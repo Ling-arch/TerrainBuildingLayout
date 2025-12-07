@@ -1,4 +1,4 @@
-project(total)
+project(app)
 
 add_subdirectory(utils)
 add_subdirectory(differentiablePlan)
