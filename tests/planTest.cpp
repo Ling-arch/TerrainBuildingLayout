@@ -1,7 +1,7 @@
 #include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
 #include <CGAL/Qt/PainterOstream.h>
 #include <CGAL/Qt/GraphicsViewNavigation.h>
-
+#include <Eigen/Dense>
 #include <QApplication>
 #include <QGraphicsView>
 #include <QGraphicsScene>

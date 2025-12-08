@@ -1,4 +1,4 @@
-# 设置库变量
+﻿# 设置库变量
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} PlanSrc)
 
 # 添加库
@@ -10,6 +10,4 @@ target_include_directories(Plan
     ${UtilsDir}
 )
 
-target_link_libraries(Plan
-PUBLIC
-Utils)
+target_link_libraries(Plan PUBLIC ${THIRD_PARTY_LIBS} Utils)

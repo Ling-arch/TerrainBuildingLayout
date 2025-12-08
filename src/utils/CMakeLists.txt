@@ -5,6 +5,12 @@ aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} UtilsSrc)
 add_library(Utils STATIC ${UtilsSrc})
 
 target_include_directories(Utils
-PUBLIC
-${CMAKE_CURRENT_SOURCE_DIR}
+    PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${TORCH_INCLUDE_DIRS}
 )
+
+
+
+target_link_libraries(Utils PUBLIC ${THIRD_PARTY_LIBS})
+

@@ -15,6 +15,7 @@ set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 #set output directory
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/lib)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/lib)
 
 #set subdirectory path variables
 set(UtilsDir ${CMAKE_SOURCE_DIR}/src/utils)
@@ -33,15 +34,31 @@ endif()
 find_package(CGAL REQUIRED OPTIONAL_COMPONENTS Qt6)
 if(TARGET CGAL::CGAL_Qt6)
     message(STATUS "CGAL found with Qt6 support.")
+    message(STATUS "CGAL include dir is ${CGAL_INCLUDE_DIR}.")
 endif()
+
 
 # Use Eigen
 find_package(Eigen3 3.1.0 QUIET)
 
 if(TARGET Eigen3::Eigen)
     message(STATUS "Eigen3 found.")
+    message(STATUS "Eigen3_DIR = ${Eigen3_DIR}")
+    message(STATUS "EIGEN3_INCLUDE_DIR = ${EIGEN3_INCLUDE_DIR}")
 endif()
 include(CGAL_Eigen3_support)
+
+# Use libtorch
+set(CMAKE_PREFIX_PATH "C:/local/libtorch/share/cmake/Torch" CACHE PATH "Path to libtorch cmake files")
+find_package(Torch QUIET)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
+
+if(TARGET Torch)
+     message(STATUS "LibTorch found.")
+endif()
+
+include_directories(${TORCH_INCLUDE_DIRS})
+
 
 set(THIRD_PARTY_LIBS
     Eigen3::Eigen
@@ -54,6 +71,11 @@ set(THIRD_PARTY_LIBS
     Qt6::OpenGLWidgets
 )
 
+if(Torch_FOUND)
+    set(TORCH_LIBS_PRIVATE ${TORCH_LIBRARIES})
+endif()
+
+message(STATUS "TORCH_LIBS_PRIVATE libraries: ${TORCH_LIBS_PRIVATE}")
 
 # Add subdirectories
 add_subdirectory(src)
