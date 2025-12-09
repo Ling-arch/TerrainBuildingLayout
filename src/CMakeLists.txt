@@ -16,9 +16,8 @@ ${BuildingDir}
 ${TerrainDir}
 ${LayoutDir}
 )
-
 if(MSVC)
-    file(GLOB TORCH_DLLS "${TORCH_INSTALL_PREFIX}/bin/*.dll")
+    file(GLOB TORCH_DLLS "${TORCH_INSTALL_PREFIX}/lib/*.dll")
     add_custom_command(TARGET ${PROJECT_NAME}
         POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -27,8 +26,8 @@ if(MSVC)
 endif(MSVC)
 
 target_link_libraries(${PROJECT_NAME}
-PRIVATE 
-Utils
-${TORCH_LIBS_PRIVATE}
+    PRIVATE
+    Utils
+    ${TORCH_LIBS}
 )
 
