@@ -31,7 +31,7 @@ public:
 
 int main() {
     std::cout << "Hello, Terrain Building Layout!" << std::endl;
-    Util::printMatrix();
+   
     torch::Tensor tensor = torch::rand({2, 3});
     std::cout << "Random Tensor:\n" << tensor << std::endl;
     torch::Tensor x = torch::tensor({2.0}, torch::requires_grad());
@@ -41,5 +41,14 @@ int main() {
 
     std::cout << "y = " << y << std::endl;            // 8
     std::cout << "dy/dx = " << x.grad() << std::endl; // 12
+    std::cout << "cuda::is_available():" << torch::cuda::is_available() << std::endl;
+    std::cout << "torch::cuda::cudnn_is_available():" << torch::cuda::cudnn_is_available() << std::endl;
+    std::cout << "torch::cuda::device_count():" << torch::cuda::device_count() << std::endl;
+
+    torch::Device device(torch::kCUDA);
+    torch::Tensor tensor1 = torch::eye(3);         // (A) tensor-cpu
+    torch::Tensor tensor2 = torch::eye(3, device); // (B) tensor-cuda
+    std::cout << tensor1 << std::endl;
+    std::cout << tensor2 << std::endl;
     return 0;
 }

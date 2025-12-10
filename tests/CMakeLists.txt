@@ -18,7 +18,7 @@ foreach(test_src ${TEST_SRCS})
         ${LayoutDir}
     )
 
-    # 链接项目的库（如 Terrain、Building、Layout...按需修改）
+    
     target_link_libraries(${test_name}
         PUBLIC
         Terrain
@@ -27,6 +27,8 @@ foreach(test_src ${TEST_SRCS})
         Utils
         ${THIRD_PARTY_LIBS}
     )
+
+    add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()
 
 

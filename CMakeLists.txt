@@ -8,6 +8,7 @@ project(TerrainBuildingLayout
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+enable_testing()
 
 #set lib output for windows dll
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
@@ -52,9 +53,17 @@ include(CGAL_Eigen3_support)
 # set(MKL_INCLUDE_DIR "C:/local/fake_mkl")
 
 set(CMAKE_PREFIX_PATH "C:/local/libtorch/share/cmake/Torch" CACHE PATH "Path to libtorch cmake files")
-set(USE_MKL OFF)
-set(USE_BLAS OFF)
+#set(USE_MKL OFF)
+#set(USE_BLAS OFF)
 #set(TORCH_USE_CUDA_WITH_MKLDNN OFF)
+
+set(CAFFE2_USE_CUDNN TRUE)
+set(CAFFE2_USE_CUCUSPARSELT TRUE)
+set(CAFFE2_USE_CUDSS TURE)
+set(TORCH_USE_CUDA TRUE)
+set(TORCH_USE_CUDNN TRUE)
+set(TORCH_USE_CUDSS TURE)
+
 
 find_package(Torch QUIET)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
@@ -62,16 +71,15 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 file(GLOB TORCH_LIBS "C:/local/libtorch/lib/*.lib")
 message(STATUS "TORCH_LIBS: ${TORCH_LIBS}")
 
+
 if(TARGET torch)
     set(TORCH_LIBS_PRIVATE ${TORCH_LIBRARIES})
     message(STATUS "LibTorch found.")
     message(STATUS "TORCH_LIBS_PRIVATE libraries: ${TORCH_LIBS_PRIVATE}")
 endif()
 
-
 include_directories(${TORCH_INCLUDE_DIRS})
 
-set(TorchLib ${TORCH_LIBRARIES})
 
 set(THIRD_PARTY_LIBS
     Eigen3::Eigen

@@ -10,4 +10,4 @@ target_include_directories(Plan
     ${UtilsDir}
 )
 
-target_link_libraries(Plan PUBLIC ${THIRD_PARTY_LIBS} Utils)
+target_link_libraries(Plan PUBLIC ${THIRD_PARTY_LIBS} Utils ${TORCH_LIBS})
