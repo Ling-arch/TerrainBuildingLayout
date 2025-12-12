@@ -46,3 +46,6 @@
 *.vs
 /out
 /lib
+
+#thirdparty
+/thirdparty

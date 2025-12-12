@@ -78,8 +78,13 @@ if(TARGET torch)
     message(STATUS "TORCH_LIBS_PRIVATE libraries: ${TORCH_LIBS_PRIVATE}")
 endif()
 
-include_directories(${TORCH_INCLUDE_DIRS})
+include_directories(${TORCH_INCLUDE_DIRS} )
 
+
+find_package(raylib QUIET)
+if(TARGET raylib::raylib)
+    message(STATUS "raylib found.")
+endif()
 
 set(THIRD_PARTY_LIBS
     Eigen3::Eigen
@@ -92,8 +97,8 @@ set(THIRD_PARTY_LIBS
     Qt6::OpenGLWidgets
 )
 
-
-
+file(GLOB Raylib_LIBS "${CMAKE_SOURCE_DIR}/thirdparty/lib/raylib/*.lib")
+message(STATUS "Raylib_LIBS libraries: ${Raylib_LIBS}")
 # Add subdirectoriesn  n nhn
 add_subdirectory(src)
 add_subdirectory(tests)

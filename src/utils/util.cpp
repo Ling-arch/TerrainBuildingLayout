@@ -32,13 +32,27 @@ namespace util{
         return {r, drdp0, drdp1};
     }
 
+    Vector2d circumcenter(const Vector2d &p0, const Vector2d &p1, const Vector2d &p2){
+        double a0 = (p0 - p1).squaredNorm();
+        double a1 = (p1 - p2).squaredNorm();
+        double a2 = (p2 - p0).squaredNorm();
+        double b0 = a0 * (a1 + a2 - a0);
+        double b1 = a1 * (a2 + a0 - a1);
+        double b2 = a2 * (a0 + a1 - a2);
+        double sum = b0 + b1 + b2;
+        double sum_inv = 1.0 / sum;
+        double c0 = b0 * sum_inv;
+        double c1 = b1 * sum_inv;
+        double c2 = b2 * sum_inv;
+        return c0 * p0 + c1 * p1 + c2 * p2;
+    }
+
     tuple<Vector2d, Matrix2d, Matrix2d> dw_intersection(
         const Vector2d &ps, // point on ray 1
         const Vector2d &pd, // direction of ray 1
         const Vector2d &qs, // point on ray 2
         const Vector2d &qd  // direction of ray 2
-    )
-    {
+    ){
         Vector2d qn = util::rotate90(qd);
         Vector2d a = qs - ps;
 
@@ -57,15 +71,25 @@ namespace util{
         return {r, dr_dqs, dr_dqd};
     }
 
+    Vector2d line_intersection(const Vector2d &ls, const Vector2d &ld,const Vector2d &ps, const Vector2d &pd){
+        Vector2d qn = util::rotate90(pd);
+        Vector2d a = ps - ls;
+
+        double denom = ld.dot(qn);
+        double b = 1.0 / denom;
+        double t = a.dot(qn) * b;
+        return ls + ld * t;
+    }
+
     CircumcenterResult wdw_circumcenter(
         const Vector2d &p0,
         const Vector2d &p1,
         const Vector2d &p2)
     {
         // 1) 计算边长平方
-        double a0 = util::norm_squared(p1 - p2);
-        double a1 = util::norm_squared(p2 - p0);
-        double a2 = util::norm_squared(p0 - p1);
+        double a0 = (p1 - p2).squaredNorm();
+        double a1 = (p2 - p0).squaredNorm();
+        double a2 = (p0 - p1).squaredNorm();
 
         // 2) 计算权重 b0,b1,b2
         double b0 = a0 * (a1 + a2 - a0);
@@ -149,4 +173,72 @@ namespace util{
         return {cc, dcc};
     }
 
+    double polygon_area(const vector<Vector2d> &poly)
+    {
+        if (poly.size() < 3)
+            return 0.0;
+        double s = 0.0;
+        for (size_t i = 0; i < poly.size(); ++i)
+        {
+            size_t j = (i + 1) % poly.size();
+            s += poly[i].x() * poly[j].y() - poly[j].x() * poly[i].y();
+        }
+        return 0.5 * std::abs(s);
+    }
+
+    // Winding number (robust-ish) for point-in-polygon
+    double winding_number(const vector<Vector2d> &poly, const Vector2d &p)
+    {
+        int wn = 0;
+
+        for (size_t i = 0; i < poly.size(); ++i)
+        {
+            Vector2d a = poly[i];
+            Vector2d b = poly[(i + 1) % poly.size()];
+
+            Vector2d ab = b - a;
+            Vector2d ap = p - a;
+            double isLeft = ab.x() * ap.y() - ab.y() * ap.x();
+            if (a.y() <= p.y())
+            {
+                if (b.y() > p.y())
+                {
+                    if (isLeft > 0)
+                        ++wn;
+                }
+            }
+            else
+            {
+                if (b.y() <= p.y())
+                {
+                    if (isLeft < 0)
+                        --wn;
+                }
+            }
+        }
+
+        return static_cast<double>(wn);
+    }
+
+
+    vector<Vector2d> to_vec2_array(const vector<double> &flat){
+        assert(flat.size() % 2 == 0);
+        vector<Vector2d> out;
+        out.reserve(flat.size() / 2);
+        for (size_t i = 0; i + 1 < flat.size(); i += 2)
+            out.emplace_back(flat[i], flat[i + 1]);
+        return out;
+    }
+
+    vector<double> flat_vec2(const vector<Vector2d> &vec2arr)
+    {
+        vector<double> out;
+        out.reserve(vec2arr.size() * 2);
+        for (const auto &p : vec2arr)
+        {
+            out.push_back(p.x());
+            out.push_back(p.y());
+        }
+        return out;
+    }
 }

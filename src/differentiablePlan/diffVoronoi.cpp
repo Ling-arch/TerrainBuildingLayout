@@ -1,4 +1,4 @@
-#include "diffVoronoi.h"
+﻿#include "diffVoronoi.h"
 #include <stdexcept>
 #include <limits>
 #include <iostream>
@@ -31,8 +31,7 @@ namespace diffVoronoi
     torch::Tensor VoronoiFunction::forward(torch::autograd::AutogradContext *ctx,
                                            const torch::Tensor &site2xy,
                                            const std::vector<double> &vtxl2xy,
-                                           const std::vector<std::array<size_t, 4>> &vtxv2info)
-    {
+                                           const std::vector<std::array<size_t, 4>> &vtxv2info){
         TORCH_CHECK(site2xy.device().is_cpu(), "site2xy must be on CPU");
         TORCH_CHECK(site2xy.dtype() == torch::kFloat32, "site2xy must be float32");
         TORCH_CHECK(site2xy.dim() == 2 && site2xy.size(1) == 2, "site2xy must be (N,2)");
@@ -45,8 +44,7 @@ namespace diffVoronoi
         // Convert vtxv2info (array<size_t,4>) to vector of vectors<size_t>
         std::vector<std::vector<size_t>> vtxv2info_vec;
         vtxv2info_vec.reserve(vtxv2info.size());
-        for (const auto &a : vtxv2info)
-        {
+        for (const auto &a : vtxv2info){
             vtxv2info_vec.push_back({a[0], a[1], a[2], a[3]});
         }
         ctx->saved_data["vtxv2info"] = vtxv2info_vec;
@@ -55,26 +53,17 @@ namespace diffVoronoi
         const size_t num_site = site2xy.size(0);
         const float *site_ptr = site2xy.data_ptr<float>();
         std::vector<double> site_flat;
-        site_flat.resize(static_cast<size_t>(num_site) * 2);
-        for (size_t i = 0; i < num_site; ++i)
-        {
+        site_flat.resize(num_site * 2);
+        for (size_t i = 0; i < num_site; ++i){
             site_flat[2 * i + 0] = static_cast<double>(site_ptr[2 * i + 0]);
             site_flat[2 * i + 1] = static_cast<double>(site_ptr[2 * i + 1]);
         }
-
         // compute vtxv positions
         size_t num_vtxv = vtxv2info.size();
         std::vector<Vector2d> out;
         out.resize(num_vtxv, Vector2d::Zero());
-        for (size_t i = 0; i < num_vtxv; ++i)
-        {
-            out[i] = voronoi2::position_of_voronoi_vertex(
-                std::array<size_t, 4>{static_cast<size_t>(vtxv2info[i][0]),
-                                      static_cast<size_t>(vtxv2info[i][1]),
-                                      static_cast<size_t>(vtxv2info[i][2]),
-                                      static_cast<size_t>(vtxv2info[i][3])},
-                vtxl2xy,
-                site_flat);
+        for (size_t i = 0; i < num_vtxv; ++i){
+            out[i] = voronoi2::position_of_voronoi_vertex(vtxv2info[i],vtxl2xy,site_flat);
         }
 
         return eigen_vec_list_to_tensor_float32(out);
@@ -82,8 +71,7 @@ namespace diffVoronoi
 
     // ---- VoronoiFunction::backward
     torch::autograd::tensor_list VoronoiFunction::backward(torch::autograd::AutogradContext *ctx,
-                                                 torch::autograd::tensor_list grad_outputs)
-    {
+                                                 torch::autograd::tensor_list grad_outputs){
         // grad_outputs[0] is gradient wrt forward output vtxv2xy (M,2) float32
         TORCH_CHECK(grad_outputs.size() >= 1, "expected grad_outputs[0]");
 
@@ -184,9 +172,8 @@ namespace diffVoronoi
                 Vector2d s1 = site_vec[idx1];
                 Vector2d s2 = site_vec[idx2];
 
-                Vector2d cc;
-                std::array<Matrix2d, 3> dvds;
-                auto [cc, dvds] = util::wdw_circumcenter(s0, s1, s2);
+                util::CircumcenterResult circumResult = util::wdw_circumcenter(s0, s1, s2);
+                std::array<Matrix2d, 3> dvds = circumResult.dcc;
 
                 Vector2d dv = dv_vec[static_cast<size_t>(i_vtxv)];
                 for (int i_node = 0; i_node < 3; ++i_node)
@@ -218,14 +205,7 @@ namespace diffVoronoi
                                const std::vector<std::array<size_t, 4>> &vtxv2info_in)
     {
         vtxl2xy = vtxl2xy_in;
-        vtxv2info.reserve(vtxv2info_in.size());
-        for (const auto &a : vtxv2info_in)
-        {
-            vtxv2info.push_back({static_cast<size_t>(a[0]),
-                                 static_cast<size_t>(a[1]),
-                                 static_cast<size_t>(a[2]),
-                                 static_cast<size_t>(a[3])});
-        }
+        vtxv2info = vtxv2info_in;
     }
 
     std::vector<std::array<size_t, 4>> VoronoiLayer::get_vtxv2info_i64() const

@@ -35,4 +35,12 @@ if(MSVC)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${TORCH_DLLS}
         $<TARGET_FILE_DIR:${PROJECT_NAME}>)
+
+    file(GLOB ThirdParty_DLLS "${CMAKE_SOURCE_DIR}/thirdparty/lib/*.dll")
+    add_custom_command(TARGET ${PROJECT_NAME}
+        POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${ThirdParty_DLLS}
+        $<TARGET_FILE_DIR:${PROJECT_NAME}>)
 endif(MSVC)
+

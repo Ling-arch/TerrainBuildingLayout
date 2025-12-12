@@ -16,9 +16,10 @@ foreach(test_src ${TEST_SRCS})
         ${BuildingDir}
         ${TerrainDir}
         ${LayoutDir}
+        ${CMAKE_SOURCE_DIR}/thirdparty/include
     )
 
-    
+
     target_link_libraries(${test_name}
         PUBLIC
         Terrain
@@ -26,6 +27,7 @@ foreach(test_src ${TEST_SRCS})
         Layout
         Utils
         ${THIRD_PARTY_LIBS}
+        ${Raylib_LIBS}
     )
 
     add_test(NAME ${test_name} COMMAND ${test_name})

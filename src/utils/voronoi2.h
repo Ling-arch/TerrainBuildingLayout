@@ -18,13 +18,16 @@ namespace voronoi2
     struct Cell
     {
         vector<Vector2d> vtx2xy;           // 顶点坐标 (按顺序, ccw)
-        vector<array<size_t, 4>> vtx2info; // 每个顶点的 info (对应 Rust 的 [usize;4])
 
-        // 简单方法
+        //多边形顶点：array[0] = loop_vertex_index,array[1] = SIZE_MAX,array[2] = SIZE_MAX,array[3] = SIZE_MAX
+        //多边形边和两个site的垂直平分线的交点：array[0] = loop_vertex_index,array[1] = site1_index,array[2] = site2_index,array[3] = SIZE_MAX
+        //三个site的外接圆心：array[0] = SIZE_MAX,array[1] = site1_index,array[2] = site2_index,array[3] = site3_index
+        vector<array<size_t, 4>> vtx2info; // 每个顶点的 info
+
+    
         bool is_inside(const Vector2d &p) const;
         double area() const;
 
-        // 构造
         static Cell new_from_polyloop2(const vector<Vector2d> &vtx2xy_in);
         static Cell new_empty();
     };
@@ -54,25 +57,9 @@ namespace voronoi2
     // 索引化：把每个 cell 的局部顶点去重映射到全局 voronoi 顶点
     VoronoiMesh indexing(const vector<Cell> &site2cell);
 
-    // 根据 info 计算 voronoi vertex 的真实位置（与 Rust 中 position_of_voronoi_vertex 对应）
-    Vector2d position_of_voronoi_vertex(
-        const array<size_t, 4> &info,
-        const vector<double> &vtxl2xy,
-        const vector<double> &site2xy);
-
-        
-    // ---- 辅助工具（对外可见） ----
-    Vector2d line_intersection_param(
-        const Vector2d &ls, const Vector2d &ld,
-        const Vector2d &qs, const Vector2d &qd); // 返回交点（ls + t*ld）
-
-    Vector2d circumcenter(const Vector2d &a, const Vector2d &b, const Vector2d &c);
-
-    // 将扁平数组转成 Vector2d 数组
-    vector<Vector2d> to_vec2_array(const vector<double> &flat);
-
-    // polygon 几何：area, winding_number
-    double polygon_area(const vector<Vector2d> &poly);
-    double winding_number(const vector<Vector2d> &poly, const Vector2d &p);
+    // 根据 info 计算 voronoi vertex 的真实位置
+    Vector2d position_of_voronoi_vertex(const array<size_t, 4> &info,const vector<double> &vtxl2xy,const vector<double> &site2xy);
+   
+    
 
 }
