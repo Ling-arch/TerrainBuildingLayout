@@ -141,4 +141,79 @@ namespace polygonMesh
         return line2vtx;
     }
 
+    std::vector<size_t> elem2elem_from_polygon_mesh_with_vtx2elem(
+        const std::vector<size_t> &elem2idx,
+        const std::vector<size_t> &idx2vtx,
+        const std::vector<size_t> &vtx2jdx,
+        const std::vector<size_t> &jdx2elem)
+    {
+        assert(!vtx2jdx.empty());
+
+        size_t num_elem = elem2idx.size() - 1;
+        std::vector<size_t> idx2elem(idx2vtx.size(), INVALID);
+
+        for (size_t i_elem = 0; i_elem < num_elem; ++i_elem)
+        {
+            size_t start_i = elem2idx[i_elem];
+            size_t end_i = elem2idx[i_elem + 1];
+            size_t num_edge_i = end_i - start_i;
+
+            for (size_t i_edge = 0; i_edge < num_edge_i; ++i_edge)
+            {
+                size_t i0 = idx2vtx[start_i + i_edge];
+                size_t i1 = idx2vtx[start_i + (i_edge + 1) % num_edge_i];
+
+                // 遍历所有包含 i0 的 polygon
+                for (size_t p = vtx2jdx[i0]; p < vtx2jdx[i0 + 1]; ++p)
+                {
+                    size_t j_elem = jdx2elem[p];
+                    if (j_elem == i_elem)
+                        continue;
+
+                    size_t start_j = elem2idx[j_elem];
+                    size_t end_j = elem2idx[j_elem + 1];
+                    size_t num_edge_j = end_j - start_j;
+
+                    for (size_t j_edge = 0; j_edge < num_edge_j; ++j_edge)
+                    {
+                        size_t j0 = idx2vtx[start_j + j_edge];
+                        size_t j1 = idx2vtx[start_j + (j_edge + 1) % num_edge_j];
+
+                        // 反向边匹配
+                        if (i0 == j1 && i1 == j0)
+                        {
+                            idx2elem[start_i + i_edge] = j_elem;
+                            goto FOUND;
+                        }
+                    }
+                }
+            FOUND:
+                continue;
+            }
+        }
+
+        return idx2elem;
+    }
+
+    std::vector<size_t> elem2elem_from_polygon_mesh(
+        const std::vector<size_t> &elem2idx,
+        const std::vector<size_t> &idx2vtx,
+        size_t num_vtx)
+    {
+        // 1) build vtx -> elem adjacency
+        auto vtx2elem = vtx2elem_from_polygon_mesh(
+            elem2idx,
+            idx2vtx,
+            num_vtx);
+
+        const std::vector<size_t> &vtx2jdx = vtx2elem.first;
+        const std::vector<size_t> &jdx2elem = vtx2elem.second;
+
+        // 2) build elem -> elem adjacency
+        return elem2elem_from_polygon_mesh_with_vtx2elem(
+            elem2idx,
+            idx2vtx,
+            vtx2jdx,
+            jdx2elem);
+    }
 }

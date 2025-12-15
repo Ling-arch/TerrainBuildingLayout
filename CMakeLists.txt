@@ -49,6 +49,17 @@ if(TARGET Eigen3::Eigen)
 endif()
 include(CGAL_Eigen3_support)
 
+
+find_package(nanoflann 1.7 QUIET)
+
+if(nanoflann_FOUND)
+    message(STATUS "nanoflann found.")
+    message(STATUS "nanoflann_DIR = ${nanoflann_DIR}")
+    message(STATUS "nanoflann_INCLUDE_DIR = ${nanoflann_INCLUDE_DIR}")
+endif()
+
+
+
 # Use libtorch
 # set(MKL_INCLUDE_DIR "C:/local/fake_mkl")
 

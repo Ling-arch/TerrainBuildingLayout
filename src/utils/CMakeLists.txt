@@ -7,6 +7,8 @@ add_library(Utils STATIC ${UtilsSrc})
 target_include_directories(Utils
     PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/thirdparty/include
+    ${EIGEN3_INCLUDE_DIR}
 )
 
 

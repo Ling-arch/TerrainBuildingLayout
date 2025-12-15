@@ -3,19 +3,28 @@
 #include <vector>
 #include <algorithm>
 #include <set>
-
-
+#include <limits>
+#include <cassert>
 
 namespace polygonMesh
 {
 
     using std::vector, std::pair, std::set;
-    
+
+    static constexpr size_t INVALID = std::numeric_limits<size_t>::max();
+
+    std::vector<size_t> elem2elem_from_polygon_mesh(const std::vector<size_t> &elem2idx,const std::vector<size_t> &idx2vtx,size_t num_vtx);
+
+    std::vector<size_t> elem2elem_from_polygon_mesh_with_vtx2elem(
+            const std::vector<size_t> &elem2idx,
+            const std::vector<size_t> &idx2vtx,
+            const std::vector<size_t> &vtx2jdx,
+            const std::vector<size_t> &jdx2elem);
+
     vector<size_t> edge2vtx_from_polygon_mesh(
         const vector<size_t> &elem2idx,
         const vector<size_t> &idx2vtx,
         size_t num_vtx);
-
 
     // 输入：
     //  elem2idx[i]..elem2idx[i+1] 为第 i 个 polygon 的顶点范围
