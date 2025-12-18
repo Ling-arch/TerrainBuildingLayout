@@ -118,29 +118,6 @@ namespace polygonMesh
         return {vtx2kdx, kdx2vtx};
     }
 
-    template <typename Index>
-    vector<Index> edge2vtx_from_vtx2vtx(
-        const vector<Index> &vtx2idx,
-        const vector<Index> &idx2vtx)
-    {
-        vector<Index> line2vtx;
-        line2vtx.reserve(idx2vtx.size() * 2);
-
-        for (size_t v = 0; v + 1 < vtx2idx.size(); v++)
-        {
-            size_t begin = vtx2idx[v];
-            size_t end = vtx2idx[v + 1];
-
-            for (size_t k = begin; k < end; k++)
-            {
-                Index u = idx2vtx[k];
-                line2vtx.push_back(static_cast<Index>(v));
-                line2vtx.push_back(u);
-            }
-        }
-        return line2vtx;
-    }
-
     std::vector<size_t> elem2elem_from_polygon_mesh_with_vtx2elem(
         const std::vector<size_t> &elem2idx,
         const std::vector<size_t> &idx2vtx,
@@ -215,5 +192,41 @@ namespace polygonMesh
             idx2vtx,
             vtx2jdx,
             jdx2elem);
+    }
+
+    // elem_from_polygon_mesh_as_points
+    // - elem2idx: size = num_elem + 1
+    // - idx2vtx: flattened vertex indices
+    // - vtx2xyz: flattened vertex coordinates (num_vtx * num_dim)
+    // - num_dim: dimension per vertex (2 or 3)
+    //
+    // return: flattened elem2cog (num_elem * num_dim)
+
+    std::vector<float> polyMesh_elem2area(
+        const std::vector<size_t> &elem2idx,
+        const std::vector<size_t> &idx2vtx,
+        const float *vtx2xy)
+    {
+        const size_t num_elem = elem2idx.size() - 1;
+        std::vector<float> areas(num_elem, 0.0f);
+
+        for (size_t i_elem = 0; i_elem < num_elem; ++i_elem)
+        {
+            const size_t num_vtx_in_elem =
+                elem2idx[i_elem + 1] - elem2idx[i_elem];
+
+            for (size_t i_edge = 0; i_edge < num_vtx_in_elem; ++i_edge)
+            {
+                const size_t i0_vtx =idx2vtx[elem2idx[i_elem] + i_edge];
+
+                const size_t i1_vtx =idx2vtx[elem2idx[i_elem] +(i_edge + 1) % num_vtx_in_elem];
+
+                areas[i_elem] +=0.5f * vtx2xy[i0_vtx * 2 + 0] *vtx2xy[i1_vtx * 2 + 1];
+
+                areas[i_elem] -=0.5f * vtx2xy[i0_vtx * 2 + 1] *vtx2xy[i1_vtx * 2 + 0];
+            }
+        }
+
+        return areas;
     }
 }

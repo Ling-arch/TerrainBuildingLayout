@@ -13,17 +13,16 @@
 
 namespace util
 {
-    using Eigen::Matrix2d, Eigen::Matrix2f;
-    using Eigen::Vector2d, Eigen::Vector2f;
     using std::vector, std::tuple, std::array;
     constexpr double Litten_PI = 3.14159265358979323846;
-
+    using Tri = std::array<size_t, 3>;
     template <typename Scalar>
     struct Math2
     {
         using Vector2 = Eigen::Matrix<Scalar, 2, 1>;
         using Matrix2 = Eigen::Matrix<Scalar, 2, 2>;
-        using Tri = std::array<size_t, 3>;
+        using Vector3 = Eigen::Matrix<Scalar, 3, 1>;
+
         // 包含圆心和 3 个 Jacobian
         struct CircumcenterResult
         {
@@ -62,7 +61,8 @@ namespace util
             return {r, drdp0, drdp1};
         }
 
-        static Vector2 circumcenter(const Vector2 &p0,const Vector2 &p1,const Vector2 &p2){
+        static Vector2 circumcenter(const Vector2 &p0, const Vector2 &p1, const Vector2 &p2)
+        {
             Scalar a0 = (p0 - p1).squaredNorm();
             Scalar a1 = (p1 - p2).squaredNorm();
             Scalar a2 = (p2 - p0).squaredNorm();
@@ -116,7 +116,6 @@ namespace util
             return ls + ld * t;
         }
 
-        
         static CircumcenterResult wdw_circumcenter(
             const Vector2 &p0,
             const Vector2 &p1,
@@ -251,8 +250,7 @@ namespace util
             return static_cast<Scalar>(wn);
         }
 
-        
-        static vector<Vector2> to_vec2_array(const vector<Scalar> &flat)
+        static inline vector<Vector2> to_vec2_array(const vector<Scalar> &flat)
         {
             assert(flat.size() % 2 == 0);
             vector<Vector2> out;
@@ -262,8 +260,7 @@ namespace util
             return out;
         }
 
-        
-        static vector<Scalar> flat_vec2(const vector<Vector2> &vec2arr)
+        static inline vector<Scalar> flat_vec2(const vector<Vector2> &vec2arr)
         {
             vector<Scalar> out;
             out.reserve(vec2arr.size() * 2);
@@ -304,7 +301,7 @@ namespace util
             return sites;
         }
 
-        static bool point_in_poly(const std::vector<Vector2> &poly,const Vector2 &p)
+        static bool point_in_poly(const std::vector<Vector2> &poly, const Vector2 &p)
         {
             return std::abs(winding_number(poly, p) - Scalar(1)) < Scalar(0.1);
         }
@@ -561,21 +558,21 @@ namespace util
         // 将Eigen点转成 earcut 所需格式
         static std::vector<std::vector<std::array<Scalar, 2>>> convert_to_earcut(const std::vector<Vector2> &polygon)
         {
-            using Point = std::array<Scalar,2>;
+            using Point = std::array<Scalar, 2>;
             using Ring = std::vector<Point>;
 
             Ring ring;
             ring.reserve(polygon.size());
 
-            for(const auto &p:polygon){
-                ring.push_back({Scalar(p.x()),Scalar(p.y())});
+            for (const auto &p : polygon)
+            {
+                ring.push_back({Scalar(p.x()), Scalar(p.y())});
             }
 
-            //保证CCW
+            // 保证CCW
             if (signed_polygon_area(polygon) < Scalar(0))
                 std::reverse(ring.begin(), ring.end());
 
-           
             std::vector<Ring> out;
             out.push_back(ring);
             return out;
@@ -608,7 +605,90 @@ namespace util
             // 调用之前写的 poisson_disk_sample 函数（需修改成非static 或用Math2::poisson_disk_sample调用）
             return poisson_disk_sample(polygon, triangles, radius, num_iterations, rng);
         }
+
+        static std::vector<Tri> triangulate_poly(const std::vector<Vector2> &polygon2d)
+        {
+            if (polygon2d.size() < 3)
+                return {};
+
+            // 转换格式给 earcut
+            auto polygon_earcut = convert_to_earcut(polygon2d);
+
+            // earcut 返回的是索引序列，3个一组是三角形
+            std::vector<uint32_t> indices = mapbox::earcut<uint32_t>(polygon_earcut);
+
+            // 转换为 Tri 类型的三角形索引数组
+            std::vector<Tri> triangles;
+            for (size_t i = 0; i + 2 < indices.size(); i += 3)
+            {
+                triangles.push_back({indices[i], indices[i + 1], indices[i + 2]});
+            }
+            return triangles;
+        }
+
+        static bool compute_plane(const std::vector<Vector3> &pts,Vector3 &origin,Vector3 &normal,Scalar eps)
+        {
+            if (pts.size() < 3)
+                return false;
+
+            origin = pts[0];
+
+            // 找不共线的三点
+            Vector3 n = Vector3::Zero();
+            for (size_t i = 1; i + 1 < pts.size(); ++i)
+            {
+                Vector3 a = pts[i] - origin;
+                Vector3 b = pts[i + 1] - origin;
+                n = a.cross(b);
+                if (n.norm() > eps)
+                    break;
+            }
+
+            if (n.norm() <= eps)
+                return false; // 全共线
+
+            normal = n.normalized();
+
+            // 检查所有点到平面的距离
+            for (auto &p : pts)
+            {
+                Scalar d = (p - origin).dot(normal);
+                if (std::fabs(d) > eps)
+                    return false; // 不共面
+            }
+
+            return true;
+        }
+
+        static void make_plane_basis(const Vector3 &n,Vector3 &u,Vector3 &v)
+        {
+            Vector3 tmp = (std::fabs(n.x()) < Scalar(0.9))
+                              ? Vector3(1, 0, 0)
+                              : Vector3(0, 1, 0);
+
+            u = n.cross(tmp).normalized();
+            v = u.cross(n);
+        }
+
+        static std::vector<Vector2> project_to_2d(
+            const std::vector<Vector3> &pts,
+            const Vector3 &origin,
+            const Vector3 &u,
+            const Vector3 &v)
+        {
+            std::vector<Vector2> out;
+            out.reserve(pts.size());
+
+            for (const auto &p : pts)
+            {
+                Vector3 d = p - origin;
+                Vector2 p2d;
+                p2d << d.dot(u), d.dot(v);
+                out.push_back(p2d);
+            }
+
+            return out;
+        }
     };
 
-    
 }

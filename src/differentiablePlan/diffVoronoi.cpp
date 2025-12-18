@@ -134,7 +134,7 @@ namespace diffVoronoi
         TORCH_CHECK(site2xy.dtype() == torch::kFloat32, "site2xy must be float32");
 
         // recover params
-        
+
         auto iv_vtxv2info = ctx->saved_data["vtxv2info"];
 
         torch::Tensor vtxl2xy_tensor = saved[1];
@@ -186,12 +186,12 @@ namespace diffVoronoi
             if (info[1] == SIZE_MAX_T)
             {
                 // original polygon vertex -> no grad w.r.t. sites
-                std::cout << "original polygon vertex index is " << i_vtxv << std::endl;
+                //std::cout << "original polygon vertex index is " << i_vtxv << std::endl;
                 continue;
             }
             else if (info[3] == SIZE_MAX_T)
             {
-                std::cout << "polygon edge with two sites vertex index is " << i_vtxv << std::endl;
+                //std::cout << "polygon edge with two sites vertex index is " << i_vtxv << std::endl;
                 // intersection of loop edge and two sites
                 size_t num_vtxl = vtxl2xy.size() / 2;
                 size_t i1_loop = info[0];
@@ -206,7 +206,7 @@ namespace diffVoronoi
                 size_t i1_site = info[2];
                 Vector2 s0 = site_vec[i0_site];
                 Vector2 s1 = site_vec[i1_site];
-                std::cout << "Two sites is (" << i0_site <<"," << i1_site << ")"<< std::endl;
+                //std::cout << "Two sites is (" << i0_site << "," << i1_site << ")" << std::endl;
                 // call utility: returns r, dr/ds0 (Matrix2d), dr/ds1 (Matrix2d)
                 Vector2 r;
                 Matrix2 drds0, drds1;
@@ -224,12 +224,12 @@ namespace diffVoronoi
             }
             else
             {
-                std::cout << "three sites vtxv index is " << i_vtxv << std::endl;
+                //std::cout << "three sites vtxv index is " << i_vtxv << std::endl;
                 // circumcenter of three sites
                 size_t idx0 = info[1];
                 size_t idx1 = info[2];
                 size_t idx2 = info[3];
-                std::cout << "Three sites is (" << idx0 << ", " << idx1 << ", " << idx2 << ")" << std::endl;
+                //std::cout << "Three sites is (" << idx0 << ", " << idx1 << ", " << idx2 << ")" << std::endl;
                 Vector2 s0 = site_vec[idx0];
                 Vector2 s1 = site_vec[idx1];
                 Vector2 s2 = site_vec[idx2];
@@ -262,28 +262,7 @@ namespace diffVoronoi
         return {grad_site, torch::Tensor(), torch::Tensor()};
     }
 
-    // ---- VoronoiLayer wrapper implementation
-    VoronoiLayer::VoronoiLayer(const std::vector<float> &vtxl2xy_in,
-                               const std::vector<std::array<size_t, 4>> &vtxv2info_in)
-    {
-        vtxl2xy = vtxl2xy_in;
-        vtxv2info = vtxv2info_in;
-    }
-
-    std::vector<std::array<size_t, 4>> VoronoiLayer::get_vtxv2info_i64() const
-    {
-        return vtxv2info;
-    }
-
-    torch::Tensor VoronoiLayer::forward(const torch::Tensor &site2xy) const
-    {
-        // call autograd::Function apply
-        // note: torch::autograd::Function::apply signature expects the same types we defined for forward
-        return VoronoiFunction::apply(site2xy, vtxl2xy, vtxv2info);
-    }
-
-    std::pair<torch::Tensor, VoronoiInfo>
-    voronoi(
+    std::pair<torch::Tensor, VoronoiInfo> voronoi(
         const std::vector<float> &vtxl2xy_f,
         const torch::Tensor &site2xy,
         const std::function<bool(size_t)> &site2isalive)
@@ -292,27 +271,20 @@ namespace diffVoronoi
         std::vector<float> site_flat = flat_tensor_to_float(site2xy);
 
         // 2) compute site2cell
-        auto site2cell =
-            voronoi2::voronoi_cells(vtxl2xy_f, site_flat, site2isalive);
+        auto site2cell = voronoi2::voronoi_cells(vtxl2xy_f, site_flat, site2isalive);
 
         // 3) indexing
-        voronoi2::VoronoiMesh voronoi_mesh =
-            voronoi2::indexing(site2cell);
+        voronoi2::VoronoiMesh voronoi_mesh = voronoi2::indexing(site2cell);
 
         // 4) autograd layer
-        VoronoiLayer layer(
-            std::vector<float>(vtxl2xy_f.begin(), vtxl2xy_f.end()),
-            voronoi_mesh.vtxv2info);
+        VoronoiLayer layer(std::vector<float>(vtxl2xy_f.begin(), vtxl2xy_f.end()),voronoi_mesh.vtxv2info);
 
         torch::Tensor vtxv2xy = layer.forward(site2xy);
 
-        // --------------------------------------------------
-        // ★★★ Rust 对齐点：idx2site（elem2elem）
-        // --------------------------------------------------
+        //   -----idx2site（elem2elem）
         size_t num_vtxv = vtxv2xy.size(0);
 
-        std::vector<size_t> idx2site =
-            polygonMesh::elem2elem_from_polygon_mesh(
+        std::vector<size_t> idx2site = polygonMesh::elem2elem_from_polygon_mesh(
                 voronoi_mesh.site2idx,
                 voronoi_mesh.idx2vtxv,
                 num_vtxv);
@@ -327,133 +299,290 @@ namespace diffVoronoi
         return {vtxv2xy, vi};
     }
 
-    // Forward: elem2idx (cumulative), idx2vtx (vertex indices), vtx2xy (num_vtx x 2 float tensor)
-    // returns Tensor elem2cog (num_elem x 2 float)
-    torch::Tensor polygonmesh2_to_cogs_forward(
-        const std::vector<size_t> &elem2idx, // size = num_elem + 1
-        const std::vector<size_t> &idx2vtx,  // flattened vertex index list
-        const torch::Tensor &vtx2xy          // (num_vtx,2) float32
-    )
+    torch::Tensor PolygonMesh2ToCogsFunction::forward(torch::autograd::AutogradContext *ctx,
+                                                      const torch::Tensor &vtx2xy,
+                                                      const std::vector<size_t> &elem2idx,
+                                                      const std::vector<size_t> &idx2vtx)
     {
-        TORCH_CHECK(vtx2xy.device().is_cpu(), "vtx2xy must be CPU tensor");
-        TORCH_CHECK(vtx2xy.dim() == 2 && vtx2xy.size(1) == 2, "vtx2xy must be (N,2)");
+        TORCH_CHECK(vtx2xy.device().is_cpu(), "vtx2xy must be CPU");
+        TORCH_CHECK(vtx2xy.dim() == 2 && vtx2xy.size(1) == 2,
+                    "vtx2xy must be (N,2)");
 
-        size_t num_elem = elem2idx.size() > 1 ? elem2idx.size() - 1 : 0;
-
-        auto options = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
-        torch::Tensor elem2cog = torch::zeros({(long)num_elem, 2}, options);
-
-        // contiguous float* pointer
         auto vcont = vtx2xy.contiguous();
-        const float *vptr = vcont.data_ptr<float>(); // layout: [x0,y0, x1,y1, ...]
+        const float *vptr = vcont.data_ptr<float>();
 
-        // accessor for output
-        auto acc = elem2cog.accessor<float, 2>();
+        std::vector<float> elem2cog =
+            polygonMesh::elem2center_from_polygon_mesh_as_points<float>(
+                elem2idx,
+                idx2vtx,
+                std::vector<float>(vptr, vptr + vtx2xy.numel()),
+                2);
 
-        // main loop
-        for (size_t ie = 0; ie < num_elem; ++ie)
+        const int64_t num_elem = static_cast<int64_t>(elem2idx.size() - 1);
+
+        auto out = torch::from_blob(
+                       elem2cog.data(),
+                       {num_elem, 2},
+                       torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU))
+                       .clone(); // clone 保证内存安全
+
+        // ===== 保存 backward 所需 =====
+        ctx->save_for_backward({vtx2xy});
+        std::vector<int64_t> elem2idx_arr;
+        std::vector<int64_t> idx2vtx_arr;
+        elem2idx_arr.reserve(elem2idx.size());
+        idx2vtx_arr.reserve(idx2vtx.size());
+        for (auto &idx : elem2idx)
         {
-            size_t start = elem2idx[ie];
-            size_t end = elem2idx[ie + 1];
-            size_t nv = (end > start) ? (end - start) : 0;
-
-            if (nv == 0)
-            {
-                acc[ie][0] = 0.0f;
-                acc[ie][1] = 0.0f;
-                continue;
-            }
-
-            double sx = 0.0;
-            double sy = 0.0;
-
-            for (size_t k = start; k < end; ++k)
-            {
-                size_t vidx = idx2vtx[k];
-
-                // direct pointer access
-                // vtx2xy is (num_vtx,2)
-                sx += vptr[vidx * 2 + 0];
-                sy += vptr[vidx * 2 + 1];
-            }
-
-            float rx = float(sx / double(nv));
-            float ry = float(sy / double(nv));
-
-            // write using accessor
-            acc[ie][0] = rx;
-            acc[ie][1] = ry;
+            elem2idx_arr.push_back(static_cast<int64_t>(idx));
         }
+        for (auto &idx : idx2vtx)
+        {
+            idx2vtx_arr.push_back(static_cast<int64_t>(idx));
+        }
+        ctx->saved_data["elem2idx"] = elem2idx_arr;
+        ctx->saved_data["idx2vtx"] = idx2vtx_arr;
 
-        return elem2cog;
+        return out;
     }
 
-    // Backward: distribute dw_elem2cog (num_elem x 2) back to vertices (num_vtx x 2)
-    // returns dw_vtx2xy tensor (num_vtx x 2)
-    torch::Tensor polygonmesh2_to_cogs_backward(
-        const std::vector<size_t> &elem2idx,
-        const std::vector<size_t> &idx2vtx,
-        const torch::Tensor &vtx2xy,
-        const torch::Tensor &dw_elem2cog)
+    torch::autograd::tensor_list PolygonMesh2ToCogsFunction::backward(
+        torch::autograd::AutogradContext *ctx,
+        torch::autograd::tensor_list grad_outputs)
     {
+        TORCH_CHECK(grad_outputs.size() == 1);
+
+        auto dw_elem2cog = grad_outputs[0];
         TORCH_CHECK(dw_elem2cog.device().is_cpu());
         TORCH_CHECK(dw_elem2cog.dim() == 2 && dw_elem2cog.size(1) == 2);
 
-        size_t num_vtx = (size_t)vtx2xy.size(0);
-        auto options = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
-        torch::Tensor dw_vtx2xy = torch::zeros({(long)num_vtx, 2}, options);
+        auto saved = ctx->get_saved_variables();
+        auto vtx2xy = saved[0];
 
-        auto acc = dw_vtx2xy.accessor<float, 2>();
+        const auto &elem2idx = ctx->saved_data["elem2idx"].toIntVector();
+        const auto &idx2vtx = ctx->saved_data["idx2vtx"].toIntVector();
 
-        auto gcont = dw_elem2cog.contiguous();
-        const float *gptr = gcont.data_ptr<float>();
+        const int64_t num_vtx = vtx2xy.size(0);
 
-        size_t num_elem = elem2idx.size() > 1 ? elem2idx.size() - 1 : 0;
+        auto grad_vtx = torch::zeros(
+            {num_vtx, 2},
+            torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU));
 
-        for (size_t ie = 0; ie < num_elem; ++ie)
+        auto gptr = dw_elem2cog.contiguous().data_ptr<float>();
+        auto acc = grad_vtx.accessor<float, 2>();
+
+        const size_t num_elem = elem2idx.size() - 1;
+
+        // ===== 完全对应 Rust bwd =====
+        for (size_t i_elem = 0; i_elem < num_elem; ++i_elem)
         {
-            size_t start = elem2idx[ie];
-            size_t end = elem2idx[ie + 1];
-            size_t nv = (end > start) ? (end - start) : 0;
+            size_t start = static_cast<size_t>(elem2idx[i_elem]);
+            size_t end = static_cast<size_t>(elem2idx[i_elem + 1]);
+            size_t nv = end - start;
 
             if (nv == 0)
                 continue;
 
             float ratio = 1.0f / float(nv);
-            float gx = gptr[ie * 2 + 0];
-            float gy = gptr[ie * 2 + 1];
+            float gx = gptr[i_elem * 2 + 0];
+            float gy = gptr[i_elem * 2 + 1];
 
             for (size_t k = start; k < end; ++k)
             {
-                size_t vidx = idx2vtx[k]; // vertex index
-
-                // Just use accessor — fastest and cleanest
-                acc[vidx][0] += ratio * gx;
-                acc[vidx][1] += ratio * gy;
+                size_t i_vtx = static_cast<size_t>(idx2vtx[k]);
+                acc[i_vtx][0] += ratio * gx;
+                acc[i_vtx][1] += ratio * gy;
             }
         }
 
-        return dw_vtx2xy;
+        // 只有 vtx2xy 有梯度，其它是常量
+        return {grad_vtx, torch::Tensor(), torch::Tensor()};
     }
 
-    torch::Tensor loss_lloyd(
+    torch::Tensor PolygonMesh2ToAreaFunction::forward(
+        torch::autograd::AutogradContext *ctx,
+        const torch::Tensor &vtx2xy,
         const std::vector<size_t> &elem2idx,
-        const std::vector<size_t> &idx2vtx,
-        const torch::Tensor &site2xy, // (num_sites,2) float32
-        const torch::Tensor &vtxv2xy  // (num_vtxv,2) float32
+        const std::vector<size_t> &idx2vtx)
+    {
+        TORCH_CHECK(vtx2xy.device().is_cpu(), "vtx2xy must be CPU");
+        TORCH_CHECK(vtx2xy.dim() == 2 && vtx2xy.size(1) == 2);
+
+        auto vcont = vtx2xy.contiguous();
+        const float *vptr = vcont.data_ptr<float>();
+
+        // === 调用elem2area
+        std::vector<float> areas = polygonMesh::polyMesh_elem2area(elem2idx, idx2vtx, vptr);
+
+        auto out = torch::from_blob(
+                       areas.data(),
+                       {(int64_t)areas.size()},
+                       torch::TensorOptions()
+                           .dtype(torch::kFloat32)
+                           .device(torch::kCPU))
+                       .clone();
+
+        // backward 需要的数据
+        ctx->save_for_backward({vtx2xy});
+        std::vector<int64_t> elem2idx_arr;
+        std::vector<int64_t> idx2vtx_arr;
+        elem2idx_arr.reserve(elem2idx.size());
+        idx2vtx_arr.reserve(idx2vtx.size());
+        for (auto &idx : elem2idx)
+        {
+            elem2idx_arr.push_back(static_cast<int64_t>(idx));
+        }
+        for (auto &idx : idx2vtx)
+        {
+            idx2vtx_arr.push_back(static_cast<int64_t>(idx));
+        }
+        ctx->saved_data["elem2idx"] = elem2idx_arr;
+        ctx->saved_data["idx2vtx"] = idx2vtx_arr;
+
+        return out;
+    }
+
+    torch::autograd::tensor_list PolygonMesh2ToAreaFunction::backward(
+        torch::autograd::AutogradContext *ctx,
+        torch::autograd::tensor_list grad_outputs)
+    {
+        TORCH_CHECK(grad_outputs.size() == 1);
+
+        auto dw_area = grad_outputs[0];
+        TORCH_CHECK(dw_area.device().is_cpu());
+        TORCH_CHECK(dw_area.dim() == 1);
+
+        auto saved = ctx->get_saved_variables();
+        auto vtx2xy = saved[0];
+
+        const auto &elem2idx = ctx->saved_data["elem2idx"].toIntVector();
+        const auto &idx2vtx = ctx->saved_data["idx2vtx"].toIntVector();
+
+        const int64_t num_vtx = vtx2xy.size(0);
+
+        auto grad_vtx = torch::zeros(
+            {num_vtx, 2},
+            torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU));
+
+        const float *vptr = vtx2xy.contiguous().data_ptr<float>();
+        const float *gptr = dw_area.contiguous().data_ptr<float>();
+        auto acc = grad_vtx.accessor<float, 2>();
+
+        const size_t num_elem = elem2idx.size() - 1;
+
+        for (size_t i_elem = 0; i_elem < num_elem; ++i_elem)
+        {
+            float w = gptr[i_elem];
+            size_t start = static_cast<size_t>(elem2idx[i_elem]);
+            size_t end = static_cast<size_t>(elem2idx[i_elem + 1]);
+            size_t nv = end - start;
+
+            for (size_t i = 0; i < nv; ++i)
+            {
+                size_t i0 = static_cast<size_t>(idx2vtx[start + i]);
+                size_t i1 = static_cast<size_t>(idx2vtx[start + (i + 1) % nv]);
+
+                acc[i0][0] += 0.5f * vptr[i1 * 2 + 1] * w;
+                acc[i1][1] += 0.5f * vptr[i0 * 2 + 0] * w;
+                acc[i0][1] -= 0.5f * vptr[i1 * 2 + 0] * w;
+                acc[i1][0] -= 0.5f * vptr[i0 * 2 + 1] * w;
+            }
+        }
+
+        return {
+            grad_vtx,
+            torch::Tensor(),
+            torch::Tensor()};
+    }
+
+    torch::Tensor Vtx2XYZToEdgeVectorFunction::forward(
+        torch::autograd::AutogradContext *ctx,
+        const torch::Tensor &vtx2xy,        // (num_vtx, num_dim)
+        const std::vector<size_t> &edge2vtx // len = num_edge * 2
     )
     {
-        // compute element centers (site2cogs) from voronoi vertices (vtxv2xy) using polygonmesh2_to_cogs_forward
-        torch::Tensor site2cogs = polygonmesh2_to_cogs_forward(elem2idx, idx2vtx, vtxv2xy);
+        TORCH_CHECK(vtx2xy.device().is_cpu());
+        TORCH_CHECK(vtx2xy.dtype() == torch::kFloat32);
+        TORCH_CHECK(vtx2xy.dim() == 2);
 
-        // compute difference site2xy - site2cogs
-        TORCH_CHECK(site2xy.device().is_cpu() && site2cogs.device().is_cpu(), "tensors must be CPU");
-        auto diff = site2xy - site2cogs; // broadcasting shapes must match
-        auto sq = diff * diff;
-        // sum all returns scalar tensor
-        torch::Tensor loss = sq.sum();
-        return loss;
+        const auto num_vtx = vtx2xy.size(0);
+        const auto num_dim = vtx2xy.size(1);
+        const size_t num_edge = edge2vtx.size() / 2;
+
+        auto vtx = vtx2xy.contiguous();
+        const float *vtx_ptr = vtx.data_ptr<float>();
+
+        torch::Tensor edge2xy = torch::zeros({static_cast<int64_t>(num_edge), num_dim}, vtx.options());
+
+        float *edge_ptr = edge2xy.data_ptr<float>();
+
+        for (size_t i_edge = 0; i_edge < num_edge; ++i_edge)
+        {
+            size_t i0_vtx = edge2vtx[i_edge * 2 + 0];
+            size_t i1_vtx = edge2vtx[i_edge * 2 + 1];
+
+            for (int d = 0; d < num_dim; ++d)
+            {
+                edge_ptr[i_edge * num_dim + d] += vtx_ptr[i1_vtx * num_dim + d];
+                edge_ptr[i_edge * num_dim + d] -= vtx_ptr[i0_vtx * num_dim + d];
+            }
+        }
+
+        // backward 需要 edge2vtx 和 num_vtx
+        ctx->save_for_backward({});
+        std::vector<int64_t> edge2vtx_arr;
+        edge2vtx_arr.reserve(edge2vtx.size());
+        for(auto & vtx_idx:edge2vtx)
+            edge2vtx_arr.push_back(static_cast<int64_t>(vtx_idx));
+        ctx->saved_data["edge2vtx"] = edge2vtx_arr;
+        ctx->saved_data["num_vtx"] = (int64_t)num_vtx;
+        ctx->saved_data["num_dim"] = (int64_t)num_dim;
+
+        return edge2xy;
     }
+
+    torch::autograd::tensor_list Vtx2XYZToEdgeVectorFunction::backward(
+        torch::autograd::AutogradContext *ctx,
+        torch::autograd::tensor_list grad_outputs)
+    {
+        auto dw_edge2xy = grad_outputs[0];
+        TORCH_CHECK(dw_edge2xy.defined());
+
+        const auto edge2vtx = ctx->saved_data["edge2vtx"].toIntVector();
+        const int64_t num_vtx = ctx->saved_data["num_vtx"].toInt();
+        const int64_t num_dim = ctx->saved_data["num_dim"].toInt();
+
+        const size_t num_edge = edge2vtx.size() / 2;
+
+        auto dw_edge = dw_edge2xy.contiguous();
+        const float *dw_edge_ptr = dw_edge.data_ptr<float>();
+
+        torch::Tensor dw_vtx2xy =
+            torch::zeros({num_vtx, num_dim}, dw_edge.options());
+
+        float *dw_vtx_ptr = dw_vtx2xy.data_ptr<float>();
+
+        for (size_t i_edge = 0; i_edge < num_edge; ++i_edge)
+        {
+            size_t i0 = edge2vtx[i_edge * 2 + 0];
+            size_t i1 = edge2vtx[i_edge * 2 + 1];
+
+            for (int d = 0; d < num_dim; ++d)
+            {
+                float g = dw_edge_ptr[i_edge * num_dim + d];
+                dw_vtx_ptr[i1 * num_dim + d] += g;
+                dw_vtx_ptr[i0 * num_dim + d] -= g;
+            }
+        }
+
+        // 返回顺序必须和 forward 参数一致
+        return {
+            dw_vtx2xy,      // grad vtx2xy
+            torch::Tensor() // grad edge2vtx (None)
+        };
+    }
+
+   
 
     static bool has_nan_inf(const torch::Tensor &t)
     {
@@ -527,7 +656,8 @@ namespace diffVoronoi
                 .set_requires_grad(true);
 
         // ---------- 3. Voronoi forward ----------
-        auto [vtxv2xy0, vi] = voronoi(vtxl2xy, site2xy0, [](size_t){ return true; });
+        auto [vtxv2xy0, vi] = voronoi(vtxl2xy, site2xy0, [](size_t)
+                                      { return true; });
 
         // ---------- 4. random goal ----------
         torch::Tensor vtxv2xy_goal = torch::randn_like(vtxv2xy0);
@@ -549,15 +679,15 @@ namespace diffVoronoi
         {
             for (int d = 0; d < 2; ++d)
             {
-                torch::Tensor site_pert =site2xy0.detach().clone();
-                auto pert_acc =site_pert.accessor<float, 2>();
+                torch::Tensor site_pert = site2xy0.detach().clone();
+                auto pert_acc = site_pert.accessor<float, 2>();
                 pert_acc[i_site][d] += eps;
-                torch::Tensor vtxv2xy1 =VoronoiFunction::apply(site_pert,vtxl2xy,vi.vtxv2info);
+                torch::Tensor vtxv2xy1 = VoronoiFunction::apply(site_pert, vtxl2xy, vi.vtxv2info);
 
-                torch::Tensor loss1 =(vtxv2xy1 * vtxv2xy_goal).sum();
+                torch::Tensor loss1 = (vtxv2xy1 * vtxv2xy_goal).sum();
 
-                float numeric =(loss1.item<float>() - loss.item<float>()) / eps;
-                float analytic =grad_site_acc[i_site][d];
+                float numeric = (loss1.item<float>() - loss.item<float>()) / eps;
+                float analytic = grad_site_acc[i_site][d];
 
                 float diff = numeric - analytic;
                 float abs_diff = std::abs(diff);

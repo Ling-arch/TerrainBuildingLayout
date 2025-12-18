@@ -24,7 +24,6 @@ namespace diffVoronoi
     using M2 = util::Math2<voronoi2::Scalar>;
     using Vector2 = typename M2::Vector2;
     using Matrix2 = typename M2::Matrix2;
-    
 
     struct VoronoiInfo
     {
@@ -46,12 +45,6 @@ namespace diffVoronoi
      - All geometric computations use double (Eigen::Vector2d). Conversion to/from tensors uses float32.
     */
 
-    struct VoronoiParams
-    {
-        std::vector<float> vtxl2xy;                    // flattened loop coords
-        std::vector<std::array<size_t, 4>> vtxv2info; // per-vertex info (use size_t)
-    };
-
     class VoronoiFunction : public torch::autograd::Function<VoronoiFunction>
     {
     public:
@@ -71,14 +64,20 @@ namespace diffVoronoi
     {
     public:
         VoronoiLayer(const std::vector<float> &vtxl2xy_in,
-                     const std::vector<std::array<size_t, 4>> &vtxv2info_in);
+                     const std::vector<std::array<size_t, 4>> &vtxv2info_in)
+            : vtxl2xy(vtxl2xy_in), vtxv2info(vtxv2info_in) {};
 
         // site2xy: (N,2) float32 -> returns (M,2) float32
-        torch::Tensor forward(const torch::Tensor &site2xy) const;
+        torch::Tensor forward(const torch::Tensor &site2xy) const
+        {
+            // call autograd::Function apply
+            // note: torch::autograd::Function::apply signature expects the same types we defined for forward
+            return VoronoiFunction::apply(site2xy, vtxl2xy, vtxv2info);
+        };
 
-        // helper to access params (if needed)
-        const std::vector<float> &get_vtxl2xy() const { return vtxl2xy; }
-        std::vector<std::array<size_t, 4>> get_vtxv2info_i64() const;
+        // helper to access params
+        const std::vector<float> &get_vtxl2xy() const { return vtxl2xy; };
+        std::vector<std::array<size_t, 4>> get_vtxv2info_i64() const { return vtxv2info; };
 
     private:
         std::vector<float> vtxl2xy;
@@ -86,39 +85,115 @@ namespace diffVoronoi
     };
 
     std::pair<torch::Tensor, VoronoiInfo> voronoi(
-        const std::vector<float> &vtxl2xy_f,             // flattened loop coords (f32)
-        const torch::Tensor &site2xy,                    // Nx2 float32 tensor (CPU)
+        const std::vector<float> &vtxl2xy_f,            // flattened loop coords (f32)
+        const torch::Tensor &site2xy,                   // Nx2 float32 tensor (CPU)
         const std::function<bool(size_t)> &site2isalive // predicate
     );
 
-    // Forward: elem2idx (cumulative), idx2vtx (vertex indices), vtx2xy (num_vtx x 2 float tensor)
-    // returns Tensor elem2cog (num_elem x 2 float)
-    torch::Tensor polygonmesh2_to_cogs_forward(
-        const std::vector<size_t> &elem2idx, // length = num_elem + 1, cumulative
-        const std::vector<size_t> &idx2vtx,  // flattened vertex indices
-        const torch::Tensor &vtx2xy           // num_vtx x 2 (float32, CPU)
-    );
+    class PolygonMesh2ToCogsFunction : public torch::autograd::Function<PolygonMesh2ToCogsFunction>
+    {
+    public:
+        static torch::Tensor forward(
+            torch::autograd::AutogradContext *ctx,
+            const torch::Tensor &vtx2xy,
+            const std::vector<size_t> &elem2idx,
+            const std::vector<size_t> &idx2vtx);
 
-    // Backward: distribute dw_elem2cog (num_elem x 2) back to vertices (num_vtx x 2)
-    // returns dw_vtx2xy tensor (num_vtx x 2)
-    torch::Tensor polygonmesh2_to_cogs_backward(
-        const std::vector<size_t> &elem2idx,
-        const std::vector<size_t> &idx2vtx,
-        const torch::Tensor &vtx2xy,     // used for shape (num_vtx,2)
-        const torch::Tensor &dw_elem2cog // (num_elem,2)
-    );
+        static torch::autograd::tensor_list backward(
+            torch::autograd::AutogradContext *ctx,
+            torch::autograd::tensor_list grad_outputs);
+    };
 
-    torch::Tensor loss_lloyd(
-        const std::vector<size_t> &elem2idx,
-        const std::vector<size_t> &idx2vtx,
-        const torch::Tensor &site2xy, // (num_sites,2) float32
-        const torch::Tensor &vtxv2xy  // (num_vtxv,2) float32
-    );
+    class PolygonMesh2ToCogsLayer
+    {
+    public:
+        PolygonMesh2ToCogsLayer(const std::vector<size_t> &elem2idx_,
+                                const std::vector<size_t> &idx2vtx_)
+            : elem2idx(elem2idx_), idx2vtx(idx2vtx_) {}
+
+        // site2xy: (N,2) float32 -> returns (M,2) float32
+        torch::Tensor forward(const torch::Tensor &vtx2xy) const
+        {
+            return PolygonMesh2ToCogsFunction::apply(vtx2xy, elem2idx, idx2vtx);
+        }
+
+        // helper to access params (if needed)
+        const std::vector<size_t> &get_elem2idx() const { return elem2idx; }
+        const std::vector<size_t> &get_idx2vtx() const { return idx2vtx; }
+
+    private:
+        std::vector<size_t> elem2idx;
+        std::vector<size_t> idx2vtx;
+    };
+
+    class PolygonMesh2ToAreaFunction : public torch::autograd::Function<PolygonMesh2ToAreaFunction>
+    {
+    public:
+        static torch::Tensor forward(
+            torch::autograd::AutogradContext *ctx,
+            const torch::Tensor &vtx2xy,
+            const std::vector<size_t> &elem2idx,
+            const std::vector<size_t> &idx2vtx);
+
+        static torch::autograd::tensor_list backward(
+            torch::autograd::AutogradContext *ctx,
+            torch::autograd::tensor_list grad_outputs);
+    };
+
+    class PolygonMesh2ToAreaLayer
+    {
+    public:
+        PolygonMesh2ToAreaLayer(const std::vector<size_t> &elem2idx_, const std::vector<size_t> &idx2vtx_)
+            : elem2idx(elem2idx_), idx2vtx(idx2vtx_) {}
+
+        torch::Tensor forward(const torch::Tensor &vtx2xy) const
+        {
+            return PolygonMesh2ToAreaFunction::apply(vtx2xy, elem2idx, idx2vtx);
+        }
+
+        const std::vector<size_t> &get_elem2idx() const { return elem2idx; }
+        const std::vector<size_t> &get_idx2vtx() const { return idx2vtx; }
+
+    private:
+        std::vector<size_t> elem2idx;
+        std::vector<size_t> idx2vtx;
+    };
+
+    class Vtx2XYZToEdgeVectorFunction : public torch::autograd::Function<Vtx2XYZToEdgeVectorFunction>
+    {
+    public:
+        static torch::Tensor forward(
+            torch::autograd::AutogradContext *ctx,
+            const torch::Tensor &vtx2xy,        // (num_vtx, num_dim)
+            const std::vector<size_t> &edge2vtx // len = num_edge * 2
+        );
+
+        static torch::autograd::tensor_list backward(
+            torch::autograd::AutogradContext *ctx,
+            torch::autograd::tensor_list grad_outputs);
+    };
+
+    class Vtx2XYZToEdgeVectorLayer
+    {
+    public:
+        Vtx2XYZToEdgeVectorLayer(std::vector<size_t> edge2vtx_)
+            : edge2vtx(edge2vtx_) {}
+
+        torch::Tensor forward(const torch::Tensor &vtx2xy) const
+        {
+            return Vtx2XYZToEdgeVectorFunction::apply(vtx2xy, edge2vtx);
+        }
+
+        const std::vector<size_t> &get_egde2vtx() const { return edge2vtx; }
+
+    private:
+        std::vector<size_t> edge2vtx;
+    };
 
     // ---- Utility: convert Vector2 -> float32 tensor (N,2)
     std::vector<float> flat_tensor_to_float(const torch::Tensor &t);
 
-    //convert float32 tensor row i to Eigen::Vector2
+    // convert float32 tensor row i to Eigen::Vector2
     inline Vector2 get_tensor_row_to_vec2(const float *ptr, size_t i);
 
     bool has_nan_inf(const torch::Tensor &t);
