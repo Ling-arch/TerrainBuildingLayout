@@ -63,11 +63,11 @@ namespace util
 
         static Vector2 circumcenter(const Vector2 &p0, const Vector2 &p1, const Vector2 &p2)
         {
-            Scalar a0 = (p0 - p1).squaredNorm();
-            Scalar a1 = (p1 - p2).squaredNorm();
-            Scalar a2 = (p2 - p0).squaredNorm();
+            Scalar a0 = (p1 - p2).squaredNorm();
+            Scalar a1 = (p2 - p0).squaredNorm();
+            Scalar a2 = (p0 - p1).squaredNorm();
             Scalar b0 = a0 * (a1 + a2 - a0);
-            Scalar b1 = a1 * (a2 + a0 - a1);
+            Scalar b1 = a1 * (a0 + a2 - a1);
             Scalar b2 = a2 * (a0 + a1 - a2);
             Scalar sum = b0 + b1 + b2;
             Scalar sum_inv = Scalar(1) / sum;

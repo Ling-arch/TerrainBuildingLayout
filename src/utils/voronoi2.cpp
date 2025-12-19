@@ -343,7 +343,7 @@ namespace voronoi2
         return vm;
     }
 
-     Vector2 position_of_voronoi_vertex(const array<size_t, 4> &info, const vector<Scalar> &vtxl2xy, const vector<Scalar> &site2xy)
+    Vector2 position_of_voronoi_vertex(const array<size_t, 4> &info, const vector<Scalar> &vtxl2xy, const vector<Scalar> &site2xy)
     {
         // helpers to fetch coordinates
         auto get_vtxl = [&](size_t idx) -> Vector2
@@ -360,10 +360,12 @@ namespace voronoi2
         if (info[1] == INVALID_INDEX)
         {
             // original loop vertex
+            //std::cout << "original vertex " << get_vtxl(info[0]) <<std::endl;
             return get_vtxl(info[0]);
         }
         else if (info[3] == INVALID_INDEX)
         {
+            
             // intersection of loop edge and bisector between two sites
             size_t num_vtxl = vtxl2xy.size() / 2;
             assert(info[0] < num_vtxl);
@@ -375,6 +377,7 @@ namespace voronoi2
             Vector2 s2 = get_site(info[2]);
             Vector2 mid = Scalar(0.5) * (s1 + s2);
             Vector2 bisdir = M2::rotate90(s2 - s1);
+            //std::cout << "two sites intersect vertex , sites is" << info[1] << " , " << info[2] << std::endl;
             return M2::line_intersection(l1, (l2 - l1), mid, bisdir);
         }
         else
@@ -384,6 +387,7 @@ namespace voronoi2
             Vector2 s0 = get_site(info[1]);
             Vector2 s1 = get_site(info[2]);
             Vector2 s2 = get_site(info[3]);
+            //std::cout << "three sites intersect vertex , sites is" << info[1] << " , " << info[2] << " , " << info[3]<< std::endl;
             return M2::circumcenter(s0, s1, s2);
         }
     }

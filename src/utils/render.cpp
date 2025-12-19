@@ -139,17 +139,38 @@ namespace render
         }
     }
 
-    void Renderer3D::stroke_polygon2(const Polyloop2 &poly, Color color, float z, float thickness, float alpha)
+    void Renderer3D::stroke_light_polygon2(const Polyloop2 &poly, Color color, float z, float alpha)
     {
         vector<Vector3> pts_vector3 = vec2_to_Vector3_arr(poly.points(), float(z));
         size_t n = pts_vector3.size();
         for (size_t i = 0; i < n; ++i)
         {
+            DrawLine3D(pts_vector3[i], pts_vector3[(i + 1) % n], Fade(color, alpha));
+        }
+    }
+
+    void Renderer3D::stroke_bold_polygon2(const Polyloop2 &poly, Color color, float z, float thickness, float alpha)
+    {
+        vector<Vector3> pts_vector3 = vec2_to_Vector3_arr(poly.points(), float(z));
+        size_t n = pts_vector3.size();
+        for (size_t i = 0; i < n; ++i)
+        {
+
             DrawCylinderEx(pts_vector3[i], pts_vector3[(i + 1) % n], thickness, thickness, 1, Fade(color, alpha));
         }
     }
 
-    void Renderer3D::stroke_polygon3(const Polyloop3 &poly, Color color, float thickness, float alpha)
+    void Renderer3D::stroke_light_polygon3(const Polyloop3 &poly, Color color, float alpha)
+    {
+        vector<Vector3> pts_vector3 = vec3_to_Vector3_arr(poly.points());
+        size_t n = pts_vector3.size();
+        for (size_t i = 0; i < n; ++i)
+        {
+            DrawLine3D(pts_vector3[i], pts_vector3[(i + 1) % n], Fade(color, alpha));
+        }
+    }
+
+    void Renderer3D::stroke_bold_polygon3(const Polyloop3 &poly, Color color, float thickness, float alpha)
     {
         vector<Vector3> pts_vector3 = vec3_to_Vector3_arr(poly.points());
         size_t n = pts_vector3.size();
@@ -159,12 +180,62 @@ namespace render
         }
     }
 
+    void Renderer3D::draw_light_polyline2(const std::vector<Vec2> &pts, Color color, float z, float alpha)
+    {
+        vector<Vector3> pts_vector3 = vec2_to_Vector3_arr(pts, float(z));
+        size_t n = pts_vector3.size();
+        if (n <= 1)
+            return;
+        for (size_t i = 0; i < n - 1; ++i)
+        {
+            DrawLine3D(pts_vector3[i], pts_vector3[i + 1], Fade(color, alpha));
+        }
+    }
+
+
+    void Renderer3D::draw_bold_polyline2(const std::vector<Vec2> &pts, Color color, float z, float thickness, float alpha)
+    {
+        vector<Vector3> pts_vector3 = vec2_to_Vector3_arr(pts, float(z));
+        size_t n = pts_vector3.size();
+        if (n <= 1)
+            return;
+        for (size_t i = 0; i < n - 1; ++i)
+        {
+            DrawCylinderEx(pts_vector3[i], pts_vector3[i+1], thickness, thickness, 1, Fade(color, alpha));
+        }
+    }
+
+
+    void Renderer3D::draw_light_polyline3(const std::vector<Vec3> &pts, Color color, float alpha)
+    {
+        vector<Vector3> pts_vector3 = vec3_to_Vector3_arr(pts);
+        size_t n = pts_vector3.size();
+        if (n <= 1)
+            return;
+        for (size_t i = 0; i < n - 1; ++i)
+        {
+            DrawLine3D(pts_vector3[i], pts_vector3[i + 1], Fade(color, alpha));
+        }
+    }
+
+    void Renderer3D::draw_bold_polyline3(const std::vector<Vec3> &pts, Color color, float thickness, float alpha)
+    {
+        vector<Vector3> pts_vector3 = vec3_to_Vector3_arr(pts);
+        size_t n = pts_vector3.size();
+        if (n <= 1)
+            return;
+        for (size_t i = 0; i < n - 1; ++i)
+        {
+            DrawCylinderEx(pts_vector3[i], pts_vector3[i + 1], thickness, thickness, 1, Fade(color, alpha));
+        }
+    }
+
     void Renderer3D::draw_points(const std::vector<Vec2> &pts, Color color, float alpha, Scalar radius, Scalar z)
     {
         for (auto &pt : pts)
         {
             DrawCube({pt.x(), z, -pt.y()}, radius, radius, radius, Fade(color, alpha));
-                //DrawPoint3D({pt.x(), z, -pt.y()}, Fade(color, alpha));
+            // DrawPoint3D({pt.x(), z, -pt.y()}, Fade(color, alpha));
             // DrawSphere({pt.x(), z, -pt.y()}, radius, Fade(color, alpha));
         }
     }

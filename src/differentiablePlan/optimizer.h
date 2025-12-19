@@ -15,4 +15,9 @@ namespace optimizer{
         std::vector<float> site2xy2flag,
         std::vector<float> room2area_trg,
         std::vector<std::pair<size_t, size_t>> room_connections);
+
+
+    struct OptimizeProblem{
+
+    };
 }

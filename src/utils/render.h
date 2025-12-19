@@ -52,13 +52,19 @@ namespace render
         void draw();
         void fill_polygon2(const Polyloop2 &poly, Color color, float z = 0, float alpha = 1.f, bool doubleSided = false);
         void fill_polygon3(const Polyloop3 &poly, Color color, float alpha = 1.f, bool doubleSided = false);
-        void stroke_polygon2(const Polyloop2 &poly, Color color, float z = 0, float thickness = 0.05f, float alpha = 1.f);
-        void stroke_polygon3(const Polyloop3 &poly, Color color, float thickness = 0.05f, float alpha = 1.f);
+
+        void stroke_light_polygon2(const Polyloop2 &poly, Color color, float z = 0.f, float alpha = 1.f);
+        void stroke_bold_polygon2(const Polyloop2 &poly, Color color, float z = 0.f, float thickness = 0.03f, float alpha = 1.f);
+        void stroke_light_polygon3(const Polyloop3 &poly, Color color, float alpha = 1.f);
+        void stroke_bold_polygon3(const Polyloop3 &poly, Color color, float thickness = 0.03f, float alpha = 1.f);
 
         void draw_points(const std::vector<Vec2> &pts, Color color, float alpha = 1.f, Scalar radius = 0.1f, Scalar z = 0.f);
         void draw_points(const std::vector<Vec3> &pts, Color color, float alpha = 1.f, Scalar radius = 0.1f);
 
-        void draw_polyline(const std::vector<Vector3> &pts, Color color, float alpha = 1.f);
+        void draw_light_polyline2(const std::vector<Vec2> &pts, Color color, float z = 0.f, float alpha = 1.f);
+        void draw_bold_polyline2(const std::vector<Vec2> &pts, Color color, float z = 0.f,float thickness = 0.03f,float alpha = 1.f);
+        void draw_light_polyline3(const std::vector<Vec3> &pts, Color color, float alpha = 1.f);
+        void draw_bold_polyline3(const std::vector<Vec3> &pts, Color color, float thickness = 0.03f, float alpha = 1.f);
 
         void draw_index_fonts(const std::vector<Vector3> &world_pos, int size, Color color);
 
@@ -81,7 +87,6 @@ namespace render
 
     std::vector<Vector3> vec3_to_Vector3_arr(const std::vector<Vec3> &arr);
     std::vector<Vector3> vec2_to_Vector3_arr(const std::vector<Vec2> &arr2, float z = 0.f);
-  
 
     void sort_polygon_ccw(std::vector<Vec2> &pts);
 }

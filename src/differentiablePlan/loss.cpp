@@ -436,7 +436,7 @@ namespace loss
         TORCH_CHECK(vtxv2xy.device().is_cpu());
         TORCH_CHECK(vtxv2xy.dim() == 2 && vtxv2xy.size(1) == 2);
 
-        std::cout << "TORCH_CHECK OK" << std::endl;
+        //std::cout << "TORCH_CHECK OK" << std::endl;
         /* ------------------------------------------------------------
          * 1. site2areas via PolygonMesh2ToAreas
          * ------------------------------------------------------------ */
@@ -445,10 +445,10 @@ namespace loss
             idx2vtxv);
 
         torch::Tensor site2areas = polygonmesh2_to_areas.forward(vtxv2xy);
-        std::cout << "polygonmesh2_to_areas forward OK" << std::endl;
+        //std::cout << "polygonmesh2_to_areas forward OK" << std::endl;
         // reshape to (num_site, 1) for matmul
         site2areas = site2areas.view({site2areas.size(0), 1});
-        std::cout << "site2areas has calculated" << std::endl;
+        //std::cout << "site2areas has calculated" << std::endl;
         /* ------------------------------------------------------------
          * 2. build (num_room, num_site) accumulation matrix
          * ------------------------------------------------------------ */
@@ -472,7 +472,7 @@ namespace loss
                                  torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU))
                                  .clone(); // owning tensor
 
-        std::cout << "room_site_mat has calculated" << std::endl;
+        //std::cout << "room_site_mat has calculated" << std::endl;
         /* ------------------------------------------------------------
          * 3. matmul -> room2area
          * ------------------------------------------------------------ */
