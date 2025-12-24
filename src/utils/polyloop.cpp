@@ -7,16 +7,15 @@ namespace polyloop
     {
         triangles_ = M2::triangulate_poly(points_);
     }
-   
 
     Polyloop3::Polyloop3(const std::vector<Vector3> &points)
         : points_(points)
     {
-    
+
         // 1. 计算平面（origin 和 normal）
-        if (!M2::compute_plane(points_, origin_, normal_, 1e-5f))
+        if (!M2::compute_plane(points_, normal_, 1e-5f))
         {
-            //std::cerr << "Points are not coplanar or too few.\n";
+            // std::cerr << "Points are not coplanar or too few.\n";
             return;
         }
 
@@ -24,12 +23,19 @@ namespace polyloop
         M2::make_plane_basis(normal_, u_, v_);
 
         // 3. 投影到二维平面
-        projected_points_ = M2::project_to_2d(points_, origin_, u_, v_);
+        projected_points_ = M2::project_to_2d(points_, u_, v_);
 
         // 4. 三角化二维投影多边形
         triangles_ = M2::triangulate_poly(projected_points_);
 
-        //std::cout << "Polyloop3 triangulated with " << triangles_.size() << " triangles.\n";
+        // std::cout << "Polyloop3 triangulated with " << triangles_.size() << " triangles.\n";
     }
 
+   
+
+    
+
+    
+
+   
 }

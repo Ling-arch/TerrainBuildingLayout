@@ -75,6 +75,12 @@ namespace loss
         size_t num_site,
         const std::vector<float> &room2area);
 
+    std::vector<size_t> site2room(
+        size_t num_site,
+        const std::vector<float> &room2area,
+        const std::vector<size_t> &fixed_site_indices,
+        const std::vector<size_t> &fixed_rooms);
+        
     torch::Tensor loss_lloyd(
         const std::vector<size_t> &elem2idx,
         const std::vector<size_t> &idx2vtx,

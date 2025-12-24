@@ -31,7 +31,7 @@ namespace util
             array<Matrix2, 3> dcc; // 对 p0,p1,p2 的 Jacobian
         };
 
-        static tuple<Vector2, Matrix2, Matrix2> dw_intersection_against_bisector(
+        static inline tuple<Vector2, Matrix2, Matrix2> dw_intersection_against_bisector(
             const Vector2 &ls, // line start
             const Vector2 &ld, // line dir
             const Vector2 &p0, // site0
@@ -61,7 +61,7 @@ namespace util
             return {r, drdp0, drdp1};
         }
 
-        static Vector2 circumcenter(const Vector2 &p0, const Vector2 &p1, const Vector2 &p2)
+        static inline Vector2 circumcenter(const Vector2 &p0, const Vector2 &p1, const Vector2 &p2)
         {
             Scalar a0 = (p1 - p2).squaredNorm();
             Scalar a1 = (p2 - p0).squaredNorm();
@@ -77,7 +77,7 @@ namespace util
             return c0 * p0 + c1 * p1 + c2 * p2;
         }
 
-        static tuple<Vector2, Matrix2, Matrix2> dw_intersection(
+        static inline tuple<Vector2, Matrix2, Matrix2> dw_intersection(
             const Vector2 &ps, // point on ray 1
             const Vector2 &pd, // direction of ray 1
             const Vector2 &qs, // point on ray 2
@@ -101,7 +101,7 @@ namespace util
             return {r, dr_dqs, dr_dqd};
         }
 
-        static Vector2 line_intersection(
+        static inline Vector2 line_intersection(
             const Vector2 &ls,
             const Vector2 &ld,
             const Vector2 &ps,
@@ -199,12 +199,7 @@ namespace util
             return {cc, dcc};
         }
 
-        static Scalar polygon_area(const vector<Vector2> &poly)
-        {
-            return Eigen::numext::abs(signed_polygon_area(poly));
-        }
-
-        static Scalar signed_polygon_area(const vector<Vector2> &poly)
+        static inline Scalar signed_polygon_area(const vector<Vector2> &poly)
         {
             if (poly.size() < 3)
                 return Scalar(0);
@@ -217,8 +212,40 @@ namespace util
             return Scalar(0.5) * s;
         }
 
+
+        static inline Scalar polygon_area(const vector<Vector2> &poly)
+        {
+            return Eigen::numext::abs(signed_polygon_area(poly));
+        }
+
+        static inline Scalar signed_polygon_area_flat_xy(const std::vector<Scalar> &poly_flat)
+        {
+            const size_t n = poly_flat.size() / 2;
+            if (n < 3 || poly_flat.size() % 2 != 0)
+                return Scalar(0);
+
+            Scalar s = Scalar(0);
+            for (size_t i = 0; i < n; ++i)
+            {
+                size_t j = (i + 1) % n;
+
+                Scalar xi = poly_flat[i * 2 + 0];
+                Scalar yi = poly_flat[i * 2 + 1];
+                Scalar xj = poly_flat[j * 2 + 0];
+                Scalar yj = poly_flat[j * 2 + 1];
+
+                s += xi * yj - xj * yi;
+            }
+            return Scalar(0.5) * s;
+        }
+
+        static inline Scalar polygon_area(const std::vector<Scalar> &poly_flat)
+        {
+            return Eigen::numext::abs(signed_polygon_area_flat_xy(poly_flat));
+        }
+
         // Winding number (robust-ish) for point-in-polygon
-        static Scalar winding_number(const vector<Vector2> &poly, const Vector2 &p)
+        static inline Scalar winding_number(const vector<Vector2> &poly, const Vector2 &p)
         {
             int wn = 0;
             for (size_t i = 0; i < poly.size(); ++i)
@@ -344,8 +371,7 @@ namespace util
                 return std::make_pair(gx, gy);
             };
 
-            auto is_far_enough = [&](const Vector2 &p,
-                                     const std::vector<Vector2> &samples)
+            auto is_far_enough = [&](const Vector2 &p, const std::vector<Vector2> &samples)
             {
                 auto [gx, gy] = grid_index(p);
                 for (int j = -2; j <= 2; ++j)
@@ -425,6 +451,161 @@ namespace util
             }
 
             return samples;
+        }
+
+        struct PoissonResult{
+            std::vector<Vector2> samples;
+            std::vector<size_t> seed_indices;
+
+        };
+
+        static PoissonResult gen_poisson_sites_in_poly_with_seeds(
+            const std::vector<Vector2> &poly,
+            const std::vector<Vector2> &seed_points,
+            Scalar r,
+            int k = 30,
+            unsigned seed = 0)
+        {
+            // -------- fallback --------
+            if (seed_points.empty())
+            {
+                return PoissonResult{gen_poisson_sites_in_poly(poly, r, k, seed), {}};
+            }
+
+            std::mt19937_64 rng(seed);
+
+            // ---------- bounding box ----------
+            Scalar minx = poly[0].x(), maxx = poly[0].x();
+            Scalar miny = poly[0].y(), maxy = poly[0].y();
+            for (auto &v : poly)
+            {
+                minx = std::min(minx, v.x());
+                maxx = std::max(maxx, v.x());
+                miny = std::min(miny, v.y());
+                maxy = std::max(maxy, v.y());
+            }
+
+            std::uniform_real_distribution<Scalar> dang(0, Scalar(2 * Litten_PI));
+            std::uniform_real_distribution<Scalar> dr(r, Scalar(2 * r));
+
+            // ---------- grid ----------
+            const Scalar cell_size = r / std::sqrt(2);
+            const int grid_w = int((maxx - minx) / cell_size) + 1;
+            const int grid_h = int((maxy - miny) / cell_size) + 1;
+
+            std::vector<int> grid(grid_w * grid_h, -1);
+
+            auto grid_index = [&](const Vector2 &p)
+            {
+                int gx = int((p.x() - minx) / cell_size);
+                int gy = int((p.y() - miny) / cell_size);
+                return std::make_pair(gx, gy);
+            };
+
+            auto is_far_enough = [&](const Vector2 &p,
+                                     const std::vector<Vector2> &samples)
+            {
+                auto [gx, gy] = grid_index(p);
+                for (int j = -2; j <= 2; ++j)
+                {
+                    for (int i = -2; i <= 2; ++i)
+                    {
+                        int nx = gx + i;
+                        int ny = gy + j;
+                        if (nx < 0 || ny < 0 || nx >= grid_w || ny >= grid_h)
+                            continue;
+                        int idx = grid[ny * grid_w + nx];
+                        if (idx >= 0)
+                        {
+                            if ((samples[idx] - p).norm() < r)
+                                return false;
+                        }
+                    }
+                }
+                return true;
+            };
+
+            // ---------- init with seeds ----------
+            std::vector<Vector2> samples;
+            std::vector<int> active;
+            std::vector<size_t> seed_indices;
+            // 1) insert seed points
+            for (const auto &p : seed_points)
+            {
+                if (!point_in_poly(poly, p))
+                    continue;
+
+                auto [gx, gy] = grid_index(p);
+                if (gx < 0 || gy < 0 || gx >= grid_w || gy >= grid_h)
+                    continue;
+
+                // 与已有 seed 也满足距离
+                bool ok = true;
+                for (const auto &q : samples)
+                {
+                    if ((q - p).norm() < r)
+                    {
+                        ok = false;
+                        break;
+                    }
+                }
+                if (!ok)
+                    continue;
+
+                int idx = (int)samples.size();
+                samples.push_back(p);
+                active.push_back(idx); // ✔ 是否加入 active：这里选择加入
+                grid[gy * grid_w + gx] = idx;
+                seed_indices.push_back(idx);
+            }
+
+            // 如果 seed 一个都没成功插入，强制 fallback
+            if (samples.empty())
+            {
+                samples = gen_poisson_sites_in_poly(poly, r, k, seed);
+                return PoissonResult{samples, {}};
+            }
+
+            // ---------- Bridson loop ----------
+            while (!active.empty())
+            {
+                int idx = active.back();
+                active.pop_back();
+
+                const Vector2 &base = samples[idx];
+                bool found = false;
+
+                for (int i = 0; i < k; ++i)
+                {
+                    Scalar ang = dang(rng);
+                    Scalar rad = dr(rng);
+                    Vector2 p = base + Vector2(std::cos(ang), std::sin(ang)) * rad;
+
+                    if (p.x() < minx || p.x() > maxx ||
+                        p.y() < miny || p.y() > maxy)
+                        continue;
+
+                    if (!point_in_poly(poly, p))
+                        continue;
+
+                    if (!is_far_enough(p, samples))
+                        continue;
+
+                    int new_idx = (int)samples.size();
+                    samples.push_back(p);
+                    active.push_back(new_idx);
+
+                    auto [gx, gy] = grid_index(p);
+                    grid[gy * grid_w + gx] = new_idx;
+
+                    found = true;
+                }
+
+                if (found)
+                    active.push_back(idx);
+            }
+
+            return PoissonResult{samples, seed_indices};
         }
 
         // 计算三角形面积
@@ -626,33 +807,30 @@ namespace util
             return triangles;
         }
 
-        static bool compute_plane(const std::vector<Vector3> &pts,Vector3 &origin,Vector3 &normal,Scalar eps)
+        static bool compute_plane(const std::vector<Vector3> &pts,Vector3 &normal, Scalar eps)
         {
             if (pts.size() < 3)
                 return false;
 
-            origin = pts[0];
-
             // 找不共线的三点
             Vector3 n = Vector3::Zero();
-            for (size_t i = 1; i + 1 < pts.size(); ++i)
+            for (size_t i = 0; i < pts.size(); ++i)
             {
-                Vector3 a = pts[i] - origin;
-                Vector3 b = pts[i + 1] - origin;
-                n = a.cross(b);
-                if (n.norm() > eps)
-                    break;
+                const Vector3& a = pts[i];
+                const Vector3& b = pts[(i + 1) % pts.size()];
+                n += a.cross(b);
             }
 
             if (n.norm() <= eps)
                 return false; // 全共线
 
             normal = n.normalized();
+            
 
             // 检查所有点到平面的距离
             for (auto &p : pts)
             {
-                Scalar d = (p - origin).dot(normal);
+                Scalar d = (p - pts[0]).dot(normal);
                 if (std::fabs(d) > eps)
                     return false; // 不共面
             }
@@ -660,28 +838,27 @@ namespace util
             return true;
         }
 
-        static void make_plane_basis(const Vector3 &n,Vector3 &u,Vector3 &v)
+        static void make_plane_basis(const Vector3 &n, Vector3 &u, Vector3 &v)
         {
-            Vector3 tmp = (std::fabs(n.x()) < Scalar(0.9))
-                              ? Vector3(1, 0, 0)
+            Vector3 tmp = (std::fabs(n.z()) < Scalar(0.9))
+                              ? Vector3(0, 0, 1)
                               : Vector3(0, 1, 0);
 
-            u = n.cross(tmp).normalized();
-            v = u.cross(n);
+            u = (tmp.cross(n)).normalized();
+            v = n.cross(u);
         }
 
         static std::vector<Vector2> project_to_2d(
             const std::vector<Vector3> &pts,
-            const Vector3 &origin,
             const Vector3 &u,
             const Vector3 &v)
         {
             std::vector<Vector2> out;
             out.reserve(pts.size());
-
+ 
             for (const auto &p : pts)
             {
-                Vector3 d = p - origin;
+                Vector3 d = p - pts[0];
                 Vector2 p2d;
                 p2d << d.dot(u), d.dot(v);
                 out.push_back(p2d);

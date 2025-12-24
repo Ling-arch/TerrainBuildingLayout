@@ -89,7 +89,7 @@ namespace polyloop
 
     private:
         std::vector<Vector3> points_;
-        Vector3 origin_, normal_, u_, v_;
+        Vector3 normal_, u_, v_;
         std::vector<Vector2> projected_points_;
         std::vector<Tri> triangles_;
     };
@@ -228,6 +228,31 @@ namespace polyloop
         return out;
     }
 
+
+    template <typename Real>
+    std::vector<Real> map_pt_normalized(const std::vector<Real> &pt2xy, const std::array<Real, 2> &center_pos, const NormalizeTransform2D<Real>& tf)
+    {
+        assert(pt2xy.size() % 2 == 0);
+        std::vector<Real> out;
+        for (size_t i = 0; i < pt2xy.size(); i += 2)
+        {
+            out.push_back((pt2xy[i] - tf.cx) * tf.scale + center_pos[0]);
+            out.push_back((pt2xy[i + 1] - tf.cy) * tf.scale + center_pos[1]);
+        }
+        return out;
+    }
+
+    inline std::vector<Vector2> map_pt_normalized(const std::vector<Vector2> &pts, const std::array<Scalar, 2> &center_pos, const NormalizeTransform2D<Scalar> &tf)
+    {
+        std::vector<Vector2> out;
+        for (Vector2 v : pts)
+        {
+            Vector2 mapped_pt = {(v.x() - tf.cx) * tf.scale + center_pos[0], (v.y() - tf.cy) * tf.scale + center_pos[1]};
+            out.push_back(mapped_pt);
+        }
+        return out;
+    }
+
     template <typename Real>
     std::vector<Real> denormalize(
         const std::vector<Real> &vtx2xy_norm,
@@ -244,6 +269,69 @@ namespace polyloop
             Real y = (vtx2xy_norm[i + 1] - tf.ty) / tf.scale + tf.cy;
             out.push_back(x);
             out.push_back(y);
+        }
+        return out;
+    }
+
+    inline std::vector<Vector2> denormalize(
+        const std::vector<Vector2> &vtx_norm,
+        const NormalizeTransform2D<Scalar> &tf)
+    {
+
+        std::vector<Vector2> out;
+        out.reserve(vtx_norm.size());
+
+        for (Vector2 v : vtx_norm)
+        {
+            Vector2 v_origin = {(v.x() - tf.tx) / tf.scale + tf.cx, (v.y() - tf.ty) / tf.scale + tf.cy};
+            out.push_back(v_origin);
+        }
+        return out;
+    }
+
+    inline std::vector<Polyloop3> convert_polyloop2_to_3d(std::vector<Polyloop2> polys, Scalar z)
+    {
+        std::vector<Polyloop3> out;
+        for (Polyloop2 &poly : polys)
+        {
+            std::vector<Vector3> points;
+            for (Vector2 pt : poly.points())
+            {
+                points.push_back({pt.x(), pt.y(), z});
+            }
+            out.emplace_back(points);
+        }
+        return out;
+    }
+
+    inline Polyloop3 convert_points_to_polyloop3d(std::vector<Vector2> points, Scalar z){
+        std::vector<Vector3> points_3d;
+        for (Vector2 pt : points)
+        {
+            points_3d.push_back({pt.x(), pt.y(), z});
+        }
+        return Polyloop3(points_3d);
+    }
+
+    inline std::vector<Vector3> convert_points_to_3d(std::vector<Vector2> points, Scalar z)
+    {
+        std::vector<Vector3> points_3d;
+        for (Vector2 pt : points)
+        {
+            points_3d.push_back({pt.x(), pt.y(), z});
+        }
+        return points_3d;
+    }
+
+    inline std::vector<Vector3> denormalize_and_to3d(const std::vector<Vector2> &vtx_norm, const NormalizeTransform2D<Scalar> &tf, Scalar z)
+    {
+        std::vector<Vector3> out;
+        out.reserve(vtx_norm.size());
+
+        for (Vector2 v : vtx_norm)
+        {
+            Vector3 v_origin = {(v.x() - tf.tx) / tf.scale + tf.cx, (v.y() - tf.ty) / tf.scale + tf.cy, z};
+            out.push_back(v_origin);
         }
         return out;
     }

@@ -262,7 +262,7 @@ namespace diffVoronoi
         return {grad_site, torch::Tensor(), torch::Tensor()};
     }
 
-    std::pair<torch::Tensor, VoronoiInfo> voronoi(
+    std::tuple<torch::Tensor, VoronoiInfo, std::vector<voronoi2::Cell>> voronoi(
         const std::vector<float> &vtxl2xy_f,
         const torch::Tensor &site2xy,
         const std::function<bool(size_t)> &site2isalive)
@@ -271,7 +271,7 @@ namespace diffVoronoi
         std::vector<float> site_flat = flat_tensor_to_float(site2xy);
 
         // 2) compute site2cell
-        auto site2cell = voronoi2::voronoi_cells(vtxl2xy_f, site_flat, site2isalive);
+        std::vector<voronoi2::Cell> site2cell = voronoi2::voronoi_cells(vtxl2xy_f, site_flat, site2isalive);
 
         // 3) indexing
         voronoi2::VoronoiMesh voronoi_mesh = voronoi2::indexing(site2cell);
@@ -296,7 +296,7 @@ namespace diffVoronoi
         vi.vtxv2info = voronoi_mesh.vtxv2info;
         vi.idx2site = std::move(idx2site);
 
-        return {vtxv2xy, vi};
+        return std::make_tuple(vtxv2xy, vi, site2cell);
     }
 
     torch::Tensor PolygonMesh2ToCogsFunction::forward(torch::autograd::AutogradContext *ctx,
@@ -308,7 +308,7 @@ namespace diffVoronoi
         TORCH_CHECK(vtx2xy.dim() == 2 && vtx2xy.size(1) == 2,
                     "vtx2xy must be (N,2)");
 
-        auto vcont = vtx2xy.contiguous();
+        torch::Tensor vcont = vtx2xy.contiguous();
         const float *vptr = vcont.data_ptr<float>();
 
         std::vector<float> elem2cog =
@@ -320,11 +320,11 @@ namespace diffVoronoi
 
         const int64_t num_elem = static_cast<int64_t>(elem2idx.size() - 1);
 
-        auto out = torch::from_blob(
-                       elem2cog.data(),
-                       {num_elem, 2},
-                       torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU))
-                       .clone(); // clone 保证内存安全
+        torch::Tensor out = torch::from_blob(
+                                elem2cog.data(),
+                                {num_elem, 2},
+                                torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU))
+                                .clone(); // clone 保证内存安全
 
         // ===== 保存 backward 所需 =====
         ctx->save_for_backward({vtx2xy});
@@ -647,8 +647,7 @@ namespace diffVoronoi
         std::vector<float> site_xy_vec = M2::flat_vec2(sites);
         const int64_t num_site = site_xy_vec.size() / 2;
 
-        torch::Tensor site2xy0 =
-            torch::from_blob(
+        torch::Tensor site2xy0 = torch::from_blob(
                 site_xy_vec.data(),
                 {num_site, 2},
                 torch::TensorOptions().dtype(torch::kFloat32))
@@ -656,7 +655,7 @@ namespace diffVoronoi
                 .set_requires_grad(true);
 
         // ---------- 3. Voronoi forward ----------
-        auto [vtxv2xy0, vi] = voronoi(vtxl2xy, site2xy0, [](size_t)
+        auto [vtxv2xy0, vi, site2cell] = voronoi(vtxl2xy, site2xy0, [](size_t)
                                       { return true; });
 
         // ---------- 4. random goal ----------
@@ -669,7 +668,7 @@ namespace diffVoronoi
         torch::Tensor grad_site = site2xy0.grad().detach().clone();
 
         // ---------- 6. finite difference ----------
-        const float eps = 1e-3f;
+        const float eps = 1e-4f;
         auto grad_site_acc = grad_site.accessor<float, 2>();
 
         float max_abs_diff = 0.f;

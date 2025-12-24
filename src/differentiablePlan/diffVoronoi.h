@@ -84,7 +84,7 @@ namespace diffVoronoi
         std::vector<std::array<size_t, 4>> vtxv2info;
     };
 
-    std::pair<torch::Tensor, VoronoiInfo> voronoi(
+    std::tuple<torch::Tensor, VoronoiInfo, std::vector<voronoi2::Cell>> voronoi(
         const std::vector<float> &vtxl2xy_f,            // flattened loop coords (f32)
         const torch::Tensor &site2xy,                   // Nx2 float32 tensor (CPU)
         const std::function<bool(size_t)> &site2isalive // predicate

@@ -62,33 +62,36 @@ endif()
 
 # Use libtorch
 # set(MKL_INCLUDE_DIR "C:/local/fake_mkl")
+set(CMAKE_PREFIX_PATH "C:/local/libtorch_release/share/cmake/Torch" CACHE PATH "Path to libtorch cmake files")
 
-set(CMAKE_PREFIX_PATH "C:/local/libtorch/share/cmake/Torch" CACHE PATH "Path to libtorch cmake files")
-#set(USE_MKL OFF)
-#set(USE_BLAS OFF)
-#set(TORCH_USE_CUDA_WITH_MKLDNN OFF)
+# set(USE_MKL OFF)
+# set(USE_BLAS OFF)
+# set(TORCH_USE_CUDA_WITH_MKLDNN OFF)
+# set(CMAKE_PREFIX_PATH ${LIBTORCH_DIR})
 
 set(CAFFE2_USE_CUDNN TRUE)
 set(CAFFE2_USE_CUCUSPARSELT TRUE)
-set(CAFFE2_USE_CUDSS TURE)
+set(CAFFE2_USE_CUDSS TRUE)
 set(TORCH_USE_CUDA TRUE)
 set(TORCH_USE_CUDNN TRUE)
-set(TORCH_USE_CUDSS TURE)
+set(TORCH_USE_CUDSS TRUE)
 
 
 find_package(Torch QUIET)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
 
-file(GLOB TORCH_LIBS "C:/local/libtorch/lib/*.lib")
-message(STATUS "TORCH_LIBS: ${TORCH_LIBS}")
+
+
 
 
 if(TARGET torch)
     set(TORCH_LIBS_PRIVATE ${TORCH_LIBRARIES})
-    message(STATUS "LibTorch found.")
+    message(STATUS "LibTorch release found.")
     message(STATUS "TORCH_LIBS_PRIVATE libraries: ${TORCH_LIBS_PRIVATE}")
 endif()
 
+file(GLOB TORCH_LIBS "C:/local/libtorch_release/lib/*.lib")
+message(STATUS "TORCH_LIBS: ${TORCH_LIBS}")
 include_directories(${TORCH_INCLUDE_DIRS} )
 
 

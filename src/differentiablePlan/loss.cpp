@@ -589,6 +589,93 @@ namespace loss
         return site2room;
     }
 
+    std::vector<size_t> site2room(
+        size_t num_site,
+        const std::vector<float> &room2area,
+        const std::vector<size_t> &fixed_site_indices,
+        const std::vector<size_t> &fixed_rooms)
+    {
+        const size_t num_room = room2area.size();
+        std::vector<size_t> site2room(num_site, INVALID);
+
+        assert(fixed_site_indices.size() == fixed_rooms.size());
+
+        // ---------- 1) apply fixed assignments ----------
+        std::vector<bool> site_fixed(num_site, false);
+        std::vector<size_t> room_fixed_count(num_room, 0);
+
+        for (size_t i = 0; i < fixed_site_indices.size(); ++i)
+        {
+            size_t s = fixed_site_indices[i];
+            size_t r = fixed_rooms[i];
+            assert(s < num_site);
+            assert(r < num_room);
+
+            site2room[s] = r;
+            site_fixed[s] = true;
+            room_fixed_count[r]++;
+        }
+
+        // ---------- 2) collect free sites ----------
+        std::vector<size_t> free_sites;
+        for (size_t i = 0; i < num_site; ++i)
+        {
+            if (!site_fixed[i])
+                free_sites.push_back(i);
+        }
+
+        if (free_sites.empty())
+            return site2room;
+
+        // ---------- 3) compute remaining area per room ----------
+        float total_area = 0.f;
+        for (float a : room2area)
+            total_area += a;
+
+
+        const size_t num_site_assign = num_site - num_room;
+        float area_per_site = total_area / static_cast<float>(num_site_assign);
+        
+        std::vector<float> cumsum(num_room);
+        {
+            float acc = 0.f;
+            for (size_t i = 0; i < num_room; ++i)
+            {
+                acc += room2area[i];
+                cumsum[i] = acc;
+            }
+        }
+
+        // ---------- 4) assign free sites ----------
+        size_t free_idx = 0;
+        float area_cur = 0.f;
+
+        for (size_t i_room = 0; i_room < num_room; ++i_room)
+        {
+            // 如果该 room 没有固定 site，优先保证一个
+            if (room_fixed_count[i_room] == 0 && free_idx < free_sites.size())
+            {
+                site2room[free_sites[free_idx]] = i_room;
+                free_idx ++;
+            }
+
+            while (free_idx < free_sites.size())
+            {
+                area_cur += area_per_site;
+                site2room[free_sites[free_idx]] = i_room;
+                free_idx++;
+
+                if (area_cur > cumsum[i_room])
+                    break;
+            }
+
+            if (free_idx >= free_sites.size())
+                break;
+        }
+
+        return site2room;
+    }
+
     torch::Tensor loss_lloyd(
         const std::vector<size_t> &elem2idx,
         const std::vector<size_t> &idx2vtx,

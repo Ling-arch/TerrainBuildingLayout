@@ -271,7 +271,7 @@ namespace voronoi2
             for (size_t k = 0; k < cell_stack.size(); ++k)
             {
                 bool inside = cell_stack[k].is_inside(site2xy[i_site]);
-                Scalar score = inside ? 0.0 : 1.0 / std::max(Scalar(1e-12), cell_stack[k].area());
+                Scalar score = inside ? Scalar(0) : Scalar(1) / std::max(Scalar(1e-12), cell_stack[k].area());
                 depthcell.emplace_back(score, k);
             }
             std::sort(depthcell.begin(), depthcell.end(),
