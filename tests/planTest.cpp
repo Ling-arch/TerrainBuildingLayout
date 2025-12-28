@@ -65,6 +65,7 @@ int main()
     // }
 
     //----------------------------相当于draw部分------------------------
+    
     render.runMainLoop(render::FrameCallbacks{
         [&]() { // 按键更新，重新绘图等事件，poly修改过需要重新fill
             if (IsKeyPressed(KEY_R))

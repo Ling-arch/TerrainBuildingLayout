@@ -11,6 +11,7 @@ namespace render
         : width_(width), height_(height), fovy_(fovy), projection_(proj), name_(name),
           yaw_(0.8f), pitch_(0.4f), distance_(14.f)
     {
+        SetConfigFlags(FLAG_MSAA_4X_HINT);
         camera_.position = {50.f, 50.f, 50.f};
         camera_.target = {0.f, 0.f, 0.f};
         camera_.up = {0.f, 1.f, 0.f};
@@ -29,7 +30,10 @@ namespace render
     void Renderer3D::updateCamera()
     {
         Vector2 md = GetMouseDelta();
-
+        if (ImGui::IsAnyItemActive() || ImGui::IsAnyItemHovered())
+        {
+            return;
+        }
         // 左键旋转
         if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
         {
@@ -250,6 +254,7 @@ namespace render
 
     void Renderer3D::runMainLoop(const FrameCallbacks &callBack)
     {
+        
         while (!WindowShouldClose())
         {
             updateCamera();
@@ -257,6 +262,7 @@ namespace render
                 callBack.onUpdate();
             BeginDrawing();
             ClearBackground(RAYWHITE);
+          
             BeginMode3D(camera_);
             if (callBack.onDraw3D)
                 callBack.onDraw3D();
@@ -265,6 +271,7 @@ namespace render
                 callBack.onDraw2D();
             EndDrawing();
         }
+      
     }
 
     void Renderer3D::draw_index_fonts(const std::vector<Vector3> &world_pos, int size, Color color)

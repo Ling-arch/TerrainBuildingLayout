@@ -10,8 +10,10 @@ target_include_directories(Terrain
     ${UtilsDir}
     ${PlanDir}
     ${BuildingDir}
+    ${CMAKE_SOURCE_DIR}/thirdparty/include
 )
 
 target_link_libraries(Terrain
     PUBLIC
+    Utils
 )

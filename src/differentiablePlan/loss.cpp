@@ -440,9 +440,7 @@ namespace loss
         /* ------------------------------------------------------------
          * 1. site2areas via PolygonMesh2ToAreas
          * ------------------------------------------------------------ */
-        PolygonMesh2ToAreaLayer polygonmesh2_to_areas(
-            site2idx,
-            idx2vtxv);
+        PolygonMesh2ToAreaLayer polygonmesh2_to_areas(site2idx,idx2vtxv);
 
         torch::Tensor site2areas = polygonmesh2_to_areas.forward(vtxv2xy);
         //std::cout << "polygonmesh2_to_areas forward OK" << std::endl;

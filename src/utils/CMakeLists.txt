@@ -12,6 +12,5 @@ target_include_directories(Utils
 )
 
 
-
 target_link_libraries(Utils PUBLIC ${THIRD_PARTY_LIBS})
 

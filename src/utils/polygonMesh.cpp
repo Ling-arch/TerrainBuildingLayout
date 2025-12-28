@@ -212,8 +212,7 @@ namespace polygonMesh
 
         for (size_t i_elem = 0; i_elem < num_elem; ++i_elem)
         {
-            const size_t num_vtx_in_elem =
-                elem2idx[i_elem + 1] - elem2idx[i_elem];
+            const size_t num_vtx_in_elem = elem2idx[i_elem + 1] - elem2idx[i_elem];
 
             for (size_t i_edge = 0; i_edge < num_vtx_in_elem; ++i_edge)
             {

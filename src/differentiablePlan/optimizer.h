@@ -19,8 +19,11 @@ namespace optimizer
 
     inline constexpr size_t INVALID = static_cast<size_t>(std::numeric_limits<int64_t>::max());
 
+    //生成点时，根据平面跨层情况，选择polyloop的相交区域进行生成，同时记录当前区域的站点id，后续分配房间
+    //优先考虑相交区域，将跨层的房间id先分配给
     struct MultiPlanProblem{
-        vector<Scalar>
+        vector<vector<Scalar>> vtxl2xy_norms;
+
     };
     
     struct PlanProblem
@@ -68,12 +71,6 @@ namespace optimizer
 
     void optimize_draw_bystep(PlanProblem& plan_prob, size_t &cur_iter, const size_t max_iter, OptimizeDrawData &diff_voronoi_show_data);
 
-    torch::Tensor optimize(
-        std::vector<float> vtxl2xy,
-        std::vector<float> site2xy_init,
-        std::vector<size_t> site2room,
-        std::vector<float> site2xy2flag,
-        std::vector<float> room2area_trg,
-        std::vector<std::pair<size_t, size_t>> room_connections);
+   
    
 }
