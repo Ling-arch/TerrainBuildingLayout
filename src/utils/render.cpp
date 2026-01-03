@@ -85,7 +85,7 @@ namespace render
         camera_.up = {0, 1, 0};
     }
 
-    void Renderer3D::fill_polygon2(const Polyloop2 &poly, Color color, float z, float alpha, bool doubleSided)
+    void fill_polygon2(const Polyloop2 &poly, Color color, float z, float alpha, bool doubleSided)
     {
         if (poly.triangles().size() <= 0)
             return;
@@ -114,7 +114,7 @@ namespace render
         }
     }
 
-    void Renderer3D::fill_polygon3(const Polyloop3 &poly, Color color, float alpha, bool doubleSided)
+    void fill_polygon3(const Polyloop3 &poly, Color color, float alpha, bool doubleSided)
     {
         if (poly.triangles().size() <= 0)
             return;
@@ -143,7 +143,7 @@ namespace render
         }
     }
 
-    void Renderer3D::stroke_light_polygon2(const Polyloop2 &poly, Color color, float z, float alpha)
+    void stroke_light_polygon2(const Polyloop2 &poly, Color color, float z, float alpha)
     {
         vector<Vector3> pts_vector3 = vec2_to_Vector3_arr(poly.points(), float(z));
         size_t n = pts_vector3.size();
@@ -153,7 +153,7 @@ namespace render
         }
     }
 
-    void Renderer3D::stroke_bold_polygon2(const Polyloop2 &poly, Color color, float z, float thickness, float alpha)
+    void stroke_bold_polygon2(const Polyloop2 &poly, Color color, float z, float thickness, float alpha)
     {
         vector<Vector3> pts_vector3 = vec2_to_Vector3_arr(poly.points(), float(z));
         size_t n = pts_vector3.size();
@@ -164,7 +164,7 @@ namespace render
         }
     }
 
-    void Renderer3D::stroke_light_polygon3(const Polyloop3 &poly, Color color, float alpha)
+    void stroke_light_polygon3(const Polyloop3 &poly, Color color, float alpha)
     {
         vector<Vector3> pts_vector3 = vec3_to_Vector3_arr(poly.points());
         size_t n = pts_vector3.size();
@@ -174,7 +174,7 @@ namespace render
         }
     }
 
-    void Renderer3D::stroke_bold_polygon3(const Polyloop3 &poly, Color color, float thickness, float alpha)
+    void stroke_bold_polygon3(const Polyloop3 &poly, Color color, float thickness, float alpha)
     {
         vector<Vector3> pts_vector3 = vec3_to_Vector3_arr(poly.points());
         size_t n = pts_vector3.size();
@@ -184,7 +184,7 @@ namespace render
         }
     }
 
-    void Renderer3D::draw_light_polyline2(const std::vector<Vec2> &pts, Color color, float z, float alpha)
+    void draw_light_polyline2(const std::vector<Vec2> &pts, Color color, float z, float alpha)
     {
         vector<Vector3> pts_vector3 = vec2_to_Vector3_arr(pts, float(z));
         size_t n = pts_vector3.size();
@@ -197,7 +197,7 @@ namespace render
     }
 
 
-    void Renderer3D::draw_bold_polyline2(const std::vector<Vec2> &pts, Color color, float z, float thickness, float alpha)
+    void draw_bold_polyline2(const std::vector<Vec2> &pts, Color color, float z, float thickness, float alpha)
     {
         vector<Vector3> pts_vector3 = vec2_to_Vector3_arr(pts, float(z));
         size_t n = pts_vector3.size();
@@ -210,7 +210,7 @@ namespace render
     }
 
 
-    void Renderer3D::draw_light_polyline3(const std::vector<Vec3> &pts, Color color, float alpha)
+    void draw_light_polyline3(const std::vector<Vec3> &pts, Color color, float alpha)
     {
         vector<Vector3> pts_vector3 = vec3_to_Vector3_arr(pts);
         size_t n = pts_vector3.size();
@@ -222,7 +222,7 @@ namespace render
         }
     }
 
-    void Renderer3D::draw_bold_polyline3(const std::vector<Vec3> &pts, Color color, float thickness, float alpha)
+    void draw_bold_polyline3(const std::vector<Vec3> &pts, Color color, float thickness, float alpha)
     {
         vector<Vector3> pts_vector3 = vec3_to_Vector3_arr(pts);
         size_t n = pts_vector3.size();
@@ -234,7 +234,7 @@ namespace render
         }
     }
 
-    void Renderer3D::draw_points(const std::vector<Vec2> &pts, Color color, float alpha, Scalar radius, Scalar z)
+    void draw_points(const std::vector<Vec2> &pts, Color color, float alpha, Scalar radius, Scalar z)
     {
         for (auto &pt : pts)
         {
@@ -244,7 +244,7 @@ namespace render
         }
     }
 
-    void Renderer3D::draw_points(const std::vector<Vec3> &pts, Color color, float alpha, Scalar radius)
+    void draw_points(const std::vector<Vec3> &pts, Color color, float alpha, Scalar radius)
     {
         for (auto &pt : pts)
         {

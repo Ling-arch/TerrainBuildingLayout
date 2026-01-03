@@ -40,10 +40,21 @@ namespace geo{
     struct Edge
     {
         int segId;
-        int end; // 0 = a, 1 = b
+        int end; // 0 = p0, 1 = p1
     };
 
+
+    struct GraphEdge{
+        int from;
+        int to;
+        float cost;
+        int dx;
+        int dy;
+    };
+
+
     std::vector<Polyline> buildPolylines(const std::vector<geo::Segment> &segments, float eps = 1e-4f);
+
 
     void followChain(
         int startSeg,

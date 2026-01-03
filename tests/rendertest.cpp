@@ -309,20 +309,20 @@ int main()
                     Polyloop2 cell = result.cellPolys[i];
                     // size_t room_id = site2room[i];
                     Polyloop3 cell3d = Polyloop3(polyloop::convert_points_to_3d(cell.points(),0.f));
-                    render.stroke_light_polygon2(cell, BLACK, 0.f);
+                    render::stroke_light_polygon2(cell, BLACK, 0.f);
                     // render.fill_polygon2(cell, room_color_from_id(result.site2room[i], num_room), 0.0f, 0.5f);
-                    render.fill_polygon3(cell3d,GREEN,0.5F);
+                    render::fill_polygon3(cell3d, GREEN, 0.5F);
                 }
 
                 for (size_t i = 0; i < result.diffPolys.size(); i++)
                 {
                     Polyloop2 cell = result.diffPolys[i];
                     // size_t room_id = site2room[i];
-                    render.stroke_light_polygon2(cell, GREEN, 0.f);
+                    render::stroke_light_polygon2(cell, GREEN, 0.f);
                     // render.fill_polygon2(cell, room_color_from_id(result.site2room[i], num_room), 0.0f, 0.5f);
                 }
-                render.draw_points(result.sites, RED);
-                render.draw_points(result.vtxv_real_pos, RED, 0.5f, 0.1f);
+                render::draw_points(result.sites, RED);
+                render::draw_points(result.vtxv_real_pos, RED, 0.5f, 0.1f);
 
             },
             [&]() { // 二维屏幕空间绘图

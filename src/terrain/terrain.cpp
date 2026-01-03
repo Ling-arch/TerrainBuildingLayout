@@ -40,11 +40,6 @@ namespace terrain
         }
     }
 
-    int Terrain::vertexIndex(int gx, int gy) const
-    {
-        return gy * (width + 1) + gx;
-    }
-
     void Terrain::upload()
     {
         Mesh raylib_mesh = buildRaylibMesh(mesh);
@@ -316,8 +311,8 @@ namespace terrain
         return segments;
     }
 
-    
-    std::vector<ContourLayer> Terrain::extractContours(float gap) const{
+    std::vector<ContourLayer> Terrain::extractContours(float gap) const
+    {
         std::unordered_map<int, ContourLayer> layerMap;
 
         for (size_t i = 0; i < mesh.indices.size(); i += 3)
@@ -403,20 +398,163 @@ namespace terrain
         isShowContours = contourShow;
     }
 
-    void Terrain::drawContours() const
+    void Terrain::drawContours(std::vector<ContourLayer> layers) const
     {
-        if (!isShowContours)
+        if (!contourShowData.isShowContours)
             return;
-        std::vector<ContourLayer> layers = extractContours(1.f);
+
+        // std::vector<std::vector<Vector3>> polyline_pts;
+
         for (ContourLayer &layer : layers)
         {
             std::vector<geo::Segment> segments = layer.segments;
-            for (auto &seg : segments)
+            if (contourShowData.isShowLines)
             {
-                Vector3 p0 = render::vec3_to_Vector3(seg.p0);
-                Vector3 p1 = render::vec3_to_Vector3(seg.p1);
-                DrawLine3D(p0, p1, BLACK);
-            } 
+                for (auto &seg : segments)
+                {
+                    Vector3 p0 = {seg.p0.x(), seg.p0.z(), -seg.p0.y()};
+                    Vector3 p1 = {seg.p1.x(), seg.p1.z(), -seg.p1.y()};
+                    DrawLine3D(p0, p1, contourShowData.lineColor);
+                    if (contourShowData.isShowPts)
+                    {
+                        DrawCube(p0, contourShowData.ptSize, contourShowData.ptSize, contourShowData.ptSize, contourShowData.ptColor);
+                        DrawCube(p1, contourShowData.ptSize, contourShowData.ptSize, contourShowData.ptSize, contourShowData.ptColor);
+                    }
+                }
+            }
+
+            // if (contourShowData.isShowPts)
+            // {
+            //     std::vector<geo::Polyline> polylines = buildPolylines(segments);
+            //     for (int i = 0; i < polylines.size(); ++i)
+            //     {
+            //         std::vector<Eigen::Vector3f> pts = polylines[i].points;
+            //         if (contourShowData.isShowIndex)
+            //         {
+            //             for (auto &pt : pts)
+            //             {
+            //                 DrawCubeV({pt.x(), pt.z(), -pt.y()}, {
+            //                                                          contourShowData.ptSize,
+            //                                                          contourShowData.ptSize,
+            //                                                          contourShowData.ptSize,
+            //                                                      },
+            //                           contourShowData.ptColor);
+            //             }
+            //             // render.draw_index_fonts(world_pts, contourShowData.ptIndexSize, contourShowData.ptIndexColor);
+            //         }
+            //     }
+            // }
+        }
+    }
+
+    void Terrain::drawContourPtIndices(std::vector<ContourLayer> layers, render::Renderer3D &render) const
+    {
+        if (!contourShowData.isShowContours || !contourShowData.isShowPts || !contourShowData.isShowIndex)
+            return;
+        for (ContourLayer &layer : layers)
+        {
+            std::vector<geo::Segment> segments = layer.segments;
+            std::vector<geo::Polyline> polylines = buildPolylines(segments);
+
+            for (int i = 0; i < polylines.size(); ++i)
+            {
+                std::vector<Eigen::Vector3f> pts = polylines[i].points;
+                std::vector<Vector3> world_pts = render::vec3_to_Vector3_arr(pts);
+
+                render.draw_index_fonts(world_pts, contourShowData.ptIndexSize, contourShowData.ptIndexColor);
+            }
+        }
+    }
+
+    void Terrain::buildContourSettings()
+    {
+        if (ImGui::Checkbox("ContoursDrawSetting", &contourShowData.isShowContours))
+        {
+            setContoursShow(contourShowData.isShowContours);
+        }
+        if (contourShowData.isShowContours)
+        {
+            ImGui::Indent();
+
+            // ===== Lines =====
+            if (ImGui::Checkbox("Show Lines", &contourShowData.isShowLines))
+            {
+                // nothing else needed
+            }
+
+            if (contourShowData.isShowLines)
+            {
+                ImGui::Indent();
+
+                // Color picker（轮盘）
+                if (ImGui::ColorEdit4(
+                        "Line Color",
+                        (float *)&contourShowData.lineColorF,
+                        ImGuiColorEditFlags_Float | ImGuiColorEditFlags_PickerHueWheel))
+                {
+                    contourShowData.lineColor = transformFloat4ToColor(contourShowData.lineColorF);
+                }
+
+                ImGui::Unindent();
+            }
+
+            ImGui::Separator();
+
+            // ===== Points =====
+            if (ImGui::Checkbox("Show Points", &contourShowData.isShowPts))
+            {
+            }
+
+            if (contourShowData.isShowPts)
+            {
+                ImGui::Indent();
+
+                if (ImGui::ColorEdit4(
+                        "Point Color",
+                        (float *)&contourShowData.ptColorF,
+                        ImGuiColorEditFlags_Float | ImGuiColorEditFlags_PickerHueWheel))
+                {
+                    contourShowData.ptColor = transformFloat4ToColor(contourShowData.ptColorF);
+                }
+
+                ImGui::SliderFloat(
+                    "Point Size",
+                    &contourShowData.ptSize,
+                    0.02f, 0.5f,
+                    "%.2f");
+
+                ImGui::Unindent();
+            }
+
+            ImGui::Separator();
+
+            // ===== Indices =====
+            if (ImGui::Checkbox("Show Indices", &contourShowData.isShowIndex))
+            {
+            }
+
+            if (contourShowData.isShowIndex)
+            {
+                ImGui::Indent();
+
+                if (ImGui::ColorEdit4(
+                        "Index Color",
+                        (float *)&contourShowData.ptIndexColorF,
+                        ImGuiColorEditFlags_Float | ImGuiColorEditFlags_PickerHueWheel))
+                {
+                    contourShowData.ptIndexColor = transformFloat4ToColor(contourShowData.ptIndexColorF);
+                }
+
+                ImGui::SliderFloat(
+                    "Index Size",
+                    &contourShowData.ptIndexSize,
+                    8.0f, 48.0f,
+                    "%.0f");
+
+                ImGui::Unindent();
+            }
+
+            ImGui::Unindent();
         }
     }
 
@@ -462,5 +600,431 @@ namespace terrain
 
         UploadMesh(&mesh, true);
         return mesh;
+    }
+
+    //------------------------------------road path finding -------------------------------------------
+    void Terrain::linkEdge(int a, int b, int rank, std::vector<geo::GraphEdge> &edges) const
+    {
+        int maxIndex = (width + 1) * (height + 1) - 1;
+        if (b < 0 || b > maxIndex)
+            return;
+        // no directional graph
+        if (a < b)
+            return;
+        int ax = a % (width + 1);
+        int bx = b % (width + 1);
+
+        if (ax < rank && bx > width - rank)
+            return;
+        if (bx < rank && ax > width - rank)
+            return;
+
+        edges.push_back({a, b, 0.f});
+        edges.push_back({b, a, 0.f});
+    }
+
+    std::vector<geo::GraphEdge> Terrain::buildGraph(int rank) const
+    {
+        std::vector<geo::GraphEdge> edges;
+
+        int vertsPerRow = width + 1;
+        int totalVerts = vertsPerRow * (height + 1);
+
+        for (int v = 0; v < totalVerts; ++v)
+        {
+            int x = v % vertsPerRow;
+            int y = v / vertsPerRow;
+            if (!valid(x, y))
+                continue;
+
+            // === 已使用方向（最简整数方向）===
+            std::set<std::pair<int, int>> usedDirs;
+
+            auto tryAddEdge = [&](int dx, int dy)
+            {
+                int g = igcd(std::abs(dx), std::abs(dy));
+                int ndx = dx / g;
+                int ndy = dy / g;
+
+                // 同方向已经连过
+                if (usedDirs.count({ndx, ndy}))
+                    return;
+
+                usedDirs.insert({ndx, ndy});
+
+                int nx = x + dx;
+                int ny = y + dy;
+                if (!valid(nx, ny))
+                    return;
+
+                int u = ny * vertsPerRow + nx;
+
+                // 无向图：只建一次
+                if (v < u)
+                    return;
+
+                edges.push_back({v, u, 0.f, ndx, ndy});
+                edges.push_back({u, v, 0.f, -ndx, -ndy});
+            };
+
+            // ---------- rank = 0 ----------
+            if (rank >= 0)
+            {
+                tryAddEdge(1, 0);
+                tryAddEdge(-1, 0);
+                tryAddEdge(0, 1);
+                tryAddEdge(0, -1);
+            }
+
+            // ---------- rank = 1 ----------
+            if (rank >= 1)
+            {
+                tryAddEdge(1, 1);
+                tryAddEdge(-1, 1);
+                tryAddEdge(1, -1);
+                tryAddEdge(-1, -1);
+            }
+
+            // ---------- rank >= 2 ----------
+            for (int r = 2; r <= rank; ++r)
+            {
+                // 外围正方形一圈
+                for (int dy = -r; dy <= r; ++dy)
+                {
+                    for (int dx = -r; dx <= r; ++dx)
+                    {
+                        // 只取外围
+                        if (std::abs(dx) != r && std::abs(dy) != r)
+                            continue;
+
+                        if (dx == 0 && dy == 0)
+                            continue;
+
+                        tryAddEdge(dx, dy);
+                    }
+                }
+            }
+        }
+
+        return edges;
+    }
+
+
+    void Terrain::drawGraphEdges(int cx,int cy,int rank) const
+    {
+        if (!valid(cx, cy))
+            return;
+
+        Vector3 p0 = render::vec3_to_Vector3(mesh.vertices[vertexIndex(cx, cy)].position);
+
+        std::set<std::pair<int, int>> usedDirs;
+
+        auto drawDir = [&](int dx, int dy)
+        {
+            int g = igcd(std::abs(dx), std::abs(dy));
+            int ndx = dx / g;
+            int ndy = dy / g;
+
+            if (usedDirs.count({ndx, ndy}))
+                return;
+
+            usedDirs.insert({ndx, ndy});
+
+            int nx = cx + dx;
+            int ny = cy + dy;
+            if (!valid(nx, ny))
+                return;
+
+            Vector3 p1 = render::vec3_to_Vector3(mesh.vertices[vertexIndex(nx, ny)].position);
+
+            Color col = ORANGE;
+            if (ndx == 0 || ndy == 0)
+                col = WHITE; // 轴向
+            else if (std::abs(ndx) == std::abs(ndy))
+                col = GREEN; // 对角线
+
+            DrawLine3D(p0, p1, col);
+        };
+
+        // ---------- rank = 0 ----------
+        if (rank >= 0)
+        {
+            drawDir(1, 0);
+            drawDir(-1, 0);
+            drawDir(0, 1);
+            drawDir(0, -1);
+        }
+
+        // ---------- rank = 1 ----------
+        if (rank >= 1)
+        {
+            drawDir(1, 1);
+            drawDir(-1, 1);
+            drawDir(1, -1);
+            drawDir(-1, -1);
+        }
+
+        // ---------- rank >= 2 ----------
+        for (int r = 2; r <= rank; ++r)
+        {
+            for (int dy = -r; dy <= r; ++dy)
+            {
+                for (int dx = -r; dx <= r; ++dx)
+                {
+                    if (std::abs(dx) != r && std::abs(dy) != r)
+                        continue;
+
+                    if (dx == 0 && dy == 0)
+                        continue;
+
+                    drawDir(dx, dy);
+                }
+            }
+        }
+    }
+
+    void Terrain::debugBuildGraphAt(int cx, int cy, int rank) const
+    {
+        std::cout << "=== Debug Graph at (" << cx << "," << cy
+                  << "), rank = " << rank << " ===\n";
+
+        // 已使用方向集合（方向 = 最简整数比）
+        std::set<std::pair<int, int>> usedDirs;
+
+        auto tryAdd = [&](int dx, int dy)
+        {
+            int g = igcd(std::abs(dx), std::abs(dy));
+            dx /= g;
+            dy /= g;
+
+            if (usedDirs.count({dx, dy}))
+                return;
+
+            usedDirs.insert({dx, dy});
+
+            int nx = cx + dx * g;
+            int ny = cy + dy * g;
+
+            if (!valid(nx, ny))
+                return;
+
+            std::cout << "  dir=(" << dx << "," << dy
+                      << ")  -> (" << nx << "," << ny << ")\n";
+        };
+
+        // ---------- rank = 0 ----------
+        if (rank >= 0)
+        {
+            tryAdd(1, 0);
+            tryAdd(-1, 0);
+            tryAdd(0, 1);
+            tryAdd(0, -1);
+        }
+
+        // ---------- rank = 1 ----------
+        if (rank >= 1)
+        {
+            tryAdd(1, 1);
+            tryAdd(-1, 1);
+            tryAdd(1, -1);
+            tryAdd(-1, -1);
+        }
+
+        // ---------- rank >= 2 ----------
+        for (int r = 2; r <= rank; ++r)
+        {
+            std::cout << "-- rank " << r
+                      << " square size = " << (2 * r) << " --\n";
+
+            for (int dy = -r; dy <= r; ++dy)
+            {
+                for (int dx = -r; dx <= r; ++dx)
+                {
+                    // 只取外围
+                    if (std::abs(dx) != r && std::abs(dy) != r)
+                        continue;
+
+                    if (dx == 0 && dy == 0)
+                        continue;
+
+                    tryAdd(dx, dy);
+                }
+            }
+        }
+    }
+
+    float Terrain::edgeCost(int a, int b) const
+    {
+        const Eigen::Vector3f &p0 = mesh.vertices[a].position;
+        const Eigen::Vector3f &p1 = mesh.vertices[b].position;
+
+        // ---- 3D 实际距离（这是 dist）----
+        float dist3D = (p1 - p0).norm();
+
+        // ---- 水平距离（只用于算坡度）----
+        float horiz = (p1.head<2>() - p0.head<2>()).norm();
+
+        // ---- 高差 ----
+        float dh = p1.z() - p0.z();
+        float absDh = std::abs(dh);
+
+        // ---- 坡度（rise / run）----
+        float slope = absDh / (horiz + 1e-4f);
+
+        // ---- 上下坡惩罚 ----
+        float verticalPenalty = 0.0f;
+        if (dh > 0)
+            verticalPenalty = dh * w_up; // 上坡
+        else
+            verticalPenalty = (-dh) * w_down; // 下坡
+
+        // ---- 综合 cost ----
+        float cost =
+            dist3D * w_dist + // 距离
+            slope * w_slope + // 坡度惩罚
+            verticalPenalty;  // 上/下坡额外惩罚
+
+        return cost;
+    }
+
+    std::vector<int> Terrain::shortestPath(
+        int start,
+        int goal,
+        const std::vector<std::vector<int>> &adj) const
+    {
+        const int N = adj.size();
+        const float INF = std::numeric_limits<float>::infinity();
+
+        std::vector<float> dist(N, INF);
+        std::vector<int> prev(N, -1);
+
+        using Node = std::pair<float, int>; // (cost, vertex)
+        std::priority_queue<Node, std::vector<Node>, std::greater<Node>> pq;
+
+        dist[start] = 0.0f;
+        pq.push({0.0f, start});
+
+        while (!pq.empty())
+        {
+            auto [curDist, u] = pq.top();
+            pq.pop();
+
+            if (u == goal)
+                break;
+
+            if (curDist > dist[u])
+                continue;
+
+            for (int v : adj[u])
+            {
+                float cost = edgeCost(u, v);
+                float nd = curDist + cost;
+
+                if (nd < dist[v])
+                {
+                    dist[v] = nd;
+                    prev[v] = u;
+                    pq.push({nd, v});
+                }
+            }
+        }
+
+        // ---- 回溯路径 ----
+        std::vector<int> path;
+        if (prev[goal] == -1)
+            return path; // 无路
+
+        for (int v = goal; v != -1; v = prev[v])
+            path.push_back(v);
+
+        std::reverse(path.begin(), path.end());
+        return path;
+    }
+
+    std::vector<std::vector<geo::GraphEdge>> Terrain::buildAdjacencyGraph(int rank) const
+    {
+        int vertsPerRow = width + 1;
+        int totalVerts = vertsPerRow * (height + 1);
+
+        std::vector<std::vector<geo::GraphEdge>> adj(totalVerts);
+
+        auto edges = buildGraph(rank);
+
+        for (const auto &e : edges)
+        {
+            // 计算真实 cost（统一在这里）
+            float cost = edgeCost(e.from, e.to);
+
+            geo::GraphEdge edge = e;
+            edge.cost = cost;
+
+            adj[e.from].push_back(edge);
+        }
+
+        return adj;
+    }
+
+    std::vector<int> Terrain::shortestPathDijkstra(
+        int start,
+        int goal,
+        const std::vector<std::vector<geo::GraphEdge>> &adj) const
+    {
+        const float INF = std::numeric_limits<float>::infinity();
+        int n = adj.size();
+
+        std::vector<float> dist(n, INF);
+        std::vector<int> prev(n, -1);
+
+        using Node = std::pair<float, int>; // (dist, vertex)
+        std::priority_queue<Node, std::vector<Node>, std::greater<>> pq;
+
+        dist[start] = 0.0f;
+        pq.push({0.0f, start});
+
+        while (!pq.empty())
+        {
+            auto [d, u] = pq.top();
+            pq.pop();
+
+            if (d > dist[u])
+                continue;
+
+            if (u == goal)
+                break;
+
+            for (const auto &e : adj[u])
+            {
+                int v = e.to;
+                float nd = d + e.cost;
+
+                if (nd < dist[v])
+                {
+                    dist[v] = nd;
+                    prev[v] = u;
+                    pq.push({nd, v});
+                }
+            }
+        }
+
+        // ---- 回溯路径 ----
+        std::vector<int> path;
+        if (prev[goal] == -1)
+            return path; // no path
+
+        for (int v = goal; v != -1; v = prev[v])
+            path.push_back(v);
+
+        std::reverse(path.begin(), path.end());
+        return path;
+    }
+
+    void Terrain::drawPath(const std::vector<int> &path,float width) const
+    {
+        for (int i = 1; i < path.size(); ++i)
+        {
+            const auto &p0 = mesh.vertices[path[i - 1]].position;
+            const auto &p1 = mesh.vertices[path[i]].position;
+            DrawCylinderEx(render::vec3_to_Vector3(p0), render::vec3_to_Vector3(p1),width,width,1,RED);
+        }
     }
 }

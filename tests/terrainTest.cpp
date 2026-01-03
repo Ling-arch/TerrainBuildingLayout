@@ -10,51 +10,67 @@ using terrain::Terrain, terrain::TerrainCell, terrain::TerrainViewMode, terrain:
 int main()
 {
     std::cout << "Hello, TerrainTest Start!" << std::endl;
-
     Renderer3D render(1920, 1080, 45.0f, CAMERA_PERSPECTIVE, "TerrainTest");
     Terrain terrain(128, 128, 1.f, 0.03f, 6.f);
-    std::vector<Vector3> vertices = terrain.getMeshVertices();
+    // === 静态变量：ImGui 需要跨帧保存 ===
+    static int debugCx = 64;
+    static int debugCy = 64;
+    static int debugRank = 3;
+    static float pathWidth = 0.05f;
+
+    static int start = 0;
+    static int target = 210;
+    int lastStart = -1;
+    int lastTarget = -1;
+    int lastRank = -1;
+
+    static float w_slope = 3.f;
+    static float w_dist = 10.f;
+    static float w_decent = 2.f;
+    static float w_up = 0.2f;
+    static float w_down = 0.2f;
     rlImGuiSetup(true);
-    bool disableCamera = false;
+    
     TerrainViewMode viewMode = TerrainViewMode::Lit;
-    std::vector<ContourLayer> layers = terrain.extractContours(1.f);
-    for (ContourLayer &layer : layers)
-    {
-        std::vector<geo::Segment> segments = layer.segments;
-        std::vector<geo::Polyline> polylines = buildPolylines(segments);
-        for (int i = 0; i < polylines.size(); ++i)
-        {
-            std::cout << "Polyline " << i << " ("
-                      << polylines[i].points.size() << " pts)\n";
+    const std::vector<ContourLayer> &layers = terrain.extractContours(1.f);
 
-            bool closed = polylines[i].closed;
-
-            std::cout << "  closed: " << (closed ? "YES" : "NO") << "\n";
-
-            for (auto &p : polylines[i].points)
-            {
-                std::cout << "    (" << p.x()
-                          << "," << p.y()
-                          << "," << p.z() << ")\n";
-            }
-        }
-    }
-
+    std::vector<std::vector<geo::GraphEdge>> adj;
+    std::vector<int> path;
+    bool weightChanged = false;
     render.runMainLoop(render::FrameCallbacks{
         [&]() { // 按键更新，重新绘图等事件
+            if (debugRank != lastRank)
+            {
+                adj = terrain.buildAdjacencyGraph(debugRank);
+                lastRank = debugRank;
+            }
 
+            // start / target 改了
+            if (start != lastStart || target != lastTarget)
+            {
+                lastStart = start;
+                lastTarget = target;
+                path = terrain.shortestPathDijkstra(start,target,adj);
+            }
+            if(weightChanged){
+                adj = terrain.buildAdjacencyGraph(debugRank);
+                path = terrain.shortestPathDijkstra(start, target, adj);
+            }
         },
         [&]() { // 3维空间绘图内容部分
             terrain.draw();
-            terrain.drawContours();
+            terrain.drawContours(layers);
+            terrain.drawPath(path, pathWidth);
+            //terrain.drawGraphEdges(debugCx,debugCy,debugRank);
             // DrawGrid(20,1.f);
             DrawLine3D({0, 0, 0}, {10000, 0, 0}, RED);
             DrawLine3D({0, 0, 0}, {0, 10000, 0}, BLUE);
             DrawLine3D({0, 0, 0}, {0, 0, -10000}, GREEN);
+
         },
         [&]() { // 二维屏幕空间绘图
             // render.draw_index_fonts(vertices, 16, BLUE);
-
+            terrain.drawContourPtIndices(layers, render);
             rlImGuiBegin(); // 开始ImGui帧渲染（必须在2D阶段调用）
             // bool demoOpen = true;
             // ImGui::ShowDemoWindow(&demoOpen);
@@ -64,7 +80,7 @@ int main()
             if (ImGui::Begin("Terrain Info", &customOpen))
             {
                 ImGui::Text("terrain size: %d x %d", 128, 128);
-                ImGui::Text("vertices num : %zu", vertices.size());
+               
                 ImGui::Text("camera view : perspective");
                 ImGui::Separator();
                 ImGui::Text("View Mode");
@@ -88,18 +104,53 @@ int main()
 
                 ImGui::Separator();
                 // 可添加其他UI控件（按钮、滑块等
-                if (ImGui::Button("Draw Contours"))
-                {
-                    if (!terrain.getContousShow())
-                        terrain.setContoursShow(true);
-                    else
-                        terrain.setContoursShow(false);
-                }
+                terrain.buildContourSettings();
+                ImGui::Separator();
                 if (ImGui::Button("reset terrain"))
                 {
                     // 点击按钮触发地形重置逻辑
                     // terrain.reset();
                 }
+
+                ImGui::Separator();
+                ImGui::Text("Graph Debug");
+
+    
+                // 输入格子坐标
+                ImGui::InputInt("Center X", &debugCx);
+                ImGui::InputInt("Center Y", &debugCy);
+                ImGui::InputInt("Rank", &debugRank);
+                ImGui::SliderFloat(
+                    "Path Width",
+                    &pathWidth,
+                    0.05f, 1.0f,
+                    "%.2f");
+                // 限制范围（防止非法）
+                debugCx = std::clamp(debugCx, 0, terrain.getWidth());
+                debugCy = std::clamp(debugCy, 0, terrain.getHeight());
+                debugRank = std::max(1, debugRank);
+
+                ImGui::SliderInt(
+                    "Start Vertex Index",
+                    &start,
+                    0, terrain.getMesh().vertices.size() - 1,
+                    "%.0f");
+                ImGui::SliderInt(
+                    "Target Vertex Index",
+                    &target,
+                    0, terrain.getMesh().vertices.size() - 1,
+                    "%.0f");
+                
+                // 点击按钮触发
+                if (ImGui::Button("Debug Build Graph"))
+                {
+                    terrain.debugBuildGraphAt(debugCx, debugCy, debugRank);
+                }
+
+                weightChanged |= ImGui::SliderFloat("Dist Weight", &terrain.w_dist, 0.0f, 100.0f, "%.1f");
+                weightChanged |= ImGui::SliderFloat("Slope Weight", &terrain.w_slope, 0.0f, 100.0f, "%.1f");
+                weightChanged |= ImGui::SliderFloat("Up Weight", &terrain.w_up, 0.0f, 100.0f, "%.1f");
+                weightChanged |= ImGui::SliderFloat("Down Weight", &terrain.w_down, 0.0f, 100.0f, "%.1f");
             }
             ImGui::End();
 

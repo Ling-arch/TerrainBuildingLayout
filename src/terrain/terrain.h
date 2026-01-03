@@ -6,7 +6,7 @@
 #include "render.h"
 #include "renderUtil.h"
 #include "geo.h"
-
+#include <queue>
 namespace terrain
 {
 
@@ -52,9 +52,54 @@ namespace terrain
         Slope
     };
 
+    struct ContourShowData
+    {
+        bool isShowContours = false;
+        //-----------------line-----------------
+        bool isShowLines = false;
+        Color lineColor = BLACK;
+        float lineColorF[4];
+        //-----------------pt-------------------
+        bool isShowPts = false;
+        Color ptColor = RED;
+        float ptColorF[4];
+        float ptSize = 0.1f;
+
+        //-----------------pt_indices-------------
+        bool isShowIndex = false;
+        Color ptIndexColor = DARKBLUE;
+        float ptIndexColorF[4];
+        float ptIndexSize = 18.f;
+        ContourShowData()
+        {
+            syncFloatFromColor();
+        }
+
+        void syncFloatFromColor()
+        {
+            auto toFloat4 = [](Color c, float f[4])
+            {
+                f[0] = c.r / 255.0f;
+                f[1] = c.g / 255.0f;
+                f[2] = c.b / 255.0f;
+                f[3] = c.a / 255.0f;
+            };
+
+            toFloat4(lineColor, lineColorF);
+            toFloat4(ptColor, ptColorF);
+            toFloat4(ptIndexColor, ptIndexColorF);
+        }
+    };
+
     class Terrain
     {
     public:
+        float w_slope = 3.f;
+        float w_dist = 10.f;
+        float w_decent = 2.f;
+        float w_up = 0.2f;
+        float w_down = 0.2f;
+        
         Terrain(int width, int height, float cellSize);
         Terrain(int width, int height, float cellSize, float frequency, float amplitude);
         void generateHeight(float frequency, float amplitude);
@@ -63,43 +108,81 @@ namespace terrain
         void upload();
         void draw() const;
 
+        // member variables function
         const TerrainMeshData &getMesh() const { return mesh; }
         const std::vector<Vector3> getMeshVertices();
         const std::vector<TerrainCell> &getCells() const { return cells; }
         const std::vector<TerrainFaceInfo> &getFaceInfos() const { return faceInfos; }
+        const int &getWidth() const { return width; }
+        const int &getHeight() const { return height; }
         const bool &getContousShow() const { return isShowContours; }
-        const float &getMinHeight()const {return minHeight;}
+        const float &getMinHeight() const { return minHeight; }
         const float &getMaxHeight() const { return maxHeight; }
-        int vertexIndex(int gx, int gy) const;
+        const ContourShowData &getContourShowData() const { return contourShowData; }
 
-        void applyFaceColor(TerrainViewMode mode);
-        void setViewMode(TerrainViewMode mode);
-        void setContoursShow(bool contourShow);
         //----------------------utils--------------------
-        std::vector<geo::Segment> extractContourAtHeight(float isoHeight) const;
-        std::vector<ContourLayer>extractContours(float gap) const;
-        void drawContours() const;
+        inline int vertexIndex(int gx, int gy) const
+        {
+            return gy * (width + 1) + gx;
+        }
+
+        void applyFaceColor(TerrainViewMode mode); // set face colors depend on slope , aspect
+        void setViewMode(TerrainViewMode mode);    // set viewmode to draw different analysis
+        void setContoursShow(bool contourShow);
+        std::vector<geo::Segment> extractContourAtHeight(float isoHeight) const;                       // extract contours at specific height
+        std::vector<ContourLayer> extractContours(float gap) const;                                    // extract contours at each gap
+        void drawContours(std::vector<ContourLayer> layers) const;                                     // draw contour infos
+        void drawContourPtIndices(std::vector<ContourLayer> layers, render::Renderer3D &render) const; // draw contour pts indices
+        void buildContourSettings();
+
+        //----------------------path finding utils on terrain --------------------------
+        inline bool valid(int x, int y) const
+        {
+            return x >= 0 && x <= width && y >= 0 && y <= height;
+        }
+
+        void linkEdge(int a, int b, int rank, std::vector<geo::GraphEdge> &edges) const; //
+        std::vector<geo::GraphEdge> buildGraph(int rank) const;
+        void debugBuildGraphAt(int cx, int cy, int rank) const;
+        void drawGraphEdges(int cx, int cy, int rank) const;
+        float edgeCost(int a, int b) const;
+        std::vector<int> shortestPath(int start,int goal,const std::vector<std::vector<int>> &adj) const;
+
+        std::vector<std::vector<geo::GraphEdge>> buildAdjacencyGraph(int rank) const;
+        std::vector<int> shortestPathDijkstra(int start, int goal,const std::vector<std::vector<geo::GraphEdge>> &adj) const;
+        void drawPath( const std::vector<int> &path, float width) const;
 
     private:
-        int width;
-        int height;
-        float cellSize;
+        int width;      // grids number of x axis
+        int height;     // grids number of x axis
+        float cellSize; // grid edge length
         bool isShowContours = false;
-        float minHeight;
-        float maxHeight;
-        // CPU 数据
-        std::vector<TerrainFaceInfo> faceInfos;
-        std::vector<float> heightmap;
-        TerrainMeshData mesh;
+        ContourShowData contourShowData; // contour data to draw
+        float minHeight;                 // minimum height of terrain
+        float maxHeight;                 // maximum height of terrain
+
+        // mesh CPU data
+        std::vector<TerrainFaceInfo> faceInfos; // face datas of normal , aspect ,slope
+        std::vector<float> heightmap;           // reserve each vertex height from each row at x axis
+        TerrainMeshData mesh;                   // z axis up direction mesh data
         std::vector<TerrainCell> cells;
-        TerrainViewMode viewMode;
-        Model model{};
+        TerrainViewMode viewMode; // show terrain analysis draw mode
+        Model model{};            // raylib show data mesh
+
+        
     };
 
     //-------------------------------------utils-----------------------------------------
     float noise2D(int x, int y);
 
     Mesh buildRaylibMesh(const TerrainMeshData &src);
+
+    inline int igcd(int a, int b)
+    {
+        if (b == 0)
+            return a;
+        return igcd(b, a % b);
+    }
 
     inline float fade(float t)
     {
@@ -117,6 +200,16 @@ namespace terrain
         float u = h < 4 ? x : y;
         float v = h < 4 ? y : x;
         return ((h & 1) ? -u : u) + ((h & 2) ? -2.0f * v : 2.0f * v);
+    }
+
+    inline Color transformFloat4ToColor(float colorf[])
+    {
+        return {
+            (unsigned char)(colorf[0] * 255.0f),
+            (unsigned char)(colorf[1] * 255.0f),
+            (unsigned char)(colorf[2] * 255.0f),
+            (unsigned char)(colorf[3] * 255.0f),
+        };
     }
 
     // ----------------------------
