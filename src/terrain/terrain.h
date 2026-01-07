@@ -7,13 +7,19 @@
 #include "renderUtil.h"
 #include "geo.h"
 #include <queue>
+#include "OpenSimplexNoise.h"
 namespace terrain
 {
+
+    using geo::Circle;
+    using OpenSimplexNoise::Noise;
 
     struct TerrainVertex
     {
         Eigen::Vector3f position;
         Eigen::Vector3f normal;
+        float slope;
+        float aspect;
     };
 
     struct TerrainMeshData
@@ -49,7 +55,8 @@ namespace terrain
         Lit,
         Wire,
         Aspect,
-        Slope
+        Slope,
+        Score
     };
 
     struct ContourShowData
@@ -91,19 +98,60 @@ namespace terrain
         }
     };
 
+    struct RegionGrowConfig
+    {
+        float radius = 10.f;        // R
+        int targetCount = 200;      // C
+        int maxBadCount = 20;       // 允许的 score<0 数量
+        float badRatioLimit = 0.2f; // 允许坏点比例
+        float maxRadius = 20;
+    };
+
+
+    struct MeshChunkDesc
+    {
+        int startX;
+        int startY;
+        int size; // quad 数
+    };
+
+
+    struct ChunkMeshInfo
+    {
+        Mesh mesh;                           //raylib mesh
+        std::vector<int> localToGlobalVert;  //local vertexid -> global vertexid
+        std::vector<int> localToGlobalFace;
+    };
+
     class Terrain
     {
     public:
-        float w_slope = 3.f;
-        float w_dist = 10.f;
+        //terrain generation
+        int octaves = 2;
+        float lacunarity = 1.6f;
+        float gain = 0.7f;
+
+        // terrain path cost weight
+        float w_slope = 53.5f;
+        float w_dist = 10.5f;
         float w_decent = 2.f;
-        float w_up = 0.2f;
-        float w_down = 0.2f;
-        
+        float w_up = 24.5f;
+        float w_down = 14.5;
+
+        // terrain vertex sorce weight
+        float wv_slope = 10.f;
+        float wv_aspect = 5.f;
+        float score_threshold = 0.5f;
+        int minRegionFaceSize = 200;
+        RegionGrowConfig regionConfig;
+
         Terrain(int width, int height, float cellSize);
-        Terrain(int width, int height, float cellSize, float frequency, float amplitude);
+        Terrain(int seed_, int width, int height, float cellSize, float frequency, float amplitude);
+        void regenerate(int w, int h, float freq, float amp);
+        void regenerate(int seed, int w, int h, float freq, float amp);
         void generateHeight(float frequency, float amplitude);
         void buildMesh();
+        void calculateInfos();
         // 上传到 GPU
         void upload();
         void draw() const;
@@ -113,12 +161,14 @@ namespace terrain
         const std::vector<Vector3> getMeshVertices();
         const std::vector<TerrainCell> &getCells() const { return cells; }
         const std::vector<TerrainFaceInfo> &getFaceInfos() const { return faceInfos; }
+        const TerrainViewMode &getViewMode() const { return viewMode; }
         const int &getWidth() const { return width; }
         const int &getHeight() const { return height; }
         const bool &getContousShow() const { return isShowContours; }
         const float &getMinHeight() const { return minHeight; }
         const float &getMaxHeight() const { return maxHeight; }
         const ContourShowData &getContourShowData() const { return contourShowData; }
+        const std::vector<float> &getFaceScores() const { return scores; }
 
         //----------------------utils--------------------
         inline int vertexIndex(int gx, int gy) const
@@ -126,13 +176,15 @@ namespace terrain
             return gy * (width + 1) + gx;
         }
 
-        void applyFaceColor(TerrainViewMode mode); // set face colors depend on slope , aspect
-        void setViewMode(TerrainViewMode mode);    // set viewmode to draw different analysis
+        void applyFaceColor();                  // set face colors depend on slope , aspect
+        void applyFaceColorPro();
+        void setViewMode(TerrainViewMode mode); // set viewmode to draw different analysis
+
         void setContoursShow(bool contourShow);
-        std::vector<geo::Segment> extractContourAtHeight(float isoHeight) const;                       // extract contours at specific height
-        std::vector<ContourLayer> extractContours(float gap) const;                                    // extract contours at each gap
-        void drawContours(std::vector<ContourLayer> layers) const;                                     // draw contour infos
-        void drawContourPtIndices(std::vector<ContourLayer> layers, render::Renderer3D &render) const; // draw contour pts indices
+        std::vector<geo::Segment> extractContourAtHeight(float isoHeight) const;                              // extract contours at specific height
+        std::vector<ContourLayer> extractContours(float gap) const;                                           // extract contours at each gap
+        void drawContours(const std::vector<ContourLayer> &layers) const;                                     // draw contour infos
+        void drawContourPtIndices(const std::vector<ContourLayer> &layers, render::Renderer3D &render) const; // draw contour pts indices
         void buildContourSettings();
 
         //----------------------path finding utils on terrain --------------------------
@@ -140,19 +192,46 @@ namespace terrain
         {
             return x >= 0 && x <= width && y >= 0 && y <= height;
         }
-
-        void linkEdge(int a, int b, int rank, std::vector<geo::GraphEdge> &edges) const; //
         std::vector<geo::GraphEdge> buildGraph(int rank) const;
         void debugBuildGraphAt(int cx, int cy, int rank) const;
         void drawGraphEdges(int cx, int cy, int rank) const;
         float edgeCost(int a, int b) const;
-        std::vector<int> shortestPath(int start,int goal,const std::vector<std::vector<int>> &adj) const;
-
         std::vector<std::vector<geo::GraphEdge>> buildAdjacencyGraph(int rank) const;
-        std::vector<int> shortestPathDijkstra(int start, int goal,const std::vector<std::vector<geo::GraphEdge>> &adj) const;
-        void drawPath( const std::vector<int> &path, float width) const;
+        std::vector<int> shortestPathDijkstra(int start, int goal, const std::vector<std::vector<geo::GraphEdge>> &adj) const;
+        void drawPath(const std::vector<int> &path, float width) const;
+
+        //---------------------- evaluate score utils -----------------------------
+        std::vector<float> evaluateVertexScore() const;
+        std::vector<float> evaluateFaceScore() const;
+        std::vector<std::vector<int>> buildFaceAdjacency() const;
+        std::vector<std::vector<int>> floodFillFaces(const std::vector<float> &scores, float threshold) const;
+        std::vector<std::vector<int>> floodFillFacesSoft(std::vector<float> &scores,float threshold) const;
+        bool isRegionCompact(const std::vector<int> &region,const Eigen::Vector2f &center) const;
+            inline Eigen::Vector2f faceCenter(int f) const
+        {
+            int i0 = mesh.indices[f * 3 + 0];
+            int i1 = mesh.indices[f * 3 + 1];
+            int i2 = mesh.indices[f * 3 + 2];
+
+            Eigen::Vector3f c =
+                (mesh.vertices[i0].position +
+                 mesh.vertices[i1].position +
+                 mesh.vertices[i2].position) /
+                3.0f;
+
+            return {c.x(), c.y()};
+        }
+
+        inline bool insideCircle(int f, const Circle &c) const
+        {
+            Eigen::Vector2f p = faceCenter(f);
+            return (p - c.center).norm() <= c.radius;
+        }
+
+        std::vector<int> computeSeedRegion(int seedFace, const std::vector<float> &scores) const;
 
     private:
+    int seed;
         int width;      // grids number of x axis
         int height;     // grids number of x axis
         float cellSize; // grid edge length
@@ -160,23 +239,24 @@ namespace terrain
         ContourShowData contourShowData; // contour data to draw
         float minHeight;                 // minimum height of terrain
         float maxHeight;                 // maximum height of terrain
-
+        std::vector<ChunkMeshInfo> chunkMeshes;
+        std::vector<float> scores;
+        std::vector<std::vector<int>> regions;
         // mesh CPU data
         std::vector<TerrainFaceInfo> faceInfos; // face datas of normal , aspect ,slope
         std::vector<float> heightmap;           // reserve each vertex height from each row at x axis
         TerrainMeshData mesh;                   // z axis up direction mesh data
         std::vector<TerrainCell> cells;
         TerrainViewMode viewMode; // show terrain analysis draw mode
-        Model model{};            // raylib show data mesh
-
-        
+        std::vector<Model> models;            // raylib show data mesh
     };
 
     //-------------------------------------utils-----------------------------------------
     float noise2D(int x, int y);
 
     Mesh buildRaylibMesh(const TerrainMeshData &src);
-
+    std::vector<ChunkMeshInfo> buildRaylibMeshes(const TerrainMeshData &src,int chunkSize);
+ 
     inline int igcd(int a, int b)
     {
         if (b == 0)
@@ -283,6 +363,26 @@ namespace terrain
         for (int i = 0; i < octaves; ++i)
         {
             sum += amp * perlin2D(x * freq, y * freq);
+            freq *= lacunarity;
+            amp *= gain;
+        }
+        return sum;
+    }
+
+    inline float fbm2D_OpenSimplex(
+        const Noise &noise,
+        float x, float y,
+        int octaves = 5,
+        float lacunarity = 2.0f,
+        float gain = 0.5f)
+    {
+        float sum = 0.0;
+        float amp = 1.0;
+        float freq = 1.0;
+
+        for (int i = 0; i < octaves; ++i)
+        {
+            sum += (float)amp * noise.eval(x * freq, y * freq);
             freq *= lacunarity;
             amp *= gain;
         }

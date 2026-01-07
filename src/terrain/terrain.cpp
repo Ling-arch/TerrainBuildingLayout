@@ -17,146 +17,362 @@ namespace terrain
         heightmap.resize((width + 1) * (height + 1), 0.f);
     }
 
-    Terrain::Terrain(int w, int h, float cs, float frequency, float amplitude)
-        : width(w), height(h), cellSize(cs)
+    Terrain::Terrain(int seed_, int w, int h, float cs, float frequency, float amplitude)
+        : seed(seed_), width(w), height(h), cellSize(cs)
     {
         heightmap.resize((width + 1) * (height + 1), 0.f);
         generateHeight(frequency, amplitude);
         buildMesh();
+        calculateInfos();
         upload();
     }
 
     void Terrain::generateHeight(float freq, float amp)
     {
+        Noise noise(seed);
         for (int y = 0; y <= height; y++)
         {
             for (int x = 0; x <= width; x++)
             {
-                float nx = x * freq;
-                float ny = y * freq;
+                float nx = (x + 32.34f) * freq;
+                float ny = (y + 212.3f) * freq;
 
-                heightmap[y * (width + 1) + x] = fbm2D(nx, ny, 2, 1.6f, 0.7f) * amp;
+                heightmap[y * (width + 1) + x] = fbm2D_OpenSimplex(noise, nx, ny, octaves, lacunarity, gain) * amp;
             }
         }
     }
 
     void Terrain::upload()
     {
-        Mesh raylib_mesh = buildRaylibMesh(mesh);
-        model = LoadModelFromMesh(raylib_mesh);
+        chunkMeshes = buildRaylibMeshes(mesh, 128);
+
+        models.resize(chunkMeshes.size());
+
+        for (int i = 0; i < chunkMeshes.size(); ++i)
+        {
+            models[i] = LoadModelFromMesh(chunkMeshes[i].mesh);
+        }
+
+        // std::cout << "mesh build all" << std::endl;
+    }
+
+    void Terrain::regenerate(int w, int h, float freq, float amp)
+    {
+        width = w;
+        height = h;
+
+        heightmap.clear();
+        mesh.vertices.clear();
+        mesh.indices.clear();
+
+        heightmap.resize((width + 1) * (height + 1), 0.f);
+
+        generateHeight(freq, amp);
+        buildMesh();
+        calculateInfos();
+        // 释放旧 GPU 资源
+        for (Model &model : models)
+                UnloadModel(model);
+
+        upload();
+    }
+
+    void Terrain::regenerate(int seed_, int w, int h, float freq, float amp)
+    {
+        seed = seed_;
+        width = w;
+        height = h;
+
+        heightmap.clear();
+        mesh.vertices.clear();
+        mesh.indices.clear();
+
+        heightmap.resize((width + 1) * (height + 1), 0.f);
+
+        generateHeight(freq, amp);
+        buildMesh();
+        calculateInfos();
+
+        // 释放旧 GPU 资源
+        for (Model &model : models)
+            UnloadModel(model);
+
+        upload();
     }
 
     void Terrain::draw() const
     {
+
         switch (viewMode)
         {
         case TerrainViewMode::Wire:
-            DrawModelWires(model, {0, 0, 0}, 1.0f, BLACK);
+            for (const Model &model : models)
+                DrawModelWires(model, {0, 0, 0}, 1.0f, BLACK);
             break;
 
         case TerrainViewMode::Aspect:
         case TerrainViewMode::Slope:
-            DrawModel(model, {0, 0, 0}, 1.0f, WHITE);
+            for (const Model &model : models)
+                DrawModel(model, {0, 0, 0}, 1.0f, WHITE);
             break;
 
         case TerrainViewMode::Lit:
         default:
-            DrawModel(model, {0, 0, 0}, 1.0f, GRAY);
-            break;
+            for (const Model &model : models)
+                DrawModel(model, {0, 0, 0}, 1.0f, GRAY);
+                break;
         }
     }
 
-    void Terrain::applyFaceColor(TerrainViewMode mode)
+    // void Terrain::applyFaceColor()
+    // {
+    //     Mesh &m = model.meshes[0];
+
+    //     // 1. 确保有 colors buffer
+    //     if (!m.colors)
+    //     {
+    //         m.colors = (unsigned char *)MemAlloc(m.vertexCount * 4);
+    //     }
+
+    //     // 2. 默认底色
+    //     for (int i = 0; i < m.vertexCount; ++i)
+    //     {
+    //         m.colors[i * 4 + 0] = 200;
+    //         m.colors[i * 4 + 1] = 200;
+    //         m.colors[i * 4 + 2] = 200;
+    //         m.colors[i * 4 + 3] = 255;
+    //     }
+    //     std::vector<float> scores = evaluateFaceScore();
+
+    //     std::vector<std::vector<int>> regions = floodFillFaces(scores, score_threshold);
+    //     size_t faceCount = faceInfos.size();
+    //     std::vector<int> faceRegionId(faceCount, -1);
+    //     std::vector<Color> regionColors;
+
+    //     int validRegionIndex = 0;
+    //     for (const auto &region : regions)
+    //     {
+    //         if ((int)region.size() < minRegionFaceSize)
+    //             continue;
+
+    //         float hue = std::fmod(validRegionIndex * 0.6180339f, 1.0f); // 黄金分割
+    //         Color rc = renderUtil::ColorFromHue(hue);
+
+    //         for (int f : region)
+    //             faceRegionId[f] = validRegionIndex;
+
+    //         regionColors.push_back(rc);
+    //         validRegionIndex++;
+    //     }
+    //     // 3. 按 face 着色
+    //     for (size_t f = 0; f < faceInfos.size(); ++f)
+    //     {
+    //         const auto &face = faceInfos[f];
+
+    //         Color c{180, 180, 180, 255};
+
+    //         // 平地判断
+    //         bool isFlat = face.slope < 1e-4f;
+    //         int rid = faceRegionId[f];
+
+    //         if (!isFlat)
+    //         {
+    //             if (viewMode == TerrainViewMode::Aspect)
+    //             {
+    //                 // aspect ∈ [0, 2π)
+    //                 c = renderUtil::AspectToColor(face.aspect);
+    //             }
+    //             else if (viewMode == TerrainViewMode::Slope)
+    //             {
+    //                 // slope ∈ [0, π/2]
+    //                 float t = face.slope / (PI * 0.5f);
+    //                 t = std::clamp(t, 0.0f, 1.0f);
+
+    //                 // 蓝 → 红（缓坡 → 陡坡）
+    //                 c = {
+    //                     (unsigned char)(255 * t),
+    //                     0,
+    //                     (unsigned char)(255 * (1.0f - t)),
+    //                     255};
+    //             }
+    //             else if (viewMode == TerrainViewMode::Score)
+    //             {
+    //                 if (rid >= 0)
+    //                     c = regionColors[rid];
+    //                 else
+    //                 {
+    //                     //==== 2. fallback：原 score 渐变 ====
+    //                     const float &score = scores[f];
+
+    //                     if (score >= 0)
+    //                     {
+    //                         float gamma = 1.0f / 1.5f;
+    //                         float s = std::pow(score, gamma);
+    //                         c = {
+    //                             (unsigned char)(255 * s),
+    //                             (unsigned char)(255 * s),
+    //                             (unsigned char)(255 * (1.0f - s)),
+    //                             255};
+
+    //                         // float hue = (1.0f - score) * 220.0f + score * 60.0f;
+    //                         // c = ColorFromHSV(
+    //                         //     hue,
+    //                         //     0.85f, // saturation
+    //                         //     0.95f  // value
+    //                         // );
+    //                     }
+    //                     else
+    //                     {
+    //                         // 错误 / 不可用区域
+    //                         c = {255, 0, 0, 255};
+    //                     }
+    //                 }
+    //             }
+    //         }
+
+    //         int i0 = mesh.indices[f * 3 + 0];
+    //         int i1 = mesh.indices[f * 3 + 1];
+    //         int i2 = mesh.indices[f * 3 + 2];
+
+    //         auto setColor = [&](int vi)
+    //         {
+    //             m.colors[vi * 4 + 0] = c.r;
+    //             m.colors[vi * 4 + 1] = c.g;
+    //             m.colors[vi * 4 + 2] = c.b;
+    //             m.colors[vi * 4 + 3] = 255;
+    //         };
+
+    //         setColor(i0);
+    //         setColor(i1);
+    //         setColor(i2);
+    //     }
+
+    //     // 4. 上传到 GPU
+    //     UpdateMeshBuffer(m, 3, m.colors, m.vertexCount * 4, 0);
+    // }
+
+    void Terrain::applyFaceColor()
     {
-        Mesh &m = model.meshes[0];
+        std::vector<int> faceRegionId(faceInfos.size(), -1);
+        std::vector<Color> regionColors;
 
-        // 1. 确保有 colors buffer
-        if (!m.colors)
+        int rid = 0;
+        for (auto &r : regions)
         {
-            m.colors = (unsigned char *)MemAlloc(m.vertexCount * 4);
+            if ((int)r.size() < minRegionFaceSize)
+                continue;
+
+            Color c = renderUtil::ColorFromHue(
+                std::fmod(rid * 0.6180339f, 1.0f));
+
+            for (int f : r)
+                faceRegionId[f] = rid;
+            regionColors.push_back(c);
+            rid++;
         }
 
-        // 2. 默认底色
-        for (int i = 0; i < m.vertexCount; ++i)
+        // std::cout <<"apply begin" <<std::endl;
+        //  ==== 遍历每个 chunk ====
+        for (auto &chunk : chunkMeshes)
         {
-            m.colors[i * 4 + 0] = 200;
-            m.colors[i * 4 + 1] = 200;
-            m.colors[i * 4 + 2] = 200;
-            m.colors[i * 4 + 3] = 255;
-        }
+            Mesh &m = chunk.mesh;
 
-        // 3. 按 face 着色
-        for (size_t f = 0; f < faceInfos.size(); ++f)
-        {
-            const auto &face = faceInfos[f];
-
-            Color c{180, 180, 180, 255};
-
-            // 平地判断
-            bool isFlat = face.slope < 1e-4f;
-
-            if (!isFlat)
+            // 1. 先清底色
+            for (int i = 0; i < m.vertexCount; ++i)
             {
-                if (mode == TerrainViewMode::Aspect)
+                m.colors[i * 4 + 0] = 200;
+                m.colors[i * 4 + 1] = 200;
+                m.colors[i * 4 + 2] = 200;
+                m.colors[i * 4 + 3] = 255;
+            }
+
+            // 2. 按 local face 着色
+            for (int lf = 0; lf < (int)chunk.localToGlobalFace.size(); ++lf)
+            {
+                int gf = chunk.localToGlobalFace[lf];
+                const auto &face = faceInfos[gf];
+
+                Color c{180, 180, 180, 255};
+                int rid = faceRegionId[gf];
+
+                if (viewMode == TerrainViewMode::Aspect)
                 {
-                    // aspect ∈ [0, 2π)
                     c = renderUtil::AspectToColor(face.aspect);
                 }
-                else if (mode == TerrainViewMode::Slope)
+                else if (viewMode == TerrainViewMode::Slope)
                 {
-                    // slope ∈ [0, π/2]
                     float t = face.slope / (PI * 0.5f);
-                    t = std::clamp(t, 0.0f, 1.0f);
-
-                    // 蓝 → 红（缓坡 → 陡坡）
+                    t = std::clamp(t, 0.f, 1.f);
                     c = {
                         (unsigned char)(255 * t),
                         0,
-                        (unsigned char)(255 * (1.0f - t)),
+                        (unsigned char)(255 * (1.f - t)),
                         255};
                 }
+                else if (viewMode == TerrainViewMode::Score)
+                {
+                    if (rid >= 0)
+                        c = regionColors[rid];
+                    else
+                    {
+                        //==== 2. fallback：原 score 渐变 ====
+                        const float &score = scores[gf];
+
+                        if (score >= 0)
+                        {
+                            float gamma = 1.0f / 1.5f;
+                            float s = std::pow(score, gamma);
+                            c = {
+                                (unsigned char)(255 * s),
+                                (unsigned char)(255 * s),
+                                (unsigned char)(255 * (1.0f - s)),
+                                255};
+
+                            // float hue = (1.0f - score) * 220.0f + score * 60.0f;
+                            // c = ColorFromHSV(
+                            //     hue,
+                            //     0.85f, // saturation
+                            //     0.95f  // value
+                            // );
+                        }
+                        else
+                        {
+                            // 错误 / 不可用区域
+                            c = {255, 0, 0, 255};
+                        }
+                    }
+                }
+
+                // local face -> local indices
+                int li0 = m.indices[lf * 3 + 0];
+                int li1 = m.indices[lf * 3 + 1];
+                int li2 = m.indices[lf * 3 + 2];
+
+                auto setColor = [&](int lv)
+                {
+                    m.colors[lv * 4 + 0] = c.r;
+                    m.colors[lv * 4 + 1] = c.g;
+                    m.colors[lv * 4 + 2] = c.b;
+                    m.colors[lv * 4 + 3] = 255;
+                };
+
+                setColor(li0);
+                setColor(li1);
+                setColor(li2);
             }
+            std::cout << std::endl;
 
-            int i0 = mesh.indices[f * 3 + 0];
-            int i1 = mesh.indices[f * 3 + 1];
-            int i2 = mesh.indices[f * 3 + 2];
-
-            auto setColor = [&](int vi)
-            {
-                m.colors[vi * 4 + 0] = c.r;
-                m.colors[vi * 4 + 1] = c.g;
-                m.colors[vi * 4 + 2] = c.b;
-                m.colors[vi * 4 + 3] = 255;
-            };
-
-            setColor(i0);
-            setColor(i1);
-            setColor(i2);
+            UpdateMeshBuffer(m, 3, m.colors, m.vertexCount * 4, 0);
         }
-
-        // 4. 上传到 GPU
-        UpdateMeshBuffer(m, 3, m.colors, m.vertexCount * 4, 0);
     }
 
     void Terrain::setViewMode(TerrainViewMode mode)
     {
         viewMode = mode;
 
-        switch (viewMode)
+        if (viewMode != TerrainViewMode::Wire)
         {
-        case TerrainViewMode::Aspect:
-            applyFaceColor(mode);
-            break;
-
-        case TerrainViewMode::Slope:
-            applyFaceColor(mode);
-            break;
-
-        case TerrainViewMode::Lit:
-            break;
-
-        case TerrainViewMode::Wire:
-            break;
+            applyFaceColor();
         }
     }
 
@@ -166,7 +382,7 @@ namespace terrain
         vertices.reserve(mesh.vertices.size());
         for (auto &v : mesh.vertices)
         {
-            vertices.push_back({v.position.x(), v.position.z() + 0.5f, -v.position.y()});
+            vertices.push_back({v.position.x(), v.position.z(), -v.position.y()});
         }
         return vertices;
     }
@@ -230,7 +446,7 @@ namespace terrain
 
             // 坡向（使用下坡方向）
             Eigen::Vector3f down = -n;
-            Eigen::Vector3f h(down.x(), down.y(), 0.0f);
+            Eigen::Vector2f h(n.x(), n.y());
 
             float aspect = 0.f;
             if (h.norm() > 1e-5f)
@@ -256,7 +472,32 @@ namespace terrain
                 v.normal.normalize();
             else
                 v.normal = Eigen::Vector3f(0, 0, 1);
+
+            // 坡向（使用下坡方向）
+            Eigen::Vector3f down = -v.normal;
+            Eigen::Vector2f h(v.normal.x(), v.normal.y());
+
+            float aspect = 0.f;
+            if (h.norm() > 1e-5f)
+            {
+                aspect = atan2(h.y(), h.x());
+                if (aspect < 0)
+                    aspect += 2.0f * PI;
+            }
+
+            float slope = acos(std::clamp(v.normal.z(), -1.0f, 1.0f));
+            v.aspect = aspect;
+            v.slope = slope;
         }
+    }
+
+    void Terrain::calculateInfos(){
+        scores = evaluateFaceScore();
+        regions = floodFillFaces(scores,score_threshold);
+        for(int i = 0; i < regions.size(); i++){
+            std::cout << "cur " << i << " region num is " << regions[i].size() <<std::endl;
+        }
+         
     }
 
     std::vector<geo::Segment> Terrain::extractContourAtHeight(float isoHeight) const
@@ -398,14 +639,14 @@ namespace terrain
         isShowContours = contourShow;
     }
 
-    void Terrain::drawContours(std::vector<ContourLayer> layers) const
+    void Terrain::drawContours(const std::vector<ContourLayer> &layers) const
     {
         if (!contourShowData.isShowContours)
             return;
 
         // std::vector<std::vector<Vector3>> polyline_pts;
 
-        for (ContourLayer &layer : layers)
+        for (const ContourLayer &layer : layers)
         {
             std::vector<geo::Segment> segments = layer.segments;
             if (contourShowData.isShowLines)
@@ -447,11 +688,11 @@ namespace terrain
         }
     }
 
-    void Terrain::drawContourPtIndices(std::vector<ContourLayer> layers, render::Renderer3D &render) const
+    void Terrain::drawContourPtIndices(const std::vector<ContourLayer> &layers, render::Renderer3D &render) const
     {
         if (!contourShowData.isShowContours || !contourShowData.isShowPts || !contourShowData.isShowIndex)
             return;
-        for (ContourLayer &layer : layers)
+        for (const ContourLayer &layer : layers)
         {
             std::vector<geo::Segment> segments = layer.segments;
             std::vector<geo::Polyline> polylines = buildPolylines(segments);
@@ -590,7 +831,6 @@ namespace terrain
             mesh.colors[i * 4 + 3] = 255;
         }
 
-        // 反转绕序（镜像）
         for (size_t i = 0; i < src.indices.size(); i += 3)
         {
             mesh.indices[i + 0] = (unsigned short)src.indices[i + 0];
@@ -602,26 +842,100 @@ namespace terrain
         return mesh;
     }
 
-    //------------------------------------road path finding -------------------------------------------
-    void Terrain::linkEdge(int a, int b, int rank, std::vector<geo::GraphEdge> &edges) const
+    std::vector<ChunkMeshInfo> buildRaylibMeshes(const TerrainMeshData &src, int chunkSize)
     {
-        int maxIndex = (width + 1) * (height + 1) - 1;
-        if (b < 0 || b > maxIndex)
-            return;
-        // no directional graph
-        if (a < b)
-            return;
-        int ax = a % (width + 1);
-        int bx = b % (width + 1);
+        std::vector<ChunkMeshInfo> chunks;
 
-        if (ax < rank && bx > width - rank)
-            return;
-        if (bx < rank && ax > width - rank)
-            return;
+        const int width = src.gridWidth;
+        const int height = src.gridHeight;
+        const int facesPerRow = width * 2;
 
-        edges.push_back({a, b, 0.f});
-        edges.push_back({b, a, 0.f});
+        for (int cy = 0; cy < height; cy += chunkSize)
+        {
+            for (int cx = 0; cx < width; cx += chunkSize)
+            {
+                std::unordered_map<int, int> g2l;
+                std::vector<int> l2gv;
+                std::vector<int> localToGlobalFace;
+                std::vector<unsigned short> localIndices;
+
+                int faceStart = cy * facesPerRow + cx * 2;
+
+                int faceW = std::min(chunkSize, width - cx) * 2;
+                int faceH = std::min(chunkSize, height - cy);
+
+                for (int fy = 0; fy < faceH; ++fy)
+                {
+                    int row = faceStart + fy * facesPerRow;
+
+                    for (int fx = 0; fx < faceW; ++fx)
+                    {
+                        int face = row + fx;
+                        int lf = (int)localToGlobalFace.size();
+                        localToGlobalFace.push_back(face);
+
+                        for (int k = 0; k < 3; ++k)
+                        {
+                            int gvi = src.indices[face * 3 + k];
+
+                            auto it = g2l.find(gvi);
+                            if (it == g2l.end())
+                            {
+                                int lvi = (int)l2gv.size();
+                                g2l[gvi] = lvi;
+                                l2gv.push_back(gvi);
+                                localIndices.push_back((unsigned short)lvi);
+                            }
+                            else
+                            {
+                                localIndices.push_back((unsigned short)it->second);
+                            }
+                        }
+                    }
+                }
+
+                // ==== build raylib Mesh ====
+
+                Mesh m = {0};
+                m.vertexCount = (int)l2gv.size();
+                m.triangleCount = (int)localIndices.size() / 3;
+
+                m.vertices = (float *)MemAlloc(m.vertexCount * 3 * sizeof(float));
+                m.normals = (float *)MemAlloc(m.vertexCount * 3 * sizeof(float));
+                m.colors = (unsigned char *)MemAlloc(m.vertexCount * 4);
+                m.indices = (unsigned short *)MemAlloc(m.triangleCount * 3 * sizeof(unsigned short));
+
+                for (int i = 0; i < m.vertexCount; ++i)
+                {
+                    const auto &v = src.vertices[l2gv[i]];
+
+                    m.vertices[i * 3 + 0] = v.position.x();
+                    m.vertices[i * 3 + 1] = v.position.z();
+                    m.vertices[i * 3 + 2] = -v.position.y();
+
+                    m.normals[i * 3 + 0] = v.normal.x();
+                    m.normals[i * 3 + 1] = v.normal.z();
+                    m.normals[i * 3 + 2] = -v.normal.y();
+
+                    m.colors[i * 4 + 0] = 200;
+                    m.colors[i * 4 + 1] = 200;
+                    m.colors[i * 4 + 2] = 200;
+                    m.colors[i * 4 + 3] = 255;
+                }
+
+                memcpy(m.indices, localIndices.data(), localIndices.size() * sizeof(unsigned short));
+
+                UploadMesh(&m, true);
+
+                chunks.push_back({m, l2gv, localToGlobalFace});
+            }
+        }
+        std::cout << "chunks build succeed with " << chunks.size() << std::endl;
+
+        return chunks;
     }
+
+    //------------------------------------road path finding -------------------------------------------
 
     std::vector<geo::GraphEdge> Terrain::buildGraph(int rank) const
     {
@@ -709,8 +1023,7 @@ namespace terrain
         return edges;
     }
 
-
-    void Terrain::drawGraphEdges(int cx,int cy,int rank) const
+    void Terrain::drawGraphEdges(int cx, int cy, int rank) const
     {
         if (!valid(cx, cy))
             return;
@@ -887,60 +1200,6 @@ namespace terrain
         return cost;
     }
 
-    std::vector<int> Terrain::shortestPath(
-        int start,
-        int goal,
-        const std::vector<std::vector<int>> &adj) const
-    {
-        const int N = adj.size();
-        const float INF = std::numeric_limits<float>::infinity();
-
-        std::vector<float> dist(N, INF);
-        std::vector<int> prev(N, -1);
-
-        using Node = std::pair<float, int>; // (cost, vertex)
-        std::priority_queue<Node, std::vector<Node>, std::greater<Node>> pq;
-
-        dist[start] = 0.0f;
-        pq.push({0.0f, start});
-
-        while (!pq.empty())
-        {
-            auto [curDist, u] = pq.top();
-            pq.pop();
-
-            if (u == goal)
-                break;
-
-            if (curDist > dist[u])
-                continue;
-
-            for (int v : adj[u])
-            {
-                float cost = edgeCost(u, v);
-                float nd = curDist + cost;
-
-                if (nd < dist[v])
-                {
-                    dist[v] = nd;
-                    prev[v] = u;
-                    pq.push({nd, v});
-                }
-            }
-        }
-
-        // ---- 回溯路径 ----
-        std::vector<int> path;
-        if (prev[goal] == -1)
-            return path; // 无路
-
-        for (int v = goal; v != -1; v = prev[v])
-            path.push_back(v);
-
-        std::reverse(path.begin(), path.end());
-        return path;
-    }
-
     std::vector<std::vector<geo::GraphEdge>> Terrain::buildAdjacencyGraph(int rank) const
     {
         int vertsPerRow = width + 1;
@@ -970,7 +1229,7 @@ namespace terrain
         const std::vector<std::vector<geo::GraphEdge>> &adj) const
     {
         const float INF = std::numeric_limits<float>::infinity();
-        int n = adj.size();
+        size_t n = adj.size();
 
         std::vector<float> dist(n, INF);
         std::vector<int> prev(n, -1);
@@ -1018,13 +1277,317 @@ namespace terrain
         return path;
     }
 
-    void Terrain::drawPath(const std::vector<int> &path,float width) const
+    void Terrain::drawPath(const std::vector<int> &path, float width) const
     {
         for (int i = 1; i < path.size(); ++i)
         {
             const auto &p0 = mesh.vertices[path[i - 1]].position;
             const auto &p1 = mesh.vertices[path[i]].position;
-            DrawCylinderEx(render::vec3_to_Vector3(p0), render::vec3_to_Vector3(p1),width,width,1,RED);
+            DrawCylinderEx(render::vec3_to_Vector3(p0), render::vec3_to_Vector3(p1), width, width, 1, RED);
         }
+    }
+
+    std::vector<float> Terrain::evaluateVertexScore() const
+    {
+        std::vector<float> scores(mesh.vertices.size());
+        for (auto &v : mesh.vertices)
+        {
+            // float aspect_score =
+        }
+        return scores;
+    }
+
+    std::vector<float> Terrain::evaluateFaceScore() const
+    {
+        std::vector<float> scores(faceInfos.size());
+        float slope_max = 1.04719f;
+        // 南向角度
+        float south = 3.0f * PI / 2.0f;
+        float slope_factor = wv_slope / (wv_slope + wv_aspect);
+        float aspect_factor = wv_aspect / (wv_slope + wv_aspect);
+
+        for (int i = 0; i < faceInfos.size(); i++)
+        {
+            const auto &f = faceInfos[i];
+            float slope_score = 0.f;
+            float aspect_score = 0.f;
+            float score = 0.f;
+            // 角度差（wrap）
+            float da = abs(f.aspect - south);
+            da = std::min(da, 2 * PI - da);
+
+            // 映射到 [0,1]
+            aspect_score = 1 - da / PI;
+
+            if (f.slope >= slope_max)
+                score = -1;
+            else
+            {
+                slope_score = 1 - std::clamp(f.slope / slope_max, 0.f, 1.f);
+                score = slope_score * slope_factor + aspect_score * aspect_factor;
+            }
+
+            scores[i] = score;
+            // std::cout<<"the "<<i<<" face score is "<< score <<" , ";
+        }
+        // std::cout<<std::endl;
+        return scores;
+    }
+
+    std::vector<std::vector<int>> Terrain::buildFaceAdjacency() const
+    {
+        size_t faceCount = mesh.indices.size() / 3;
+        std::vector<std::vector<int>> adj(faceCount);
+
+        // edge -> face map
+        std::unordered_map<uint64_t, int> edgeMap;
+
+        auto makeKey = [](int a, int b)
+        {
+            if (a > b)
+                std::swap(a, b);
+            return (uint64_t(a) << 32) | uint64_t(b);
+        };
+
+        for (int f = 0; f < faceCount; ++f)
+        {
+            int i0 = mesh.indices[f * 3 + 0];
+            int i1 = mesh.indices[f * 3 + 1];
+            int i2 = mesh.indices[f * 3 + 2];
+
+            int edges[3][2] = {{i0, i1}, {i1, i2}, {i2, i0}};
+
+            for (auto &e : edges)
+            {
+                uint64_t key = makeKey(e[0], e[1]);
+                auto it = edgeMap.find(key);
+                if (it == edgeMap.end())
+                {
+                    edgeMap[key] = f;
+                }
+                else
+                {
+                    int other = it->second;
+                    adj[f].push_back(other);
+                    adj[other].push_back(f);
+                }
+            }
+        }
+        return adj;
+    }
+
+    std::vector<std::vector<int>> Terrain::floodFillFaces(const std::vector<float> &scores, float threshold) const
+    {
+        
+        auto adj = buildFaceAdjacency();
+
+        size_t n = faceInfos.size();
+        std::vector<bool> visited(n, false);
+
+        std::vector<std::vector<int>> regions;
+
+        for (int f = 0; f < n; ++f)
+        {
+            if (visited[f])
+                continue;
+            if (scores[f] < threshold)
+                continue;
+
+            // 开始一个新区域
+            std::vector<int> region;
+            std::queue<int> q;
+
+            visited[f] = true;
+            q.push(f);
+
+            while (!q.empty())
+            {
+                int cur = q.front();
+                q.pop();
+                region.push_back(cur);
+
+                for (int nb : adj[cur])
+                {
+                    if (visited[nb])
+                        continue;
+                    if (scores[nb] < threshold)
+                        continue;
+
+                    visited[nb] = true;
+                    q.push(nb);
+                }
+            }
+
+            regions.push_back(region);
+        }
+
+        return regions;
+    }
+
+    std::vector<std::vector<int>> Terrain::floodFillFacesSoft(std::vector<float> &scores, float threshold) const
+    {
+        scores = evaluateFaceScore();
+        auto adj = buildFaceAdjacency();
+
+        const int n = faceInfos.size();
+        std::vector<bool> visited(n, false);
+
+        std::vector<std::vector<int>> regions;
+
+        for (int seed = 0; seed < n; ++seed)
+        {
+            if (visited[seed])
+                continue;
+            if (scores[seed] < threshold)
+                continue;
+
+            std::vector<int> region;
+            std::queue<int> q;
+
+            int badCount = 0;
+
+            visited[seed] = true;
+            q.push(seed);
+
+            const Eigen::Vector2f seedPos = faceCenter(seed);
+
+            while (!q.empty())
+            {
+                int cur = q.front();
+                q.pop();
+                region.push_back(cur);
+
+                if (scores[cur] < threshold)
+                    badCount++;
+
+                // ---- 坏点比例限制 ----
+                if ((float)badCount / region.size() > regionConfig.badRatioLimit)
+                    break;
+
+                for (int nb : adj[cur])
+                {
+                    if (visited[nb])
+                        continue;
+
+                    // ---- 硬拒绝：特别差的 ----
+                    if (scores[nb] < 0)
+                        continue;
+
+                    // ---- 半径限制（防止拉丝）----
+                    // float d = (faceCenter(nb) - seedPos).norm();
+                    // if (d > regionConfig.maxRadius)
+                    //     continue;
+
+                    visited[nb] = true;
+                    q.push(nb);
+                }
+            }
+
+            if ((int)region.size() >= minRegionFaceSize /* &&
+                isRegionCompact(region, seedPos) */
+            )
+            {
+                regions.push_back(region);
+            }
+        }
+
+        return regions;
+    }
+
+    bool Terrain::isRegionCompact(const std::vector<int> &region, const Eigen::Vector2f &center) const
+    {
+        float maxDist = 0.f;
+        float avgDist = 0.f;
+
+        for (int f : region)
+        {
+            float d = (faceCenter(f) - center).norm();
+            maxDist = std::max(maxDist, d);
+            avgDist += d;
+        }
+
+        avgDist /= region.size();
+
+        // 太细长
+        if (maxDist > avgDist * 2.5f)
+            return false;
+
+        return true;
+    }
+
+    std::vector<int> Terrain::computeSeedRegion(int seedFace, const std::vector<float> &scores) const
+    {
+        Eigen::Vector2f seedPos = faceCenter(seedFace);
+
+        // 1. 候选 face 预筛
+        std::vector<int> candidates;
+        for (int f = 0; f < faceInfos.size(); ++f)
+        {
+            if ((faceCenter(f) - seedPos).norm() <= regionConfig.radius * regionConfig.targetCount)
+                candidates.push_back(f);
+        }
+
+        std::vector<int> coverCount(candidates.size(), 0);
+        std::vector<Circle> circles;
+        circles.push_back({seedPos, regionConfig.radius});
+
+        std::vector<int> region;
+
+        while (true)
+        {
+            // 2. 增量更新 coverCount
+            const Circle &newC = circles.back();
+            for (int i = 0; i < candidates.size(); ++i)
+            {
+                if (insideCircle(candidates[i], newC))
+                    coverCount[i]++;
+            }
+
+            // 3. 统计 region
+            region.clear();
+            int badCount = 0;
+
+            for (int i = 0; i < candidates.size(); ++i)
+            {
+                if (coverCount[i] >= 3)
+                {
+                    int f = candidates[i];
+                    region.push_back(f);
+                    if (scores[f] < 0)
+                        badCount++;
+                }
+            }
+
+            if ((int)region.size() >= regionConfig.targetCount)
+                break;
+
+            if (!region.empty() &&
+                (float)badCount / region.size() > regionConfig.badRatioLimit)
+                break;
+
+            // 4. 找最远可接受点
+            int best = -1;
+            float bestDist = 0.f;
+
+            for (int f : region)
+            {
+                if (scores[f] < score_threshold)
+                    continue;
+
+                float d = (faceCenter(f) - seedPos).norm();
+                if (d > bestDist)
+                {
+                    bestDist = d;
+                    best = f;
+                }
+            }
+
+            if (best < 0)
+                break;
+
+            circles.push_back({faceCenter(best), regionConfig.radius});
+        }
+
+        return region;
     }
 }

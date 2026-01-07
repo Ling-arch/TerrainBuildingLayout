@@ -56,4 +56,58 @@ namespace renderUtil{
         }
         return room2colors;
     }
+
+    Color ColorFromHue(float h)
+    {
+        // h ∈ [0,1)
+        float s = 0.65f;
+        float v = 0.95f;
+
+        float r, g, b;
+        int i = int(h * 6.0f);
+        float f = h * 6.0f - i;
+        float p = v * (1.0f - s);
+        float q = v * (1.0f - f * s);
+        float t = v * (1.0f - (1.0f - f) * s);
+
+        switch (i % 6)
+        {
+        case 0:
+            r = v;
+            g = t;
+            b = p;
+            break;
+        case 1:
+            r = q;
+            g = v;
+            b = p;
+            break;
+        case 2:
+            r = p;
+            g = v;
+            b = t;
+            break;
+        case 3:
+            r = p;
+            g = q;
+            b = v;
+            break;
+        case 4:
+            r = t;
+            g = p;
+            b = v;
+            break;
+        default:
+            r = v;
+            g = p;
+            b = q;
+            break;
+        }
+
+        return {
+            (unsigned char)(r * 255),
+            (unsigned char)(g * 255),
+            (unsigned char)(b * 255),
+            255};
+    }
 }

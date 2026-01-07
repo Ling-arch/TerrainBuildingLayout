@@ -52,6 +52,12 @@ namespace geo{
         int dy;
     };
 
+    struct Circle{
+        Eigen::Vector2f center; // face 质心
+        float radius;
+    };
+
+    
 
     std::vector<Polyline> buildPolylines(const std::vector<geo::Segment> &segments, float eps = 1e-4f);
 
@@ -64,4 +70,6 @@ namespace geo{
         std::vector<bool> &used,
         float eps,
         Polyline &out);
+
+   
 }

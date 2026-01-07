@@ -14,4 +14,6 @@ namespace renderUtil{
         float hue = aspect * 180.0f / PI; // rad → deg
         return ColorFromHSV(hue, 0.85f, 0.9f);
     }
+
+    Color ColorFromHue(float h);
 }
