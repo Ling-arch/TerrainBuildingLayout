@@ -13,6 +13,7 @@ namespace polyloop
     using Vector3 = typename M2::Vector3;
     using Matrix2 = typename M2::Matrix2;
     using Tri = util::Tri;
+    
     struct AABB2
     {
         float minx, miny;
@@ -86,6 +87,7 @@ namespace polyloop
         const std::vector<Vector3> &points() const { return points_; }
         const std::vector<Vector2> &projected_points() const { return projected_points_; }
         const std::vector<Tri> &triangles() const { return triangles_; }
+        const Vector3 &normal() const { return normal_; }
 
     private:
         std::vector<Vector3> points_;

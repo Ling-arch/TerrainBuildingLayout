@@ -49,23 +49,9 @@ int main()
     size_t cur_iter = 0;
     auto start = std::chrono::high_resolution_clock::now();
     bool is_optimizing = false;
-    // while (cur_iter < 250 && is_optimizing)
-    // {
-    //     optimize_draw_bystep(plan_prob, cur_iter, 250, draw_data);
-    // }
-
-    // auto end = std::chrono::high_resolution_clock::now();
-    // // 计算时间差
-    // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-
-    // std::cout << "Excute time: " << duration.count() << " ms" << std::endl;
-
-    // if(is_optimizing && cur_iter >= 250){
-    //     draw_data.cellPolys
-    // }
-
+ 
     //----------------------------相当于draw部分------------------------
-    
+    rlImGuiSetup(true);
     render.runMainLoop(render::FrameCallbacks{
         [&]() { // 按键更新，重新绘图等事件，poly修改过需要重新fill
             if (IsKeyPressed(KEY_R))
@@ -96,9 +82,11 @@ int main()
             }
         },
         [&]() { // 二维屏幕空间绘图
+            rlImGuiBegin();
             DrawText(TextFormat("iter = %d", cur_iter), 10, 10, 20, BLACK);
             // render.draw_index_fonts(site_world_pos, 21, BLUE);
+            rlImGuiEnd();
         }});
-
+    
     return 0;
 }

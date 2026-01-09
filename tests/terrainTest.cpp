@@ -5,13 +5,13 @@
 #include <rlImGui.h>
 
 using render::Renderer3D;
-using terrain::Terrain, terrain::TerrainCell, terrain::TerrainViewMode, terrain::ContourLayer;
+using terrain::Terrain, terrain::TerrainCell, terrain::TerrainViewMode, terrain::ContourLayer, terrain::Road;
 
 int main()
 {
     std::cout << "Hello, TerrainTest Start!" << std::endl;
     Renderer3D render(1920, 1080, 45.0f, CAMERA_PERSPECTIVE, "TerrainTest");
-    
+
     // === 静态变量：ImGui 需要跨帧保存 ===
     static int debugCx = 64;
     static int debugCy = 64;
@@ -31,20 +31,35 @@ int main()
 
     static float score_threshold = 0.5f;
     static int terrain_width = 128;
-    static int terrainPow = 8;
+    static int terrainPow = 7;
     static float frequency = 0.03f;
     static float amplitude = 6.f;
-    Terrain terrain((unsigned)time(nullptr) ,1 << terrainPow, 1 << terrainPow, 1.f, frequency, amplitude);
+    static int mainRoadNode = 4;
+    int lastMainRoadNode = -1;
+    static float extrudeHeight = 2.f;
+    float lastExtrudeHeight = -1.f;
+    static float colorAlpha = 0.5f;
+    static float wireframeAlpha = 0.8f;
+    bool wireframe = true;
+    bool outline = true;
+    Terrain terrain((unsigned)time(nullptr), 1 << terrainPow, 1 << terrainPow, 1.f, frequency, amplitude);
 
     TerrainViewMode viewMode = TerrainViewMode::Lit;
     std::vector<ContourLayer> layers = terrain.extractContours(1.f);
 
     std::vector<std::vector<geo::GraphEdge>> adj;
-    std::vector<int> path;
+    // std::vector<int> path;
     bool needGenTerrain = false;
     bool weightChanged = false;
     bool scoreWeightChanged = false;
-    
+    std::vector<Road> mainPaths;
+    std::vector<Eigen::Vector3f> seedPoints;
+    std::vector<Eigen::Vector3f> roadControlPts;
+    geo::PolygonMesh extrudeMesh = geo::PolygonMesh({{0, 0, 0}, {30, 0, 0}, {30, 15, 0}, {45, 15, 0}, {45, 30, 0}, {0, 30, 0}}, extrudeHeight);
+    geo::PolygonMesh extrudeMesh_2 = geo::PolygonMesh({{0, 0, extrudeHeight}, {30, 0, extrudeHeight}, {30, 30, extrudeHeight}, {0, 30, extrudeHeight}}, extrudeHeight);
+    geo::PolygonMesh extrudeMesh_3 = geo::PolygonMesh({{30, 0, 0}, {45, 0, 0}, {45, 15, 0}, {30, 15, 0}}, extrudeHeight);
+    //polyloop::Polyloop3 polyloop({{0, 0,0}, {30, 0,0}, {30, 30,0}, {0, 30,0}});
+    Color color = YELLOW;
     rlImGuiSetup(true);
 
     render.runMainLoop(render::FrameCallbacks{
@@ -55,24 +70,25 @@ int main()
                 lastRank = debugRank;
             }
 
-            // start / target 改了
             if (start != lastStart || target != lastTarget)
             {
                 lastStart = start;
                 lastTarget = target;
-                path = terrain.shortestPathDijkstra(start, target, adj);
+                // path = terrain.shortestPathDijkstra(start, target, adj);
+                mainPaths = terrain.buildRoads(seedPoints, roadControlPts, terrain.regionInfos, mainRoadNode, adj);
             }
             if (weightChanged)
             {
                 adj = terrain.buildAdjacencyGraph(debugRank);
-                path = terrain.shortestPathDijkstra(start, target, adj);
+                mainPaths = terrain.buildRoads(seedPoints, roadControlPts, terrain.regionInfos, mainRoadNode, adj);
                 weightChanged = false;
             }
             if (scoreWeightChanged && terrain.getViewMode() == TerrainViewMode::Score)
             {
                 terrain.calculateInfos();
                 terrain.applyFaceColor();
-                scoreWeightChanged =false;
+                mainPaths = terrain.buildRoads(seedPoints, roadControlPts, terrain.regionInfos, mainRoadNode, adj);
+                scoreWeightChanged = false;
             }
 
             if (score_threshold != terrain.score_threshold && terrain.getViewMode() == TerrainViewMode::Score)
@@ -80,27 +96,50 @@ int main()
                 terrain.score_threshold = score_threshold;
                 terrain.calculateInfos();
                 terrain.applyFaceColor();
+                mainPaths = terrain.buildRoads(seedPoints, roadControlPts, terrain.regionInfos, mainRoadNode, adj);
+            }
+
+            if (mainRoadNode != lastMainRoadNode)
+            {
+                lastMainRoadNode = mainRoadNode;
+                mainPaths = terrain.buildRoads(seedPoints, roadControlPts, terrain.regionInfos, mainRoadNode, adj);
             }
             if (needGenTerrain)
             {
                 terrain.regenerate(1 << terrainPow, 1 << terrainPow, frequency, amplitude);
                 adj = terrain.buildAdjacencyGraph(debugRank);
-                path = terrain.shortestPathDijkstra(start, target, adj);
+                mainPaths = terrain.buildRoads(seedPoints, roadControlPts, terrain.regionInfos, mainRoadNode, adj);
                 layers = terrain.extractContours(1.f);
                 terrain.applyFaceColor();
                 needGenTerrain = false;
             }
+
+            if(extrudeHeight != lastExtrudeHeight) {
+                lastExtrudeHeight = extrudeHeight;
+                extrudeMesh.regenerate(extrudeHeight);
+                extrudeMesh_2 = geo::PolygonMesh({{0, 0, extrudeHeight}, {30, 0, extrudeHeight}, {30, 30, extrudeHeight}, {0, 30, extrudeHeight}}, extrudeHeight);
+                extrudeMesh_3.regenerate(extrudeHeight);
+            }
         },
         [&]() { // 3维空间绘图内容部分
-            terrain.draw();
+            //terrain.draw();
             terrain.drawContours(layers);
-            terrain.drawPath(path, pathWidth);
+            if (mainPaths.size() > 0)
+                for (const auto &path : mainPaths)
+                    terrain.drawPath(path.path, pathWidth);
             // terrain.drawGraphEdges(debugCx,debugCy,debugRank);
-            //  DrawGrid(20,1.f);
+            // DrawGrid(20,1.f);
             DrawLine3D({0, 0, 0}, {10000, 0, 0}, RED);
             DrawLine3D({0, 0, 0}, {0, 10000, 0}, BLUE);
             DrawLine3D({0, 0, 0}, {0, 0, -10000}, GREEN);
 
+            render::draw_points(seedPoints, YELLOW, 0.25f, 1.2f);
+            render::draw_points(roadControlPts, GREEN, 0.25f, 0.6f);
+            extrudeMesh.draw(color, colorAlpha,outline, wireframe, wireframeAlpha);
+            extrudeMesh_2.draw(GREEN, colorAlpha,outline, wireframe, wireframeAlpha);
+            extrudeMesh_3.draw(RED, colorAlpha,outline, wireframe, wireframeAlpha);
+            //render::fill_polygon3(polyloop, RED, 0.5f);
+            //render::stroke_bold_polygon3(polyloop, BLACK);
         },
         [&]() { // 二维屏幕空间绘图
             // render.draw_index_fonts(vertices, 16, BLUE);
@@ -123,14 +162,14 @@ int main()
                     needGenTerrain |= ImGui::SliderInt("Terrain Width(2^N)", &terrainPow, 5, 10);
                     needGenTerrain |= ImGui::SliderFloat("Frequency", &frequency, 0.f, 1.f, "%.2f");
                     needGenTerrain |= ImGui::SliderFloat("Amplitude", &amplitude, 0.f, 30.f, "%.2f");
-                    needGenTerrain |= ImGui::SliderInt("Octaves",&terrain.octaves,0, 10);
+                    needGenTerrain |= ImGui::SliderInt("Octaves", &terrain.octaves, 0, 10);
                     needGenTerrain |= ImGui::SliderFloat("Lacunarity", &terrain.lacunarity, 0.f, 10.f, "%.1f");
                     needGenTerrain |= ImGui::SliderFloat("Gain", &terrain.gain, 0.f, 5.f, "%.1f");
                     if (ImGui::Button("Reset Terrain"))
                     {
                         terrain.regenerate((unsigned)time(nullptr), 1 << terrainPow, 1 << terrainPow, frequency, amplitude);
                         adj = terrain.buildAdjacencyGraph(debugRank);
-                        path = terrain.shortestPathDijkstra(start, target, adj);
+                        mainPaths = terrain.buildRoads(seedPoints, roadControlPts, terrain.regionInfos, mainRoadNode, adj);
                         layers = terrain.extractContours(1.f);
                         terrain.applyFaceColor();
                     }
@@ -176,13 +215,17 @@ int main()
                     weightChanged |= ImGui::InputInt("Rank", &debugRank);
 
                     ImGui::SliderFloat("Path Width", &pathWidth, 0.05f, 1.0f, "%.2f");
-
+                    ImGui::SliderInt(
+                        "MainRoadNodeNum",
+                        &mainRoadNode,
+                        0, 10);
                     debugCx = std::clamp(debugCx, 0, terrain.getWidth());
                     debugCy = std::clamp(debugCy, 0, terrain.getHeight());
                     debugRank = std::max(1, debugRank);
 
                     if (ImGui::Button("Debug Build Graph"))
                     {
+                        terrain.drawGraphEdges(debugCx, debugCy, debugRank);
                         terrain.debugBuildGraphAt(debugCx, debugCy, debugRank);
                     }
                 }
@@ -236,7 +279,12 @@ int main()
                 // =====================================================
                 if (ImGui::CollapsingHeader("Utilities"))
                 {
-                   
+                    ImGui::SliderFloat("Extrude Height", &extrudeHeight, 0.f, 50.f, "%.2f");
+                    ImGui::ColorEdit3("Extrude Color", (float*)&color);
+                    ImGui::SliderFloat("Extrude Alpha", &colorAlpha, 0.f, 1.f, "%.1f");
+                    ImGui::Checkbox("Outline", &outline);
+                    ImGui::Checkbox("Wireframe", &wireframe);
+                    ImGui::SliderFloat("Wireframe Alpha", &wireframeAlpha, 0.f, 1.f, "%.1f");
                 }
             }
             ImGui::End();

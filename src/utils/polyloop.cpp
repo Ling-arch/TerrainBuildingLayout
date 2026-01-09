@@ -31,11 +31,5 @@ namespace polyloop
         // std::cout << "Polyloop3 triangulated with " << triangles_.size() << " triangles.\n";
     }
 
-   
-
-    
-
-    
-
-   
+ 
 }

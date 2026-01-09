@@ -107,26 +107,44 @@ namespace terrain
         float maxRadius = 20;
     };
 
-
-    struct MeshChunkDesc
-    {
-        int startX;
-        int startY;
-        int size; // quad 数
-    };
-
-
     struct ChunkMeshInfo
     {
-        Mesh mesh;                           //raylib mesh
-        std::vector<int> localToGlobalVert;  //local vertexid -> global vertexid
+        Mesh mesh;                          // raylib mesh
+        std::vector<int> localToGlobalVert; // local vertexid -> global vertexid
         std::vector<int> localToGlobalFace;
+    };
+
+    struct RegionInfo
+    {
+        std::vector<int> faces;
+        int centerFace = -1;
+        int centeridx = -1;
+    };
+
+    struct Road
+    {
+        std::vector<int> path;
+        int level;
+    };
+
+    struct RoadSeed
+    {
+        int startVertex;
+        Eigen::Vector3f forward;
+        int level;
+    };
+
+    struct Attractor
+    {
+        int vertex; // mesh vertex index
+        int regionId;
+        float weight; // region area / importance
     };
 
     class Terrain
     {
     public:
-        //terrain generation
+        // terrain generation
         int octaves = 2;
         float lacunarity = 1.6f;
         float gain = 0.7f;
@@ -144,6 +162,7 @@ namespace terrain
         float score_threshold = 0.5f;
         int minRegionFaceSize = 200;
         RegionGrowConfig regionConfig;
+        std::vector<RegionInfo> regionInfos;
 
         Terrain(int width, int height, float cellSize);
         Terrain(int seed_, int width, int height, float cellSize, float frequency, float amplitude);
@@ -171,12 +190,9 @@ namespace terrain
         const std::vector<float> &getFaceScores() const { return scores; }
 
         //----------------------utils--------------------
-        inline int vertexIndex(int gx, int gy) const
-        {
-            return gy * (width + 1) + gx;
-        }
+        inline int vertexIndex(int gx, int gy) const { return gy * (width + 1) + gx; }
 
-        void applyFaceColor();                  // set face colors depend on slope , aspect
+        void applyFaceColor(); // set face colors depend on slope , aspect
         void applyFaceColorPro();
         void setViewMode(TerrainViewMode mode); // set viewmode to draw different analysis
 
@@ -188,10 +204,7 @@ namespace terrain
         void buildContourSettings();
 
         //----------------------path finding utils on terrain --------------------------
-        inline bool valid(int x, int y) const
-        {
-            return x >= 0 && x <= width && y >= 0 && y <= height;
-        }
+        inline bool valid(int x, int y) const { return x >= 0 && x <= width && y >= 0 && y <= height; }
         std::vector<geo::GraphEdge> buildGraph(int rank) const;
         void debugBuildGraphAt(int cx, int cy, int rank) const;
         void drawGraphEdges(int cx, int cy, int rank) const;
@@ -199,15 +212,23 @@ namespace terrain
         std::vector<std::vector<geo::GraphEdge>> buildAdjacencyGraph(int rank) const;
         std::vector<int> shortestPathDijkstra(int start, int goal, const std::vector<std::vector<geo::GraphEdge>> &adj) const;
         void drawPath(const std::vector<int> &path, float width) const;
+        void computeRegionCenter(RegionInfo &region) const;
+        Eigen::Vector3f computeForwardDirection(const std::vector<int> &path, int i) const;
+        std::vector<std::vector<int>> buildMainRoads(std::vector<RegionInfo> &regions, int mainRegionCount, const std::vector<std::vector<geo::GraphEdge>> &adj) const;
+        std::vector<int> sampleVerticesByDistance(const std::vector<int> &path, float interval) const;
+        float pathLength(const std::vector<int> &path) const;
+
+        std::vector<Road> buildRoads(std::vector<Eigen::Vector3f> &seedPoints, std::vector<Eigen::Vector3f> &controlPts, std::vector<RegionInfo> &regions, int mainRegionCount, const std::vector<std::vector<geo::GraphEdge>> &adj);
+        void drawRoads(const std::vector<Road> &roads, float MaxWidth) const;
 
         //---------------------- evaluate score utils -----------------------------
-        std::vector<float> evaluateVertexScore() const;
+        std::vector<float> evaluateVertexScore(const std::vector<float> &faceScores) const;
         std::vector<float> evaluateFaceScore() const;
         std::vector<std::vector<int>> buildFaceAdjacency() const;
         std::vector<std::vector<int>> floodFillFaces(const std::vector<float> &scores, float threshold) const;
-        std::vector<std::vector<int>> floodFillFacesSoft(std::vector<float> &scores,float threshold) const;
-        bool isRegionCompact(const std::vector<int> &region,const Eigen::Vector2f &center) const;
-            inline Eigen::Vector2f faceCenter(int f) const
+        std::vector<std::vector<int>> floodFillFacesSoft(std::vector<float> &scores, float threshold) const;
+        bool isRegionCompact(const std::vector<int> &region, const Eigen::Vector2f &center) const;
+        inline Eigen::Vector2f faceCenter(int f) const
         {
             int i0 = mesh.indices[f * 3 + 0];
             int i1 = mesh.indices[f * 3 + 1];
@@ -222,6 +243,21 @@ namespace terrain
             return {c.x(), c.y()};
         }
 
+        inline Eigen::Vector3f faceCenter3D(int f) const
+        {
+            int i0 = mesh.indices[f * 3 + 0];
+            int i1 = mesh.indices[f * 3 + 1];
+            int i2 = mesh.indices[f * 3 + 2];
+
+            Eigen::Vector3f c =
+                (mesh.vertices[i0].position +
+                 mesh.vertices[i1].position +
+                 mesh.vertices[i2].position) /
+                3.0f;
+
+            return c;
+        }
+
         inline bool insideCircle(int f, const Circle &c) const
         {
             Eigen::Vector2f p = faceCenter(f);
@@ -231,7 +267,7 @@ namespace terrain
         std::vector<int> computeSeedRegion(int seedFace, const std::vector<float> &scores) const;
 
     private:
-    int seed;
+        int seed;
         int width;      // grids number of x axis
         int height;     // grids number of x axis
         float cellSize; // grid edge length
@@ -241,22 +277,24 @@ namespace terrain
         float maxHeight;                 // maximum height of terrain
         std::vector<ChunkMeshInfo> chunkMeshes;
         std::vector<float> scores;
+        std::vector<float> vertexScores;
         std::vector<std::vector<int>> regions;
+
         // mesh CPU data
         std::vector<TerrainFaceInfo> faceInfos; // face datas of normal , aspect ,slope
         std::vector<float> heightmap;           // reserve each vertex height from each row at x axis
         TerrainMeshData mesh;                   // z axis up direction mesh data
         std::vector<TerrainCell> cells;
-        TerrainViewMode viewMode; // show terrain analysis draw mode
-        std::vector<Model> models;            // raylib show data mesh
+        TerrainViewMode viewMode;  // show terrain analysis draw mode
+        std::vector<Model> models; // raylib show data mesh
     };
 
     //-------------------------------------utils-----------------------------------------
     float noise2D(int x, int y);
 
     Mesh buildRaylibMesh(const TerrainMeshData &src);
-    std::vector<ChunkMeshInfo> buildRaylibMeshes(const TerrainMeshData &src,int chunkSize);
- 
+    std::vector<ChunkMeshInfo> buildRaylibMeshes(const TerrainMeshData &src, int chunkSize);
+
     inline int igcd(int a, int b)
     {
         if (b == 0)
@@ -290,83 +328,6 @@ namespace terrain
             (unsigned char)(colorf[2] * 255.0f),
             (unsigned char)(colorf[3] * 255.0f),
         };
-    }
-
-    // ----------------------------
-    // 单 octave Perlin（连续）
-    // ----------------------------
-    inline float perlin2D(float x, float y)
-    {
-        static int perm[512];
-        static bool initialized = false;
-
-        if (!initialized)
-        {
-            int p[256] = {
-                151, 160, 137, 91, 90, 15,
-                131, 13, 201, 95, 96, 53, 194, 233, 7, 225,
-                140, 36, 103, 30, 69, 142, 8, 99, 37, 240,
-                21, 10, 23, 190, 6, 148, 247, 120, 234, 75,
-                0, 26, 197, 62, 94, 252, 219, 203, 117, 35,
-                11, 32, 57, 177, 33, 88, 237, 149, 56, 87,
-                174, 20, 125, 136, 171, 168, 68, 175, 74, 165,
-                71, 134, 139, 48, 27, 166, 77, 146, 158, 231,
-                83, 111, 229, 122, 60, 211, 133, 230, 220, 105,
-                92, 41, 55, 46, 245, 40, 244, 102, 143, 54,
-                65, 25, 63, 161, 1, 216, 80, 73, 209, 76,
-                132, 187, 208, 89, 18, 169, 200, 196, 135, 130,
-                116, 188, 159, 86, 164, 100, 109, 198, 173, 186,
-                3, 64, 52, 217, 226, 250, 124, 123, 5, 202,
-                38, 147, 118, 126, 255, 82, 85, 212, 207, 206,
-                59, 227, 47, 16, 58, 17, 182, 189, 28, 42,
-                223, 183, 170, 213, 119, 248, 152, 2, 44, 154,
-                163, 70, 221, 153, 101, 155, 167, 43, 172, 9,
-                129, 22, 39, 253, 19, 98, 108, 110, 79, 113,
-                224, 232, 178, 185, 112, 104, 218, 246, 97, 228,
-                251, 34, 242, 193, 238, 210, 144, 12, 191, 179,
-                162, 241, 81, 51, 145, 235, 249, 14, 239, 107,
-                49, 192, 214, 31, 181, 199, 106, 157, 184, 84,
-                204, 176, 115, 121, 50, 45, 127, 4, 150, 254,
-                138, 236, 205, 93, 222, 114, 67, 29, 24, 72,
-                243, 141, 128, 195, 78, 66, 215, 61, 156, 180};
-            for (int i = 0; i < 256; i++)
-                perm[i] = perm[i + 256] = p[i];
-            initialized = true;
-        }
-
-        int X = (int)std::floor(x) & 255;
-        int Y = (int)std::floor(y) & 255;
-
-        x -= std::floor(x);
-        y -= std::floor(y);
-
-        float u = fade(x);
-        float v = fade(y);
-
-        int aa = perm[perm[X] + Y];
-        int ab = perm[perm[X] + Y + 1];
-        int ba = perm[perm[X + 1] + Y];
-        int bb = perm[perm[X + 1] + Y + 1];
-
-        return lerp(
-            lerp(grad(aa, x, y), grad(ba, x - 1, y), u),
-            lerp(grad(ab, x, y - 1), grad(bb, x - 1, y - 1), u),
-            v);
-    }
-
-    inline float fbm2D(float x, float y, int octaves = 5, float lacunarity = 2.0f, float gain = 0.5f)
-    {
-        float sum = 0.0f;
-        float amp = 1.0f;
-        float freq = 1.0f;
-
-        for (int i = 0; i < octaves; ++i)
-        {
-            sum += amp * perlin2D(x * freq, y * freq);
-            freq *= lacunarity;
-            amp *= gain;
-        }
-        return sum;
     }
 
     inline float fbm2D_OpenSimplex(

@@ -72,7 +72,7 @@ namespace terrain
         calculateInfos();
         // 释放旧 GPU 资源
         for (Model &model : models)
-                UnloadModel(model);
+            UnloadModel(model);
 
         upload();
     }
@@ -120,7 +120,7 @@ namespace terrain
         default:
             for (const Model &model : models)
                 DrawModel(model, {0, 0, 0}, 1.0f, GRAY);
-                break;
+            break;
         }
     }
 
@@ -491,13 +491,27 @@ namespace terrain
         }
     }
 
-    void Terrain::calculateInfos(){
+    void Terrain::calculateInfos()
+    {
         scores = evaluateFaceScore();
-        regions = floodFillFaces(scores,score_threshold);
-        for(int i = 0; i < regions.size(); i++){
-            std::cout << "cur " << i << " region num is " << regions[i].size() <<std::endl;
+        vertexScores = evaluateVertexScore(scores);
+        regions = floodFillFaces(scores, score_threshold);
+        regionInfos.clear();
+        for (const auto &region : regions)
+        {
+            if (region.size() > minRegionFaceSize)
+            {
+                RegionInfo regionInfo{region};
+                regionInfos.push_back(regionInfo);
+            }
         }
-         
+
+        for (RegionInfo &region : regionInfos)
+            computeRegionCenter(region);
+
+        // for(int i = 0; i < regions.size(); i++){
+        //     std::cout << "cur " << i << " region num is " << regions[i].size() <<std::endl;
+        // }
     }
 
     std::vector<geo::Segment> Terrain::extractContourAtHeight(float isoHeight) const
@@ -930,7 +944,7 @@ namespace terrain
                 chunks.push_back({m, l2gv, localToGlobalFace});
             }
         }
-        std::cout << "chunks build succeed with " << chunks.size() << std::endl;
+        // std::cout << "chunks build succeed with " << chunks.size() << std::endl;
 
         return chunks;
     }
@@ -1211,7 +1225,7 @@ namespace terrain
 
         for (const auto &e : edges)
         {
-            // 计算真实 cost（统一在这里）
+            // 计算真实 cost
             float cost = edgeCost(e.from, e.to);
 
             geo::GraphEdge edge = e;
@@ -1279,6 +1293,8 @@ namespace terrain
 
     void Terrain::drawPath(const std::vector<int> &path, float width) const
     {
+        if (path.size() < 2)
+            return;
         for (int i = 1; i < path.size(); ++i)
         {
             const auto &p0 = mesh.vertices[path[i - 1]].position;
@@ -1287,12 +1303,268 @@ namespace terrain
         }
     }
 
-    std::vector<float> Terrain::evaluateVertexScore() const
+    void Terrain::computeRegionCenter(RegionInfo &region) const
+    {
+        Eigen::Vector3f avg(0, 0, 0);
+        // 1️. 计算 region 所有 face 中心的平均
+        for (int f : region.faces)
+            avg += faceCenter3D(f);
+
+        avg *= (1.0f / region.faces.size());
+        // 2️.找最接近 avg 的 face
+        float best = std::numeric_limits<float>::max();
+        for (int f : region.faces)
+        {
+            float d = (faceCenter3D(f) - avg).squaredNorm();
+            if (d < best)
+            {
+                best = d;
+                region.centerFace = f;
+            }
+        }
+        // 3️.用 centerFace 的第一个 vertex 作为 seed
+        region.centeridx = mesh.indices[region.centerFace * 3 + 0];
+    }
+
+    Eigen::Vector3f Terrain::computeForwardDirection(const std::vector<int> &path, int i) const
+    {
+        if (i == 0)
+            return (mesh.vertices[path[1]].position -
+                    mesh.vertices[path[0]].position)
+                .normalized();
+
+        if (i == (int)path.size() - 1)
+            return (mesh.vertices[path[i]].position -
+                    mesh.vertices[path[i - 1]].position)
+                .normalized();
+
+        Eigen::Vector3f a = mesh.vertices[path[i]].position -
+                            mesh.vertices[path[i - 1]].position;
+        Eigen::Vector3f b = mesh.vertices[path[i + 1]].position -
+                            mesh.vertices[path[i]].position;
+
+        return (a + b).normalized();
+    }
+
+    std::vector<int> Terrain::sampleVerticesByDistance(
+        const std::vector<int> &path,
+        float interval) const
+    {
+        std::vector<int> result;
+        float acc = 0.0f;
+
+        for (size_t i = 1; i < path.size(); ++i)
+        {
+            float d =
+                (mesh.vertices[path[i]].position -
+                 mesh.vertices[path[i - 1]].position)
+                    .norm();
+
+            acc += d;
+
+            if (acc >= interval)
+            {
+                result.push_back(path[i]);
+                acc = 0.0f;
+            }
+        }
+
+        return result;
+    }
+
+    float Terrain::pathLength(const std::vector<int> &path) const
+    {
+        float len = 0.0f;
+        for (size_t i = 1; i < path.size(); ++i)
+        {
+            len += (mesh.vertices[path[i]].position -
+                    mesh.vertices[path[i - 1]].position)
+                       .norm();
+        }
+        return len;
+    }
+
+ 
+
+ 
+
+  
+ 
+
+   
+
+  
+    std::vector<std::vector<int>> Terrain::buildMainRoads(
+        std::vector<RegionInfo> &regions,
+        int mainRegionCount,
+        const std::vector<std::vector<geo::GraphEdge>> &adj) const
+    {
+        std::vector<std::vector<int>> roads;
+
+        if (regions.empty())
+            return roads;
+
+        // 1️ 按 region size 排序（降序）
+        std::sort(regions.begin(), regions.end(), [](const RegionInfo &a, const RegionInfo &b)
+                  { return a.faces.size() > b.faces.size(); });
+
+        // for (RegionInfo &region : regions)
+        //     computeRegionCenter(region);
+
+        int n = std::min((int)regions.size(), mainRegionCount);
+
+        // 2️ 少于 2 个，直接返回
+        if (n < 2)
+            return roads;
+
+        // 3️ 恰好 2 个，直接连
+        if (n == 2)
+        {
+            roads.push_back(
+                shortestPathDijkstra(
+                    regions[0].centeridx,
+                    regions[1].centeridx,
+                    adj));
+            return roads;
+        }
+
+        // 4️ n >= 3：EMST (Prim)
+        std::vector<bool> used(n, false);
+        std::vector<float> minCost(n, std::numeric_limits<float>::max());
+        std::vector<int> parent(n, -1);
+
+        auto dist = [&](int i, int j)
+        {
+            const auto &p = mesh.vertices[regions[i].centeridx].position;
+            const auto &q = mesh.vertices[regions[j].centeridx].position;
+            return (p - q).squaredNorm();
+        };
+
+        minCost[0] = 0.0f;
+
+        for (int it = 0; it < n; ++it)
+        {
+            int u = -1;
+            float best = std::numeric_limits<float>::max();
+
+            for (int i = 0; i < n; ++i)
+            {
+                if (!used[i] && minCost[i] < best)
+                {
+                    best = minCost[i];
+                    u = i;
+                }
+            }
+
+            if (u == -1)
+                break;
+
+            used[u] = true;
+
+            if (parent[u] != -1)
+            {
+                roads.push_back(
+                    shortestPathDijkstra(
+                        regions[parent[u]].centeridx,
+                        regions[u].centeridx,
+                        adj));
+            }
+
+            for (int v = 0; v < n; ++v)
+            {
+                if (used[v])
+                    continue;
+
+                float d = dist(u, v);
+                if (d < minCost[v])
+                {
+                    minCost[v] = d;
+                    parent[v] = u;
+                }
+            }
+        }
+
+        return roads;
+    }
+
+    std::vector<Road> Terrain::buildRoads(
+        std::vector<Eigen::Vector3f> &seedPoints,
+        std::vector<Eigen::Vector3f> &controlPts,
+        std::vector<RegionInfo> &regions,
+        int mainRegionCount,
+        const std::vector<std::vector<geo::GraphEdge>> &adj)
+    {
+        std::vector<Road> roads;
+        std::unordered_set<int> occupied;
+        seedPoints.clear();
+        controlPts.clear();
+
+        // ===== 1. 主干路 =====
+        auto mainRoads = buildMainRoads(regions, mainRegionCount, adj);
+        if (mainRoads.empty())
+            return roads;
+
+        // 记录主干路 & occupied
+        for (auto &p : mainRoads)
+        {
+            std::vector<int> seedPointsIndices = sampleVerticesByDistance(p, 35.0f);
+            for( int idx : seedPointsIndices)
+                seedPoints.push_back(mesh.vertices[idx].position);
+            roads.push_back({p, 1});
+            for (int v : p){
+                occupied.insert(v);
+                controlPts.push_back(mesh.vertices[v].position);
+            }
+                
+        }
+
+        return roads;
+    }
+
+    void Terrain::drawRoads(const std::vector<Road> &roads, float MaxWidth) const{
+
+    }
+
+    std::vector<float> Terrain::evaluateVertexScore(const std::vector<float> &faceScores) const
     {
         std::vector<float> scores(mesh.vertices.size());
-        for (auto &v : mesh.vertices)
+        std::vector<float> vertexAreaSum(mesh.vertices.size());
+        const size_t V = mesh.vertices.size();
+        const size_t F = mesh.indices.size() / 3;
+
+        scores.assign(V, 0.0f);
+        vertexAreaSum.assign(V, 0.0f);
+
+        for (size_t f = 0; f < F; ++f)
         {
-            // float aspect_score =
+            int i0 = mesh.indices[3 * f + 0];
+            int i1 = mesh.indices[3 * f + 1];
+            int i2 = mesh.indices[3 * f + 2];
+
+            const Eigen::Vector3f &v0 = mesh.vertices[i0].position;
+            const Eigen::Vector3f &v1 = mesh.vertices[i1].position;
+            const Eigen::Vector3f &v2 = mesh.vertices[i2].position;
+
+            Eigen::Vector3f n = (v1 - v0).cross(v2 - v0);
+            float area = n.norm(); // 和你法线代码一致
+
+            float s = faceScores[f]; // 已归一化
+
+            scores[i0] += s * area;
+            scores[i1] += s * area;
+            scores[i2] += s * area;
+
+            vertexAreaSum[i0] += area;
+            vertexAreaSum[i1] += area;
+            vertexAreaSum[i2] += area;
+        }
+
+        for (size_t v = 0; v < V; ++v)
+        {
+            if (vertexAreaSum[v] > 1e-6f)
+                scores[v] /= vertexAreaSum[v];
+            else
+                scores[v] = 0.0f;
         }
         return scores;
     }
@@ -1378,7 +1650,7 @@ namespace terrain
 
     std::vector<std::vector<int>> Terrain::floodFillFaces(const std::vector<float> &scores, float threshold) const
     {
-        
+
         auto adj = buildFaceAdjacency();
 
         size_t n = faceInfos.size();

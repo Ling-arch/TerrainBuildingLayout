@@ -10,7 +10,7 @@
 #include "util.h"
 #include "polyloop.h"
 #include <rlImGui.h>
-#include <imgui.h>
+ #include <imgui.h>
 
 #define RENDER_MOVE_SPEED 0.03f
 #define RENDER_ROTATE_SPEED 0.003f
