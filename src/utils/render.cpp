@@ -7,6 +7,11 @@ using std::vector;
 
 namespace render
 {
+
+    float RENDER_MOVE_SPEED = 0.03f;
+    float RENDER_ROTATE_SPEED = 0.003f;
+    float RENDER_ZOOM_SPEED = 1.0f;
+    
     Renderer3D::Renderer3D(int width, int height, float fovy, CameraProjection proj, const char *name)
         : width_(width), height_(height), fovy_(fovy), projection_(proj), name_(name),
           yaw_(0.8f), pitch_(0.4f), distance_(14.f)
@@ -30,12 +35,12 @@ namespace render
     void Renderer3D::updateCamera()
     {
         Vector2 md = GetMouseDelta();
-        if (ImGui::IsAnyItemActive() || ImGui::IsAnyItemHovered())
-        {
-            return;
-        }
+        // if (ImGui::IsAnyItemActive() || ImGui::IsAnyItemHovered())
+        // {
+        //     return;
+        // }
         // 左键旋转
-        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
+        if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT))
         {
             yaw_ += md.x * RENDER_ROTATE_SPEED;
             pitch_ += md.y * RENDER_ROTATE_SPEED;
@@ -57,8 +62,8 @@ namespace render
                 distance_ = 1.f;
         }
 
-        // 右键或者滚轮按下：平移
-        if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT) || IsMouseButtonDown(MOUSE_BUTTON_MIDDLE))
+        // 滚轮按下：平移
+        if (/* IsMouseButtonDown(MOUSE_BUTTON_RIGHT) ||  */IsMouseButtonDown(MOUSE_BUTTON_MIDDLE))
         {
             Vector3 forward = {
                 cosf(pitch_) * sinf(yaw_),
@@ -252,6 +257,30 @@ namespace render
         }
     }
 
+    void draw_vector(const Vec3 &start, const Vec3 &dir, Color color, float scale, float startThickness, float endThickness, float alpha)
+    {
+        Vec3 end = start + dir * scale;
+        DrawCylinderEx(
+            {start.x(), start.z(), -start.y()},
+            {end.x(), end.z(), -end.y()},
+            startThickness,
+            endThickness,
+            1,
+            Fade(color, alpha));
+    }
+
+    void draw_vector(const Vec2 &start, const Vec2 &dir, Color color, float scale, float startThickness, float endThickness, float z, float alpha)
+    {
+        Vec2 end = start + dir * scale;
+        DrawCylinderEx(
+            {start.x(), z, -start.y()},
+            {end.x(), z, -end.y()},
+            startThickness,
+            endThickness,
+            1,
+            Fade(color, alpha));
+    }
+
     void Renderer3D::runMainLoop(const FrameCallbacks &callBack)
     {
         
@@ -279,6 +308,46 @@ namespace render
         for (size_t i = 0; i < world_pos.size(); ++i)
         {
             Vector2 screen = GetWorldToScreen(world_pos[i], camera_);
+
+            // 可选：屏幕裁剪
+            if (screen.x < 0 || screen.x > GetScreenWidth() ||
+                screen.y < 0 || screen.y > GetScreenHeight())
+                continue;
+
+            DrawText(
+                TextFormat("%zu", i),
+                (int)screen.x,
+                (int)screen.y,
+                size,
+                color);
+        }
+    }
+
+    void Renderer3D::draw_index_fonts(const std::vector<Vec3> &world_pos, int size, Color color)
+    {
+        for (size_t i = 0; i < world_pos.size(); ++i)
+        {
+            Vector2 screen = GetWorldToScreen(vec3_to_Vector3(world_pos[i]), camera_);
+
+            // 可选：屏幕裁剪
+            if (screen.x < 0 || screen.x > GetScreenWidth() ||
+                screen.y < 0 || screen.y > GetScreenHeight())
+                continue;
+
+            DrawText(
+                TextFormat("%zu", i),
+                (int)screen.x,
+                (int)screen.y,
+                size,
+                color);
+        }
+    }
+
+    void Renderer3D::draw_index_fonts(const std::vector<Vec2> &world_pos, int size, Color color,float z)
+    {
+        for (size_t i = 0; i < world_pos.size(); ++i)
+        {
+            Vector2 screen = GetWorldToScreen(vec2_to_Vector3(world_pos[i], z), camera_);
 
             // 可选：屏幕裁剪
             if (screen.x < 0 || screen.x > GetScreenWidth() ||

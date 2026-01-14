@@ -112,17 +112,27 @@ namespace terrain
 
         case TerrainViewMode::Aspect:
         case TerrainViewMode::Slope:
-            for (const Model &model : models)
+            for (const Model &model : models){
                 DrawModel(model, {0, 0, 0}, 1.0f, WHITE);
+                if(additionalShowWire){
+                    DrawModelWires(model, {0, 0, 0}, 1.0f, BLACK);
+                }
+            }  
             break;
 
         case TerrainViewMode::Lit:
         default:
-            for (const Model &model : models)
+            for (const Model &model : models){
                 DrawModel(model, {0, 0, 0}, 1.0f, GRAY);
+                if(additionalShowWire){
+                    DrawModelWires(model, {0, 0, 0}, 1.0f, BLACK);
+                }
+            }
             break;
         }
     }
+
+ 
 
     // void Terrain::applyFaceColor()
     // {
@@ -1383,15 +1393,6 @@ namespace terrain
         }
         return len;
     }
-
- 
-
- 
-
-  
- 
-
-   
 
   
     std::vector<std::vector<int>> Terrain::buildMainRoads(

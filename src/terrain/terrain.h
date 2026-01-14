@@ -8,6 +8,7 @@
 #include "geo.h"
 #include <queue>
 #include "OpenSimplexNoise.h"
+
 namespace terrain
 {
 
@@ -163,6 +164,7 @@ namespace terrain
         int minRegionFaceSize = 200;
         RegionGrowConfig regionConfig;
         std::vector<RegionInfo> regionInfos;
+        bool additionalShowWire = false;
 
         Terrain(int width, int height, float cellSize);
         Terrain(int seed_, int width, int height, float cellSize, float frequency, float amplitude);

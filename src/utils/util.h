@@ -711,7 +711,7 @@ namespace util
                 // 查询半径内是否已有点
                 const size_t max_results = 1;
                 std::vector<nanoflann::ResultItem<uint32_t, Scalar>> ret_matches(max_results);
-                nanoflann::SearchParameters params; // nanoflann 1.8 新版参数
+                nanoflann::SearchParameters params;
 
                 size_t n_matches = kd_tree->radiusSearch(p.data(), radius * radius, ret_matches, params);
 

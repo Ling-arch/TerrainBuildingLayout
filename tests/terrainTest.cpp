@@ -3,6 +3,7 @@
 #include "terrain.h"
 #include "renderUtil.h"
 #include <rlImGui.h>
+#include <imgui.h>
 
 using render::Renderer3D;
 using terrain::Terrain, terrain::TerrainCell, terrain::TerrainViewMode, terrain::ContourLayer, terrain::Road;
@@ -55,11 +56,12 @@ int main()
     std::vector<Road> mainPaths;
     std::vector<Eigen::Vector3f> seedPoints;
     std::vector<Eigen::Vector3f> roadControlPts;
-    geo::PolygonMesh extrudeMesh = geo::PolygonMesh({{0, 0, 0}, {30, 0, 0}, {30, 15, 0}, {45, 15, 0}, {45, 30, 0}, {0, 30, 0}}, extrudeHeight);
-    geo::PolygonMesh extrudeMesh_2 = geo::PolygonMesh({{0, 0, extrudeHeight}, {30, 0, extrudeHeight}, {30, 30, extrudeHeight}, {0, 30, extrudeHeight}}, extrudeHeight);
-    geo::PolygonMesh extrudeMesh_3 = geo::PolygonMesh({{30, 0, 0}, {45, 0, 0}, {45, 15, 0}, {30, 15, 0}}, extrudeHeight);
-    //polyloop::Polyloop3 polyloop({{0, 0,0}, {30, 0,0}, {30, 30,0}, {0, 30,0}});
+    // geo::PolygonMesh extrudeMesh = geo::PolygonMesh({{0, 0, 0}, {30, 0, 0}, {30, 15, 0}, {45, 15, 0}, {45, 30, 0}, {0, 30, 0}}, extrudeHeight);
+    // geo::PolygonMesh extrudeMesh_2 = geo::PolygonMesh({{0, 0, extrudeHeight}, {30, 0, extrudeHeight}, {30, 30, extrudeHeight}, {0, 30, extrudeHeight}}, extrudeHeight);
+    // geo::PolygonMesh extrudeMesh_3 = geo::PolygonMesh({{30, 0, 0}, {45, 0, 0}, {45, 15, 0}, {30, 15, 0}}, extrudeHeight);
+    // polyloop::Polyloop3 polyloop({{0, 0,0}, {30, 0,0}, {30, 30,0}, {0, 30,0}});
     Color color = YELLOW;
+    Ray ray = {0};
     rlImGuiSetup(true);
 
     render.runMainLoop(render::FrameCallbacks{
@@ -114,15 +116,16 @@ int main()
                 needGenTerrain = false;
             }
 
-            if(extrudeHeight != lastExtrudeHeight) {
+            if (extrudeHeight != lastExtrudeHeight)
+            {
                 lastExtrudeHeight = extrudeHeight;
-                extrudeMesh.regenerate(extrudeHeight);
-                extrudeMesh_2 = geo::PolygonMesh({{0, 0, extrudeHeight}, {30, 0, extrudeHeight}, {30, 30, extrudeHeight}, {0, 30, extrudeHeight}}, extrudeHeight);
-                extrudeMesh_3.regenerate(extrudeHeight);
+                // extrudeMesh.regenerate(extrudeHeight);
+                // extrudeMesh_2 = geo::PolygonMesh({{0, 0, extrudeHeight}, {30, 0, extrudeHeight}, {30, 30, extrudeHeight}, {0, 30, extrudeHeight}}, extrudeHeight);
+                // extrudeMesh_3.regenerate(extrudeHeight);
             }
         },
         [&]() { // 3维空间绘图内容部分
-            //terrain.draw();
+            terrain.draw();
             terrain.drawContours(layers);
             if (mainPaths.size() > 0)
                 for (const auto &path : mainPaths)
@@ -135,11 +138,11 @@ int main()
 
             render::draw_points(seedPoints, YELLOW, 0.25f, 1.2f);
             render::draw_points(roadControlPts, GREEN, 0.25f, 0.6f);
-            extrudeMesh.draw(color, colorAlpha,outline, wireframe, wireframeAlpha);
-            extrudeMesh_2.draw(GREEN, colorAlpha,outline, wireframe, wireframeAlpha);
-            extrudeMesh_3.draw(RED, colorAlpha,outline, wireframe, wireframeAlpha);
-            //render::fill_polygon3(polyloop, RED, 0.5f);
-            //render::stroke_bold_polygon3(polyloop, BLACK);
+            // extrudeMesh.draw(color, colorAlpha,outline, wireframe, wireframeAlpha);
+            // extrudeMesh_2.draw(GREEN, colorAlpha,outline, wireframe, wireframeAlpha);
+            // extrudeMesh_3.draw(RED, colorAlpha,outline, wireframe, wireframeAlpha);
+            // render::fill_polygon3(polyloop, RED, 0.5f);
+            // render::stroke_bold_polygon3(polyloop, BLACK);
         },
         [&]() { // 二维屏幕空间绘图
             // render.draw_index_fonts(vertices, 16, BLUE);
@@ -150,6 +153,13 @@ int main()
 
             // 2. 自定义GUI窗口（纯2D固定在屏幕上）
             bool customOpen = true;
+            if (ImGui::Begin("Camera Controls", &customOpen))
+            {
+                ImGui::SliderFloat("Camera Move Speed", &render::RENDER_MOVE_SPEED, 0.f, 2.f, "%.2f");
+                ImGui::SliderFloat("Camera Rotate Speed", &render::RENDER_ROTATE_SPEED, 0.f, 0.009f, "%.3f");
+                ImGui::SliderFloat("Camera Zoom Speed", &render::RENDER_ZOOM_SPEED, 0.f, 2.f, "%.2f");
+            }
+            ImGui::End();
             if (ImGui::Begin("Terrain Info", &customOpen))
             {
                 ImGui::Text("Terrain size: %d x %d", 128, 128);
@@ -159,6 +169,7 @@ int main()
                 // =====================================================
                 if (ImGui::CollapsingHeader("Generate Settings", ImGuiTreeNodeFlags_DefaultOpen))
                 {
+                    ImGui::Indent();
                     needGenTerrain |= ImGui::SliderInt("Terrain Width(2^N)", &terrainPow, 5, 10);
                     needGenTerrain |= ImGui::SliderFloat("Frequency", &frequency, 0.f, 1.f, "%.2f");
                     needGenTerrain |= ImGui::SliderFloat("Amplitude", &amplitude, 0.f, 30.f, "%.2f");
@@ -173,6 +184,7 @@ int main()
                         layers = terrain.extractContours(1.f);
                         terrain.applyFaceColor();
                     }
+                    ImGui::Unindent();
                 }
 
                 // =====================================================
@@ -180,9 +192,12 @@ int main()
                 // =====================================================
                 if (ImGui::CollapsingHeader("View", ImGuiTreeNodeFlags_DefaultOpen))
                 {
+                    ImGui::Indent();
                     ImGui::Text("View Mode");
 
+
                     int mode = static_cast<int>(viewMode);
+                    ImGui::Checkbox("AdditionalWire", &terrain.additionalShowWire);
                     ImGui::RadioButton("Lit", &mode, 0);
                     ImGui::RadioButton("Wire", &mode, 1);
                     ImGui::RadioButton("Aspect", &mode, 2);
@@ -195,6 +210,7 @@ int main()
                         viewMode = newMode;
                         terrain.setViewMode(viewMode);
                     }
+                    ImGui::Unindent();
                 }
 
                 // =====================================================
@@ -202,23 +218,32 @@ int main()
                 // =====================================================
                 if (ImGui::CollapsingHeader("Draw Contours"))
                 {
+                    ImGui::Indent();
                     terrain.buildContourSettings();
+                    ImGui::Unindent();
                 }
 
                 // =====================================================
                 // Graph Debug
                 // =====================================================
-                if (ImGui::CollapsingHeader("Graph Debug"))
+                if (ImGui::CollapsingHeader("Road Path Graph Debug"))
                 {
+                    ImGui::Indent();
                     ImGui::InputInt("Center X", &debugCx);
                     ImGui::InputInt("Center Y", &debugCy);
                     weightChanged |= ImGui::InputInt("Rank", &debugRank);
-
+                    ImGui::Separator();
+                    if (ImGui::TreeNode("Cost Weights"))
+                    {
+                        weightChanged |= ImGui::SliderFloat("Dist Weight", &terrain.w_dist, 0.0f, 100.0f, "%.1f");
+                        weightChanged |= ImGui::SliderFloat("Slope Weight", &terrain.w_slope, 0.0f, 100.0f, "%.1f");
+                        weightChanged |= ImGui::SliderFloat("Up Weight", &terrain.w_up, 0.0f, 100.0f, "%.1f");
+                        weightChanged |= ImGui::SliderFloat("Down Weight", &terrain.w_down, 0.0f, 100.0f, "%.1f");
+                        ImGui::TreePop();
+                    }
+                    ImGui::Separator();
                     ImGui::SliderFloat("Path Width", &pathWidth, 0.05f, 1.0f, "%.2f");
-                    ImGui::SliderInt(
-                        "MainRoadNodeNum",
-                        &mainRoadNode,
-                        0, 10);
+                    ImGui::SliderInt("MainRoadNodeNum", &mainRoadNode, 0, 30);
                     debugCx = std::clamp(debugCx, 0, terrain.getWidth());
                     debugCy = std::clamp(debugCy, 0, terrain.getHeight());
                     debugRank = std::max(1, debugRank);
@@ -228,50 +253,36 @@ int main()
                         terrain.drawGraphEdges(debugCx, debugCy, debugRank);
                         terrain.debugBuildGraphAt(debugCx, debugCy, debugRank);
                     }
+                    ImGui::Unindent();
                 }
 
                 // =====================================================
                 // Pathfinding
                 // =====================================================
-                if (ImGui::CollapsingHeader("Pathfinding"))
-                {
-                    ImGui::SliderInt(
-                        "Start Vertex",
-                        &start,
-                        0, static_cast<int>(terrain.getMesh().vertices.size() - 1));
+                // if (ImGui::CollapsingHeader("Pathfinding"))
+                // {
+                //     ImGui::Indent();
+                //     ImGui::SliderInt("Start Vertex", &start, 0, static_cast<int>(terrain.getMesh().vertices.size() - 1));
 
-                    ImGui::SliderInt(
-                        "Target Vertex",
-                        &target,
-                        0, static_cast<int>(terrain.getMesh().vertices.size() - 1));
+                //     ImGui::SliderInt("Target Vertex", &target, 0, static_cast<int>(terrain.getMesh().vertices.size() - 1));
 
-                    if (ImGui::TreeNode("Cost Weights"))
-                    {
-                        weightChanged |= ImGui::SliderFloat("Dist Weight", &terrain.w_dist, 0.0f, 100.0f, "%.1f");
-                        weightChanged |= ImGui::SliderFloat("Slope Weight", &terrain.w_slope, 0.0f, 100.0f, "%.1f");
-                        weightChanged |= ImGui::SliderFloat("Up Weight", &terrain.w_up, 0.0f, 100.0f, "%.1f");
-                        weightChanged |= ImGui::SliderFloat("Down Weight", &terrain.w_down, 0.0f, 100.0f, "%.1f");
-                        ImGui::TreePop();
-                    }
-                }
+                   
+                //     ImGui::Unindent();
+                // }
 
                 // =====================================================
                 // Terrain Scoring
                 // =====================================================
                 if (ImGui::CollapsingHeader("Terrain Scoring"))
                 {
-                    scoreWeightChanged |= ImGui::SliderFloat(
-                        "Seed Aspect Weight",
-                        &terrain.wv_aspect, 0.f, 100.f, "%.1f");
+                    ImGui::Indent();
+                    scoreWeightChanged |= ImGui::SliderFloat("Seed Aspect Weight", &terrain.wv_aspect, 0.f, 100.f, "%.1f");
 
-                    scoreWeightChanged |= ImGui::SliderFloat(
-                        "Seed Slope Weight",
-                        &terrain.wv_slope, 0.f, 100.f, "%.1f");
+                    scoreWeightChanged |= ImGui::SliderFloat("Seed Slope Weight", &terrain.wv_slope, 0.f, 100.f, "%.1f");
 
                     ImGui::Separator();
-                    ImGui::SliderFloat(
-                        "Score Threshold",
-                        &score_threshold, 0.f, 1.f, "%.2f");
+                    ImGui::SliderFloat("Score Threshold", &score_threshold, 0.f, 1.f, "%.2f");
+                    ImGui::Unindent();
                 }
 
                 // =====================================================
@@ -279,12 +290,14 @@ int main()
                 // =====================================================
                 if (ImGui::CollapsingHeader("Utilities"))
                 {
+                    ImGui::Indent();
                     ImGui::SliderFloat("Extrude Height", &extrudeHeight, 0.f, 50.f, "%.2f");
-                    ImGui::ColorEdit3("Extrude Color", (float*)&color);
+                    ImGui::ColorEdit3("Extrude Color", (float *)&color);
                     ImGui::SliderFloat("Extrude Alpha", &colorAlpha, 0.f, 1.f, "%.1f");
                     ImGui::Checkbox("Outline", &outline);
                     ImGui::Checkbox("Wireframe", &wireframe);
                     ImGui::SliderFloat("Wireframe Alpha", &wireframeAlpha, 0.f, 1.f, "%.1f");
+                    ImGui::Unindent();
                 }
             }
             ImGui::End();
