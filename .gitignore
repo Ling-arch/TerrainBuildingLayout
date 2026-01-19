@@ -46,6 +46,7 @@
 *.vs
 /out
 /lib
+/.vscode
 
 #thirdparty
 /thirdparty

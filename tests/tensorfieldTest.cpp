@@ -133,14 +133,13 @@ int main()
                 }
             }
 
-
         },
         [&]() { // 3维空间绘图内容部分
-            DrawLine3D({0, 0, 0}, {10000, 0, 0}, RED);
-            DrawLine3D({0, 0, 0}, {0, 10000, 0}, BLUE);
-            DrawLine3D({0, 0, 0}, {0, 0, -10000}, GREEN);
+            DrawLine3D({0, 0, 0}, {10000, 0, 0}, RL_RED);
+            DrawLine3D({0, 0, 0}, {0, 10000, 0}, RL_BLUE);
+            DrawLine3D({0, 0, 0}, {0, 0, -10000}, RL_GREEN);
             // DrawGrid(100, 100.f);
-            render::stroke_bold_polygon2(polyloop::Polyloop2(poly.points), BLACK, 0.f, 1.25f, 1.f);
+            render::stroke_bold_polygon2(polyloop::Polyloop2(poly.points), RL_BLACK, 0.f, 1.25f, 1.f);
             // render::fill_polygon2(polyloop::Polyloop2(poly.points), YELLOW, 0.f, 0.3f, false);
             render::draw_points(tensorField.getAllPoints(), ptData.color, 1.f, ptData.size);
             for (const field::Tensor<float> &t : tensorField.getAllTensors())
@@ -157,19 +156,18 @@ int main()
             if (testTensor.dirs.size() == 4 && hasTestTensor)
             {
                 for (int i = 0; i < 4; ++i)
-                    render::draw_vector(testTensor.pos, testTensor.dirs[i], GREEN, vecData.scale, vecData.startThickness, vecData.endThickness, 0.f, vecData.color.a);
+                    render::draw_vector(testTensor.pos, testTensor.dirs[i], RL_GREEN, vecData.scale, vecData.startThickness, vecData.endThickness, 0.f, vecData.color.a);
             }
 
             for(const auto &attr : attractors)
                 attr.draw();
-            
 
         },
         [&]() { // 二维屏幕空间绘图
             if (showIndices)
             {
                 render.draw_index_fonts(tensorField.getAllPoints(), fontData.size, fontData.color);
-                render.draw_index_fonts(tensorField.getCellCenters(), fontData.size, RED);
+                render.draw_index_fonts(tensorField.getCellCenters(), fontData.size, RL_RED);
             }
 
             rlImGuiBegin(); // 开始ImGui帧渲染（必须在2D阶段调用）

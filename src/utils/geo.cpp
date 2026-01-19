@@ -10,7 +10,7 @@ namespace geo{
             static_cast<int> (std::round(p.z() / eps))};
     }
 
-    std::vector<Polyline> buildPolylines(const std::vector<geo::Segment> &segments, float eps)
+    std::vector<Polyline3> buildPolylines(const std::vector<geo::Segment> &segments, float eps)
     {
         using Key = PointKey;
 
@@ -26,7 +26,7 @@ namespace geo{
         }
 
         std::vector<bool> used(segments.size(), false);
-        std::vector<Polyline> polylines;
+        std::vector<Polyline3> polylines;
 
         // ===== 2. 从端点（度=1）开始，生成开曲线 =====
         for (auto &[key, edges] : adjacency)
@@ -38,7 +38,7 @@ namespace geo{
             if (used[segId])
                 continue;
 
-            Polyline pl;
+            Polyline3 pl;
             followChain(segId, edges[0].end,
                         segments, adjacency, used, eps, pl);
             polylines.push_back(std::move(pl));
@@ -50,7 +50,7 @@ namespace geo{
             if (used[i])
                 continue;
 
-            Polyline pl;
+            Polyline3 pl;
             followChain(i, 0,
                         segments, adjacency, used, eps, pl);
             pl.closed = true;
@@ -67,7 +67,7 @@ namespace geo{
         const std::unordered_map<PointKey,std::vector<Edge>, PointKeyHash> &adj,
         std::vector<bool> &used,
         float eps,
-        Polyline &out)
+        Polyline3 &out)
     {
         int currSeg = startSeg;
         int currEnd = startEnd;
@@ -283,22 +283,22 @@ namespace geo{
                 DrawLine3D(
                     toRay(mesh.vertices[i].position),
                     toRay(mesh.vertices[j].position),
-                    BLACK);
+                    RL_BLACK);
                 // ===== 2. 底面轮廓 =====
                 DrawLine3D(
                     toRay(mesh.vertices[i + half].position),
                     toRay(mesh.vertices[j + half].position),
-                    BLACK);
+                    RL_BLACK);
                 // ===== 3. 竖向轮廓边 =====
                 DrawLine3D(
                     toRay(mesh.vertices[i].position),
                     toRay(mesh.vertices[i + half].position),
-                    BLACK);
+                    RL_BLACK);
             }
         }
         if(wireframe){
             // 绘制线框
-            DrawModelWires(model, {0, 0, 0}, 1.0f, Fade(BLACK, wireframeAlpha));
+            DrawModelWires(model, {0, 0, 0}, 1.0f, Fade(RL_BLACK, wireframeAlpha));
         }
     }
 
@@ -309,4 +309,6 @@ namespace geo{
             UnloadModel(model);
         upload();
     }
+
+    
 }

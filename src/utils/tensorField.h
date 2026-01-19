@@ -10,6 +10,8 @@
 #include <Eigen/SparseQR>
 #include <nanoflann.hpp>
 #include "render.h"
+#include "geo.h"
+#include "util.h"
 
 namespace field
 {
@@ -24,11 +26,8 @@ namespace field
     template <typename Scalar>
     using SparseMatrix = Eigen::SparseMatrix<Scalar>;
 
-    enum class ConstraintDir
-    {
-        Tangent,
-        Normal
-    };
+    template <typename Scalar>
+    using Polyline2_t = geo::Polyline2_t<Scalar>;
 
     template <typename Scalar>
     struct Tensor
@@ -54,18 +53,6 @@ namespace field
     {
         Vector2<Scalar> center;
         Scalar theta[4]; // 四个角点 theta
-    };
-
-    template <typename Scalar>
-    struct Polyline2_t
-    {
-        std::vector<Vector2<Scalar>> points;
-        bool isClosed = false;
-        Polyline2_t() = default;
-        Polyline2_t(const std::vector<Vector2<Scalar>> &pts, bool isClosed)
-            : points(pts), isClosed(isClosed) {}
-        Polyline2_t(const std::vector<Vector2<Scalar>> &pts)
-            : points(pts) {}
     };
 
     template <typename Scalar>
@@ -119,9 +106,21 @@ namespace field
 
         void draw() const
         {
-         
-            DrawCylinder({pos.x(), 0.f, -pos.y()}, radius, radius, 0.f, 20, Fade(RED, 0.06f));
+
+            DrawCylinder({pos.x(), 0.f, -pos.y()}, radius, radius, 10.f, 20, Fade(RL_RED, 0.06f));
         }
+    };
+
+    template <typename Scalar>
+    struct TerrainTensor
+    {
+        Vector2<Scalar> position;
+        Scalar slope;
+        Scalar aspect;
+        int16_t init = -1;
+        TerrainTensor() = default;
+        TerrainTensor(const Vector2<Scalar> &pos, Scalar s, Scalar a)
+            : position(pos), slope(s), aspect(a) {}
     };
 
     template <typename Scalar>
@@ -131,9 +130,11 @@ namespace field
         TensorField2D() = default;
         TensorField2D(const AABB<Scalar> &bound, int minGridNum, const std::vector<Polyline2_t<Scalar>> &polylines);
         TensorField2D(const AABB<Scalar> &bound, int minGridNum, const std::vector<Polyline2_t<Scalar>> &polylines, const std::vector<PointAtrractor<Scalar>> &attractors);
+        TensorField2D(const AABB<Scalar> &bound, int minGridNum);
 
         const AABB<Scalar> &getBound() const { return bound_; }
         const int &getMinGridNum() const { return minGridNum_; }
+        const Scalar &getTerrainWeight() const { return terrainWeight; }
         const Scalar &getGridSize() const { return gridSize_; }
         const int &getGridNX() const { return nx_; }
         const int &getGridNY() const { return ny_; }
@@ -142,32 +143,38 @@ namespace field
         const std::vector<Tensor<Scalar>> &getTensors() const { return gridTensors_; }
         const std::vector<Tensor<Scalar>> &getAllTensors() const { return allTensors_; }
         const std::vector<Vector2<Scalar>> &getCellCenters() const { return cellCenters_; }
+        std::vector<PointAtrractor<Scalar>> &getAttractorsRef() { return attractors_; }
+        const std::vector<PointAtrractor<Scalar>> &getAttractors() const { return attractors_; }
+        const std::vector<Polyline2_t<Scalar>> &getPolylines() const { return polylines_; }
 
         //-----------------------------functions-------------------------
         std::array<Vector2<Scalar>, 4> getTensorAt(const Vector2<Scalar> &pos) const;
+        void addConstraint(const std::vector<Polyline2_t<Scalar>> &polylines, const std::vector<PointAtrractor<Scalar>> &attractors, const std::unordered_map<int, TerrainTensor<Scalar>> &terrainTensors);
+        void setTensorWeight(Scalar weight);
+        void resolveTensor();
         Tensor<Scalar> testTensorAt(const Vector2<Scalar> &pos) const;
         Polyline2_t<Scalar> traceStreamlineFromPos(const Vector2<Scalar> &pos, int uv, int maxIter = 1000) const;
         std::vector<Polyline2_t<Scalar>> genStreamlines(const std::vector<Vector2<Scalar>> &points, int maxIter = 1000) const;
+        Polyline2_t<Scalar> traceStreamlineFromPosWithDir(const Vector2<Scalar> &pos, const Vector2<Scalar> &startDir, Scalar step = 1.5f, int maxIter = 20) const;
+        std::unordered_map<int, std::vector<Polyline2_t<Scalar>>> traceCrossLinesBetweenGaps(int seed, int dir, Scalar rebuildStep, Scalar traceStep, const Eigen::Vector2i &gapRange) const;
+        std::vector<Polyline2_t<Scalar>> trace2sidesParcels(int seed, Scalar rebuildStep, Scalar traceStep, const Eigen::Vector2i &gapRange/* , Scalar cellSize, int width, int height */) const;
 
     private:
         void buildGrid();
         void collectConstraintPoints();
-        void computeAttractorConstraints();
         void buildConnectivity();
         void solveTensorField();
         void buildGridTensors();
-
-        inline bool isInside(const Vector2<Scalar> &p) const
-        {
-            return bound_.contains(p);
-        }
+        inline bool isInside(const Vector2<Scalar> &p) const { return bound_.contains(p); }
 
     private:
         // input
         AABB<Scalar> bound_;
         int minGridNum_;
+        Scalar terrainWeight = Scalar(2);
         std::vector<Polyline2_t<Scalar>> polylines_;
         std::vector<PointAtrractor<Scalar>> attractors_;
+        std::unordered_map<int, TerrainTensor<Scalar>> terrainTensors_;
         // grids
         Scalar gridSize_;
         int nx_, ny_;
@@ -210,8 +217,40 @@ namespace field
     {
         buildGrid();
         collectConstraintPoints();
-        // computeAttractorConstraints();
         buildConnectivity();
+        solveTensorField();
+        buildGridTensors();
+    }
+    template <typename Scalar>
+    TensorField2D<Scalar>::TensorField2D(const AABB<Scalar> &bound, int minGridNum)
+        : bound_(bound), minGridNum_(minGridNum)
+    {
+        buildGrid();
+    }
+
+    template <typename Scalar>
+    void TensorField2D<Scalar>::addConstraint(const std::vector<Polyline2_t<Scalar>> &polylines, const std::vector<PointAtrractor<Scalar>> &attractors, const std::unordered_map<int, TerrainTensor<Scalar>> &terrainTensors)
+    {
+        polylines_ = polylines;
+        attractors_ = attractors;
+        terrainTensors_ = terrainTensors;
+        collectConstraintPoints();
+        buildConnectivity();
+        solveTensorField();
+        buildGridTensors();
+    }
+
+    template <typename Scalar>
+    void TensorField2D<Scalar>::setTensorWeight(Scalar weight)
+    {
+        terrainWeight = weight;
+        solveTensorField();
+        buildGridTensors();
+    }
+
+    template <typename Scalar>
+    void TensorField2D<Scalar>::resolveTensor()
+    {
         solveTensorField();
         buildGridTensors();
     }
@@ -298,28 +337,6 @@ namespace field
         // Gaussian / RBF
         // w = exp(-d^2 / r^2)
         return std::exp(-dist2 / (radius * radius));
-    }
-    template <typename Scalar>
-    void TensorField2D<Scalar>::computeAttractorConstraints()
-    {
-        using Vector2 = Vector2<Scalar>;
-
-        for (const auto &attr : attractors_)
-        {
-            for (int i = 0; i < gridPoints_.size(); ++i)
-            {
-                Vector2 gridPt = gridPoints_[i];
-
-                Vector2 dir = attr.pos - gridPt;
-                Scalar dist2 = dir.squaredNorm();
-                if (dist2 < attr.radius * attr.radius)
-                {
-                    dir.normalize();
-                    ptLabels[i] = 1; // constraint point
-                    fixedThethas_[i] = directionToTheta<Scalar>(dir);
-                }
-            }
-        }
     }
 
     template <typename Scalar>
@@ -434,7 +451,41 @@ namespace field
                 b[i + N] += w * cos4;
             }
         }
-        
+        // ---------- (3) 地形 tensor 软约束 ----------
+        for (int i = 0; i < gridPoints_.size(); ++i)
+        {
+            TerrainTensor terrainT = terrainTensors_[i];
+            if (terrainT.init < 0)
+                continue;
+
+            // 坡向 → theta（定义的是下坡方向）
+            Scalar theta_t = terrainT.aspect;
+
+            Scalar sin4 = std::sin(Scalar(4) * theta_t);
+            Scalar cos4 = std::cos(Scalar(4) * theta_t);
+
+            // ===== 权重设计（关键）=====
+            // slope 越大，方向性越强
+            // slope ∈ [0, pi/2]，归一化
+            Scalar slope01 = terrainT.slope / Scalar(0.5 * M_PI);
+            slope01 = std::clamp(slope01, Scalar(0), Scalar(1));
+            // if (slope01 < Scalar(1e-6))
+            //     continue;
+            Scalar w = terrainWeight * slope01;
+            // terrainWeight_ 建议是 1 ~ 10，可调参数
+
+            if (w < Scalar(1e-6))
+                continue;
+
+            // sin block
+            trips.emplace_back(i, i, w);
+            b[i] += w * sin4;
+
+            // cos block
+            trips.emplace_back(i + N, i + N, w);
+            b[i + N] += w * cos4;
+        }
+
         SparseMat A(num_vars, num_vars);
         A.setFromTriplets(trips.begin(), trips.end());
         A.makeCompressed();
@@ -655,7 +706,6 @@ namespace field
         poly.points.reserve(maxIter * 2 + 1);
         Scalar step = gridSize_ / Scalar(8);
 
-        // === 对应 VEX 的 i / j ===
         int i = (uv == 0) ? 0 : 1;
         int j = (uv == 0) ? 2 : 3;
 
@@ -754,6 +804,47 @@ namespace field
     }
 
     template <typename Scalar>
+    Polyline2_t<Scalar> TensorField2D<Scalar>::traceStreamlineFromPosWithDir(const Vector2<Scalar> &pos, const Vector2<Scalar> &startDir, Scalar step, int maxIter) const
+    {
+        Polyline2_t<Scalar> poly;
+        // 初始点
+        Vector2<Scalar> current = pos;
+        poly.points.push_back(current);
+
+        Vector2<Scalar> preDir = startDir;
+
+        int iter = 0;
+        while (isInside(current) && iter < maxIter)
+        {
+            auto ts = getTensorAt(current);
+
+            Vector2<Scalar> best = ts[0];
+            Scalar maxDot = best.dot(preDir);
+
+            for (const auto &v : ts)
+            {
+                Scalar d = v.dot(preDir);
+                if (d > maxDot)
+                {
+                    maxDot = d;
+                    best = v;
+                }
+            }
+
+            Vector2<Scalar> next = current + best * step;
+            if (!isInside(next))
+                break;
+
+            poly.points.push_back(next);
+            current = next;
+            preDir = best;
+            ++iter;
+        }
+
+        return poly;
+    }
+
+    template <typename Scalar>
     std::vector<Polyline2_t<Scalar>> TensorField2D<Scalar>::genStreamlines(const std::vector<Vector2<Scalar>> &points, int maxIter) const
     {
 
@@ -836,6 +927,236 @@ namespace field
         }
         // std::cout << "AABB min: (" << box.min().x() << "," << box.min().y() << "), max: (" << box.max().x() << "," << box.max().y() << ")" << std::endl;
         return box;
+    }
+
+    template <typename Scalar>
+    Polyline2_t<Scalar> rebuildPolyline(const Polyline2_t<Scalar> &polyline, Scalar threshold)
+    {
+        Polyline2_t<Scalar> result;
+        result.isClosed = polyline.isClosed;
+
+        const auto &pts = polyline.points;
+        if (pts.size() < 2 || threshold <= Scalar(0))
+        {
+            result.points = pts;
+            return result;
+        }
+
+        const int segCount = static_cast<int>(pts.size()) - 1;
+
+        for (int i = 0; i < segCount; ++i)
+        {
+            const Vector2<Scalar> &p0 = pts[i];
+            const Vector2<Scalar> &p1 = pts[(i + 1) % pts.size()];
+
+            // 先压入起点
+            result.points.push_back(p0);
+
+            Scalar dist = (p1 - p0).norm();
+            int n = static_cast<int>(std::floor(dist / threshold));
+
+            if (n > 1)
+            {
+                // 均匀插值
+                for (int k = 1; k < n; ++k)
+                {
+                    Scalar t = Scalar(k) / Scalar(n);
+                    Vector2<Scalar> p = (Scalar(1) - t) * p0 + t * p1;
+                    result.points.push_back(p);
+                }
+            }
+        }
+
+        // 非闭合 polyline，补最后一个点
+        if (!polyline.isClosed)
+        {
+            result.points.push_back(pts.back());
+        }
+
+        return result;
+    }
+
+    template <typename Scalar>
+    std::unordered_map<int, std::vector<Polyline2_t<Scalar>>>
+    TensorField2D<Scalar>::traceCrossLinesBetweenGaps(
+        int seed,
+        int dir,
+        Scalar rebuildStep,
+        Scalar traceStep,
+        const Eigen::Vector2i &gapRange) const
+    {
+        std::unordered_map<int, std::vector<Polyline2_t<Scalar>>> result;
+        int globalIdx = 0;
+
+        for (int pid = 0; pid < (int)polylines_.size(); ++pid)
+        {
+            Polyline2_t<Scalar> poly = rebuildPolyline(polylines_[pid], rebuildStep);
+            const int nPts = (int)poly.points.size();
+
+            if (nPts < gapRange.x())
+                continue;
+
+            std::mt19937 rng(seed + pid);
+            std::uniform_int_distribution<int> gapDist(gapRange.x(), gapRange.y());
+
+            int idx = 0;
+            int segId = globalIdx;
+
+            while (idx < nPts)
+            {
+                int gap = gapDist(rng);
+                int remain = nPts - idx;
+
+                // 尾段太短，直接结束
+                if (remain < gapRange.x() / 2)
+                    break;
+
+                const int end = std::min(idx + gap, nPts);
+                // ===== 根据 gap 自适应生成 depth =====
+                int depthMin = std::max(static_cast<int>(std::ceil((Scalar)gap * Scalar(2.0 / 3.0))), gapRange.x());
+                int depthMax = static_cast<int>(std::floor((Scalar)gap * Scalar(4.0 / 3.0)));
+
+                // 防御：避免 min > max
+                if (depthMin > depthMax)
+                    std::swap(depthMin, depthMax);
+
+                std::uniform_int_distribution<int> depthDist(depthMin, depthMax);
+                int maxIter = depthDist(rng);
+                // === 核心：同一个 gap 内的每一个点都 trace ===
+                for (int i = idx; i < end; ++i)
+                {
+                    const Vector2<Scalar> &startPos = poly.points[i];
+
+                    Vector2<Scalar> tangent = poly.getTangentAt(i);
+                    Vector2<Scalar> startDir = (dir == 0) ? geo::rotate90CCW(tangent) : geo::rotate90CW(tangent);
+                    Polyline2_t<Scalar> traced = traceStreamlineFromPosWithDir(startPos, startDir, traceStep, maxIter);
+
+                    if (traced.points.size() > 1)
+                    {
+                        result[segId].push_back(traced);
+                    }
+                }
+
+                idx += gap;
+                ++segId;
+            }
+
+            globalIdx = segId;
+        }
+
+        return result;
+    }
+
+    template <typename Scalar>
+    std::vector<Polyline2_t<Scalar>> buildParcelFromTraceStrips(const std::unordered_map<int, std::vector<Polyline2_t<Scalar>>> &stripMap)
+    {
+        std::vector<Polyline2_t<Scalar>> parcels;
+
+        for (const auto &[segId, traces] : stripMap)
+        {
+            const int n = (int)traces.size();
+            if (n < 2)
+                continue;
+
+            Polyline2_t<Scalar> parcel;
+            parcel.isClosed = true;
+            const auto &first = traces.front(); // first polyline
+            const auto &last = traces.back();   // last polyline
+            if (first.points.size() < 2 || last.points.size() < 2)
+                continue;
+
+            // === 1. 起点序列（上边界） ===
+            for (const auto &pl : traces)
+            {
+                if (!pl.points.empty())
+                    parcel.points.push_back(pl.points.front());
+            }
+
+            // === 2. 最后一根 polyline（右边界，正序，去首） ===
+            for (int i = 1; i < (int)last.points.size(); ++i)
+                parcel.points.push_back(last.points[i]);
+
+            // === 3. 终点序列（下边界，reverse + 方向过滤） ===
+            for (int i = n - 2; i >= 0; --i)
+            {
+                if (traces[i].points.empty())
+                    continue;
+
+                const Vector2<Scalar> &p = traces[i].points.back();
+
+                if (parcel.points.size() >= 2)
+                {
+                    Vector2<Scalar> prevDir = parcel.points.back() - parcel.points[parcel.points.size() - 2];
+                    Vector2<Scalar> newDir = p - parcel.points.back();
+                    // prevDir.normalize();
+                    // newDir.normalize();
+                    if (prevDir.dot(newDir) < Scalar(0))
+                        continue; // 方向反了，跳过
+                }
+
+                parcel.points.push_back(p);
+            }
+
+            Vector2<Scalar> prevDir = first.points[first.points.size() - 2] - parcel.points.back();
+            Vector2<Scalar> newDir = first.points[first.points.size() - 3] - first.points[first.points.size() - 2];
+            if (prevDir.dot(newDir) < Scalar(0))
+                continue;
+            // === 4. 第一根 polyline（左边界，reverse，去首） ===
+            for (int i = (int)first.points.size() - 2; i >= 0; --i)
+                parcel.points.push_back(first.points[i]);
+
+            Scalar parcelArea = util::Math2<Scalar>::polygon_area(parcel.points);
+            if (parcelArea < Scalar(150))
+                continue;
+            //     std::reverse(parcel.points.begin(), parcel.points.end());
+
+            geo::OBB2<Scalar> obb(parcel.points);
+            Scalar minWidth = std::min(obb.halfSize.x(), obb.halfSize.y());
+            Scalar maxWidth = std::max(obb.halfSize.x(), obb.halfSize.y());
+
+            Scalar obbArea = util::Math2<Scalar>::polygon_area(obb.poly.points);
+
+            if ((maxWidth / minWidth > Scalar(2.3) && minWidth <= 20) || obbArea / parcelArea >= Scalar(1.85))
+                continue;
+
+            if (!parcel.isSelfIntersecting())
+                parcels.push_back(std::move(parcel));
+        }
+
+        return parcels;
+    }
+
+    template <typename Scalar>
+    std::vector<Polyline2_t<Scalar>> TensorField2D<Scalar>::trace2sidesParcels(int seed, Scalar rebuildStep, Scalar traceStep, const Eigen::Vector2i &gapRange/* , Scalar cellSize, int width, int height */) const
+    {
+        using AABB = Eigen::AlignedBox<Scalar, 2>;
+        std::unordered_map<int, std::vector<Polyline2_t<Scalar>>> result_1 = traceCrossLinesBetweenGaps(seed, 0, rebuildStep, traceStep, gapRange);
+        std::unordered_map<int, std::vector<Polyline2_t<Scalar>>> result_2 = traceCrossLinesBetweenGaps(seed + 1314, 1, rebuildStep, traceStep, gapRange);
+        std::vector<Polyline2_t<Scalar>> parcels = buildParcelFromTraceStrips(result_1);
+        std::vector<Polyline2_t<Scalar>> parcels2 = buildParcelFromTraceStrips(result_2);
+        parcels.insert(
+            parcels.end(),
+            std::make_move_iterator(parcels2.begin()),
+            std::make_move_iterator(parcels2.end()));
+
+        // 去重叠的parcels
+        // std::vector<std::vector<uint32_t>> gridInsideParcels;
+        // gridInsideParcels.reserve((width + 1) * (height + 1));
+        // for (int j = 0; j <= height; j++)
+        // {
+        //     for (int i = 0; i <= width; i++)
+        //     {
+        //         Vector2<Scalar> pos(i * cellSize - width / 2 * cellSize, j * cellSize - height / 2 * cellSize);
+        //         for (int k = 0; k < parcels.size(); k++)
+        //         {
+        //             const Polyline2_t<Scalar> parcel = parcels[k];
+        //             AABB bound = parcel.getAABB2();
+        //             if (bound.contains(pos))
+        //                 gridInsideParcels[j * (width + 1) + i] = k;
+        //         }
+        //     }
+        // }
+        return parcels;
     }
 
     void buildPlotUISettings();

@@ -11,7 +11,7 @@ namespace render
     float RENDER_MOVE_SPEED = 0.03f;
     float RENDER_ROTATE_SPEED = 0.003f;
     float RENDER_ZOOM_SPEED = 1.0f;
-    
+
     Renderer3D::Renderer3D(int width, int height, float fovy, CameraProjection proj, const char *name)
         : width_(width), height_(height), fovy_(fovy), projection_(proj), name_(name),
           yaw_(0.8f), pitch_(0.4f), distance_(14.f)
@@ -63,7 +63,7 @@ namespace render
         }
 
         // 滚轮按下：平移
-        if (/* IsMouseButtonDown(MOUSE_BUTTON_RIGHT) ||  */IsMouseButtonDown(MOUSE_BUTTON_MIDDLE))
+        if (/* IsMouseButtonDown(MOUSE_BUTTON_RIGHT) ||  */ IsMouseButtonDown(MOUSE_BUTTON_MIDDLE))
         {
             Vector3 forward = {
                 cosf(pitch_) * sinf(yaw_),
@@ -90,15 +90,15 @@ namespace render
         camera_.up = {0, 1, 0};
     }
 
-    void fill_polygon2(const Polyloop2 &poly, Color color, float z, float alpha, bool doubleSided)
+    void fill_polygon2(const Polyloop2 &poly, Color color, float z, float alpha, Vec2 move, bool doubleSided)
     {
         if (poly.triangles().size() <= 0)
             return;
         for (auto &tri : poly.triangles())
         {
-            Vec2 a = poly.points()[tri.at(0)];
-            Vec2 b = poly.points()[tri.at(1)];
-            Vec2 c = poly.points()[tri.at(2)];
+            Vec2 a = poly.points()[tri.at(0)] + move;
+            Vec2 b = poly.points()[tri.at(1)] + move;
+            Vec2 c = poly.points()[tri.at(2)] + move;
             DrawTriangle3D(
                 {a.x(), z, -a.y()},
                 {b.x(), z, -b.y()},
@@ -119,15 +119,15 @@ namespace render
         }
     }
 
-    void fill_polygon3(const Polyloop3 &poly, Color color, float alpha, bool doubleSided)
+    void fill_polygon3(const Polyloop3 &poly, Color color, float alpha, Vec3 move, bool doubleSided)
     {
         if (poly.triangles().size() <= 0)
             return;
         for (auto &tri : poly.triangles())
         {
-            Vec3 a = poly.points()[tri.at(0)];
-            Vec3 b = poly.points()[tri.at(1)];
-            Vec3 c = poly.points()[tri.at(2)];
+            Vec3 a = poly.points()[tri.at(0)] + move;
+            Vec3 b = poly.points()[tri.at(1)] + move;
+            Vec3 c = poly.points()[tri.at(2)] + move;
             DrawTriangle3D(
                 {a.x(), a.z(), -a.y()},
                 {b.x(), b.z(), -b.y()},
@@ -148,120 +148,127 @@ namespace render
         }
     }
 
-    void stroke_light_polygon2(const Polyloop2 &poly, Color color, float z, float alpha)
+    void stroke_light_polygon2(const Polyloop2 &poly, Color color, float z, float alpha, Vec2 move)
     {
         vector<Vector3> pts_vector3 = vec2_to_Vector3_arr(poly.points(), float(z));
         size_t n = pts_vector3.size();
+        Vector3 delta = {move.x(), 0, -move.y()};
         for (size_t i = 0; i < n; ++i)
         {
-            DrawLine3D(pts_vector3[i], pts_vector3[(i + 1) % n], Fade(color, alpha));
+            DrawLine3D(pts_vector3[i] + delta, pts_vector3[(i + 1) % n] + delta, Fade(color, alpha));
         }
     }
 
-    void stroke_bold_polygon2(const Polyloop2 &poly, Color color, float z, float thickness, float alpha)
+    void stroke_bold_polygon2(const Polyloop2 &poly, Color color, float z, float thickness, float alpha, Vec2 move)
     {
         vector<Vector3> pts_vector3 = vec2_to_Vector3_arr(poly.points(), float(z));
         size_t n = pts_vector3.size();
+        Vector3 delta = {move.x(), 0, -move.y()};
         for (size_t i = 0; i < n; ++i)
         {
-
-            DrawCylinderEx(pts_vector3[i], pts_vector3[(i + 1) % n], thickness, thickness, 1, Fade(color, alpha));
+            DrawCylinderEx(pts_vector3[i] + delta, pts_vector3[(i + 1) % n] + delta, thickness, thickness, 1, Fade(color, alpha));
         }
     }
 
-    void stroke_light_polygon3(const Polyloop3 &poly, Color color, float alpha)
+    void stroke_light_polygon3(const Polyloop3 &poly, Color color, float alpha,Vec3 move)
     {
         vector<Vector3> pts_vector3 = vec3_to_Vector3_arr(poly.points());
         size_t n = pts_vector3.size();
+        Vector3 delta = {move.x(), move.z(), -move.y()};
         for (size_t i = 0; i < n; ++i)
         {
-            DrawLine3D(pts_vector3[i], pts_vector3[(i + 1) % n], Fade(color, alpha));
+            DrawLine3D(pts_vector3[i] + delta, pts_vector3[(i + 1) % n] + delta, Fade(color, alpha));
         }
     }
 
-    void stroke_bold_polygon3(const Polyloop3 &poly, Color color, float thickness, float alpha)
+    void stroke_bold_polygon3(const Polyloop3 &poly, Color color, float thickness, float alpha, Vec3 move)
     {
         vector<Vector3> pts_vector3 = vec3_to_Vector3_arr(poly.points());
         size_t n = pts_vector3.size();
+        Vector3 delta = {move.x(), move.z(), -move.y()};
         for (size_t i = 0; i < n; ++i)
         {
-            DrawCylinderEx(pts_vector3[i], pts_vector3[(i + 1) % n], thickness, thickness, 1, Fade(color, alpha));
+            DrawCylinderEx(pts_vector3[i] + delta, pts_vector3[(i + 1) % n] + delta, thickness, thickness, 1, Fade(color, alpha));
         }
     }
 
-    void draw_light_polyline2(const std::vector<Vec2> &pts, Color color, float z, float alpha)
+    void draw_light_polyline2(const std::vector<Vec2> &pts, Color color, float z, float alpha, Vec2 move)
     {
+        size_t n = pts.size();
+        if (n <= 1)
+            return;
         vector<Vector3> pts_vector3 = vec2_to_Vector3_arr(pts, float(z));
-        size_t n = pts_vector3.size();
-        if (n <= 1)
-            return;
+        Vector3 delta = {move.x(), 0, -move.y()};
         for (size_t i = 0; i < n - 1; ++i)
         {
-            DrawLine3D(pts_vector3[i], pts_vector3[i + 1], Fade(color, alpha));
+            DrawLine3D(pts_vector3[i] + delta, pts_vector3[i + 1] + delta, Fade(color, alpha));
         }
     }
 
-
-    void draw_bold_polyline2(const std::vector<Vec2> &pts, Color color, float z, float thickness, float alpha)
+    void draw_bold_polyline2(const std::vector<Vec2> &pts, Color color, float z, float thickness, float alpha, Vec2 move)
     {
+        size_t n = pts.size();
+        if (n <= 1)
+            return;
         vector<Vector3> pts_vector3 = vec2_to_Vector3_arr(pts, float(z));
-        size_t n = pts_vector3.size();
-        if (n <= 1)
-            return;
+        Vector3 delta = {move.x(), 0, -move.y()};
         for (size_t i = 0; i < n - 1; ++i)
         {
-            DrawCylinderEx(pts_vector3[i], pts_vector3[i+1], thickness, thickness, 1, Fade(color, alpha));
+            DrawCylinderEx(pts_vector3[i] + delta, pts_vector3[i + 1] + delta, thickness, thickness, 1, Fade(color, alpha));
         }
     }
 
-
-    void draw_light_polyline3(const std::vector<Vec3> &pts, Color color, float alpha)
+    void draw_light_polyline3(const std::vector<Vec3> &pts, Color color, float alpha, Vec3 move)
     {
-        vector<Vector3> pts_vector3 = vec3_to_Vector3_arr(pts);
-        size_t n = pts_vector3.size();
+
+        size_t n = pts.size();
         if (n <= 1)
             return;
+        vector<Vector3> pts_vector3 = vec3_to_Vector3_arr(pts);
+        Vector3 delta = {move.x(), move.z(), -move.y()};
         for (size_t i = 0; i < n - 1; ++i)
         {
-            DrawLine3D(pts_vector3[i], pts_vector3[i + 1], Fade(color, alpha));
+            DrawLine3D(pts_vector3[i] + delta, pts_vector3[i + 1] + delta, Fade(color, alpha));
         }
     }
 
-    void draw_bold_polyline3(const std::vector<Vec3> &pts, Color color, float thickness, float alpha)
+    void draw_bold_polyline3(const std::vector<Vec3> &pts, Color color, float thickness, float alpha, Vec3 move)
     {
-        vector<Vector3> pts_vector3 = vec3_to_Vector3_arr(pts);
-        size_t n = pts_vector3.size();
+        size_t n = pts.size();
         if (n <= 1)
             return;
+        vector<Vector3> pts_vector3 = vec3_to_Vector3_arr(pts);
+        Vector3 delta = {move.x(), move.z(), -move.y()};
         for (size_t i = 0; i < n - 1; ++i)
         {
-            DrawCylinderEx(pts_vector3[i], pts_vector3[i + 1], thickness, thickness, 1, Fade(color, alpha));
+            DrawCylinderEx(pts_vector3[i] + delta, pts_vector3[i + 1] + delta, thickness, thickness, 1, Fade(color, alpha));
         }
     }
 
-    void draw_points(const std::vector<Vec2> &pts, Color color, float alpha, Scalar radius, Scalar z)
+    void draw_points(const std::vector<Vec2> &pts, Color color, float alpha, Scalar radius, Scalar z, Vec2 move)
     {
         for (auto &pt : pts)
         {
-            DrawCube({pt.x(), z, -pt.y()}, radius, radius, radius, Fade(color, alpha));
+            DrawCube({pt.x() + move.x(), z, -pt.y() - move.y()}, radius, radius, radius, Fade(color, alpha));
             // DrawPoint3D({pt.x(), z, -pt.y()}, Fade(color, alpha));
             // DrawSphere({pt.x(), z, -pt.y()}, radius, Fade(color, alpha));
         }
     }
 
-    void draw_points(const std::vector<Vec3> &pts, Color color, float alpha, Scalar radius)
+    void draw_points(const std::vector<Vec3> &pts, Color color, float alpha, Scalar radius, Vec3 move)
     {
         for (auto &pt : pts)
         {
-            DrawCube({pt.x(), pt.z(), -pt.y()}, radius, radius, radius, Fade(color, alpha));
+            DrawCube({pt.x() + move.x(), pt.z() + move.z(), -pt.y() - move.y()}, radius, radius, radius, Fade(color, alpha));
         }
     }
 
-    void draw_vector(const Vec3 &start, const Vec3 &dir, Color color, float scale, float startThickness, float endThickness, float alpha)
+    void draw_vector(const Vec3 &start, const Vec3 &dir, Color color, float scale, float startThickness, float endThickness, float alpha, Vec3 move)
     {
-        Vec3 end = start + dir * scale;
+        Vec3 strat_new = start + move;
+        Vec3 end = strat_new + dir * scale;
         DrawCylinderEx(
-            {start.x(), start.z(), -start.y()},
+            {strat_new.x(), strat_new.z(), -strat_new.y()},
             {end.x(), end.z(), -end.y()},
             startThickness,
             endThickness,
@@ -269,11 +276,12 @@ namespace render
             Fade(color, alpha));
     }
 
-    void draw_vector(const Vec2 &start, const Vec2 &dir, Color color, float scale, float startThickness, float endThickness, float z, float alpha)
+    void draw_vector(const Vec2 &start, const Vec2 &dir, Color color, float scale, float startThickness, float endThickness, float z, float alpha, Vec2 move)
     {
-        Vec2 end = start + dir * scale;
+        Vec2 strat_new = start + move;
+        Vec2 end = strat_new + dir * scale;
         DrawCylinderEx(
-            {start.x(), z, -start.y()},
+            {strat_new.x(), z, -strat_new.y()},
             {end.x(), z, -end.y()},
             startThickness,
             endThickness,
@@ -283,15 +291,15 @@ namespace render
 
     void Renderer3D::runMainLoop(const FrameCallbacks &callBack)
     {
-        
+
         while (!WindowShouldClose())
         {
             updateCamera();
             if (callBack.onUpdate)
                 callBack.onUpdate();
             BeginDrawing();
-            ClearBackground(RAYWHITE);
-          
+            ClearBackground(RL_RAYWHITE);
+
             BeginMode3D(camera_);
             if (callBack.onDraw3D)
                 callBack.onDraw3D();
@@ -300,7 +308,6 @@ namespace render
                 callBack.onDraw2D();
             EndDrawing();
         }
-      
     }
 
     void Renderer3D::draw_index_fonts(const std::vector<Vector3> &world_pos, int size, Color color)
@@ -323,11 +330,11 @@ namespace render
         }
     }
 
-    void Renderer3D::draw_index_fonts(const std::vector<Vec3> &world_pos, int size, Color color)
+    void Renderer3D::draw_index_fonts(const std::vector<Vec3> &world_pos, int size, Color color, Vec3 move)
     {
         for (size_t i = 0; i < world_pos.size(); ++i)
         {
-            Vector2 screen = GetWorldToScreen(vec3_to_Vector3(world_pos[i]), camera_);
+            Vector2 screen = GetWorldToScreen(vec3_to_Vector3(world_pos[i] + move), camera_);
 
             // 可选：屏幕裁剪
             if (screen.x < 0 || screen.x > GetScreenWidth() ||
@@ -343,11 +350,11 @@ namespace render
         }
     }
 
-    void Renderer3D::draw_index_fonts(const std::vector<Vec2> &world_pos, int size, Color color,float z)
+    void Renderer3D::draw_index_fonts(const std::vector<Vec2> &world_pos, int size, Color color, float z, Vec2 move)
     {
         for (size_t i = 0; i < world_pos.size(); ++i)
         {
-            Vector2 screen = GetWorldToScreen(vec2_to_Vector3(world_pos[i], z), camera_);
+            Vector2 screen = GetWorldToScreen(vec2_to_Vector3(world_pos[i] + move, z), camera_);
 
             // 可选：屏幕裁剪
             if (screen.x < 0 || screen.x > GetScreenWidth() ||

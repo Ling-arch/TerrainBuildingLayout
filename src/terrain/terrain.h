@@ -8,6 +8,7 @@
 #include "geo.h"
 #include <queue>
 #include "OpenSimplexNoise.h"
+#include "tensorField.h"
 
 namespace terrain
 {
@@ -65,17 +66,17 @@ namespace terrain
         bool isShowContours = false;
         //-----------------line-----------------
         bool isShowLines = false;
-        Color lineColor = BLACK;
+        Color lineColor = RL_BLACK;
         float lineColorF[4];
         //-----------------pt-------------------
         bool isShowPts = false;
-        Color ptColor = RED;
+        Color ptColor = RL_RED;
         float ptColorF[4];
         float ptSize = 0.1f;
 
         //-----------------pt_indices-------------
         bool isShowIndex = false;
-        Color ptIndexColor = DARKBLUE;
+        Color ptIndexColor = RL_DARKBLUE;
         float ptIndexColorF[4];
         float ptIndexSize = 18.f;
         ContourShowData()
@@ -135,18 +136,28 @@ namespace terrain
         int level;
     };
 
-    struct Attractor
+    struct ParcelFaceNode
     {
-        int vertex; // mesh vertex index
-        int regionId;
-        float weight; // region area / importance
+        int id = -1;
+        int face = -1;
+        float dist = static_cast<float>(1e9);
+        Eigen::Vector2f dirToRoad;
+        bool processed = false;
+        ParcelFaceNode() = default;
+    };
+
+
+    struct FacesParcel{
+        int parcelID = -1;
+        std::vector<int> faces;
+        FacesParcel() = default;
     };
 
     class Terrain
     {
     public:
         // terrain generation
-        int octaves = 2;
+        int octaves = 4;
         float lacunarity = 1.6f;
         float gain = 0.7f;
 
@@ -160,7 +171,7 @@ namespace terrain
         // terrain vertex sorce weight
         float wv_slope = 10.f;
         float wv_aspect = 5.f;
-        float score_threshold = 0.5f;
+        float score_threshold = 0.62f;
         int minRegionFaceSize = 200;
         RegionGrowConfig regionConfig;
         std::vector<RegionInfo> regionInfos;
@@ -185,17 +196,22 @@ namespace terrain
         const TerrainViewMode &getViewMode() const { return viewMode; }
         const int &getWidth() const { return width; }
         const int &getHeight() const { return height; }
+        const float &getCellSize() const { return cellSize; }
         const bool &getContousShow() const { return isShowContours; }
         const float &getMinHeight() const { return minHeight; }
         const float &getMaxHeight() const { return maxHeight; }
         const ContourShowData &getContourShowData() const { return contourShowData; }
         const std::vector<float> &getFaceScores() const { return scores; }
+        const Eigen::AlignedBox2f getAABB2() const { return aabb2; }
 
         //----------------------utils--------------------
         inline int vertexIndex(int gx, int gy) const { return gy * (width + 1) + gx; }
+        inline int gridIndex(int gx, int gy) const { return gy * width + gx; }
 
-        void applyFaceColor(); // set face colors depend on slope , aspect
-        void applyFaceColorPro();
+        void applyFaceColor();                                                                   // set face colors depend on slope , aspect
+        bool sampleTensorAt(field::TerrainTensor<float> &out, const Eigen::Vector2f &pos) const; // sample vertex slope and aspect
+        std::unordered_map<int, field::TerrainTensor<float>> sampleTensorAtGrids(const std::vector<Eigen::Vector2f> &grids) const;
+        bool projectPolylineToTerrain(const std::vector<Eigen::Vector2f> &polyline2D, std::vector<Eigen::Vector3f> &outPolyline3D) const;
         void setViewMode(TerrainViewMode mode); // set viewmode to draw different analysis
 
         void setContoursShow(bool contourShow);
@@ -221,6 +237,7 @@ namespace terrain
         float pathLength(const std::vector<int> &path) const;
 
         std::vector<Road> buildRoads(std::vector<Eigen::Vector3f> &seedPoints, std::vector<Eigen::Vector3f> &controlPts, std::vector<RegionInfo> &regions, int mainRegionCount, const std::vector<std::vector<geo::GraphEdge>> &adj);
+        std::vector<field::Polyline2_t<float>> convertRoadToFieldLine(const std::vector<Road> roads) const;
         void drawRoads(const std::vector<Road> &roads, float MaxWidth) const;
 
         //---------------------- evaluate score utils -----------------------------
@@ -230,6 +247,10 @@ namespace terrain
         std::vector<std::vector<int>> floodFillFaces(const std::vector<float> &scores, float threshold) const;
         std::vector<std::vector<int>> floodFillFacesSoft(std::vector<float> &scores, float threshold) const;
         bool isRegionCompact(const std::vector<int> &region, const Eigen::Vector2f &center) const;
+
+        //---------------------- tensorfield utils --------------------------------
+        std::vector<FacesParcel> generateParcelsWithRoads(const field::TensorField2D<float>& field,const std::vector<Road> &roads,float parcelWidth,float parcelDepth) const;
+
         inline Eigen::Vector2f faceCenter(int f) const
         {
             int i0 = mesh.indices[f * 3 + 0];
@@ -277,6 +298,7 @@ namespace terrain
         ContourShowData contourShowData; // contour data to draw
         float minHeight;                 // minimum height of terrain
         float maxHeight;                 // maximum height of terrain
+        Eigen::AlignedBox2f aabb2;       // terrain planar aabb box
         std::vector<ChunkMeshInfo> chunkMeshes;
         std::vector<float> scores;
         std::vector<float> vertexScores;

@@ -51,33 +51,33 @@ namespace render
         Camera& getCamera() { return camera_; }
         void updateCamera();
         void draw_index_fonts(const std::vector<Vector3> &world_pos, int size, Color color);
-        void draw_index_fonts(const std::vector<Vec3> &world_pos, int size, Color color);
-        void draw_index_fonts(const std::vector<Vec2> &world_pos, int size, Color color,float z = 0.f);
+        void draw_index_fonts(const std::vector<Vec3> &world_pos, int size, Color color,Vec3 move = {0.f, 0.f, 0.f});
+        void draw_index_fonts(const std::vector<Vec2> &world_pos, int size, Color color,float z = 0.f,Vec2 move = {0.f, 0.f});
         void runMainLoop(const FrameCallbacks &callBack);
     };
 
     //-----------------------------------辅助方法------------------------------------
 
-    void fill_polygon2(const Polyloop2 &poly, Color color, float z = 0, float alpha = 1.f, bool doubleSided = false);
-    void fill_polygon3(const Polyloop3 &poly, Color color, float alpha = 1.f, bool doubleSided = false);
+    void fill_polygon2(const Polyloop2 &poly, Color color, float z = 0, float alpha = 1.f , Vec2 move = {0.f, 0.f} ,bool doubleSided = false);
+    void fill_polygon3(const Polyloop3 &poly, Color color, float alpha = 1.f, Vec3 move = {0.f, 0.f, 0.f} ,bool doubleSided = false);
 
-    void stroke_light_polygon2(const Polyloop2 &poly, Color color, float z = 0.f, float alpha = 1.f);
-    void stroke_bold_polygon2(const Polyloop2 &poly, Color color, float z = 0.f, float thickness = 0.03f, float alpha = 1.f);
-    void stroke_light_polygon3(const Polyloop3 &poly, Color color, float alpha = 1.f);
-    void stroke_bold_polygon3(const Polyloop3 &poly, Color color, float thickness = 0.03f, float alpha = 1.f);
+    void stroke_light_polygon2(const Polyloop2 &poly, Color color, float z = 0.f, float alpha = 1.f, Vec2 move = {0.f, 0.f});
+    void stroke_bold_polygon2(const Polyloop2 &poly, Color color, float z = 0.f, float thickness = 0.03f, float alpha = 1.f,Vec2 move = {0.f,0.f});
+    void stroke_light_polygon3(const Polyloop3 &poly, Color color, float alpha = 1.f, Vec3 move = {0.f, 0.f, 0.f});
+    void stroke_bold_polygon3(const Polyloop3 &poly, Color color, float thickness = 0.03f, float alpha = 1.f, Vec3 move = {0.f, 0.f, 0.f});
 
-    void draw_points(const std::vector<Vec2> &pts, Color color, float alpha = 1.f, Scalar radius = 0.1f, Scalar z = 0.f);
-    void draw_points(const std::vector<Vec3> &pts, Color color, float alpha = 1.f, Scalar radius = 0.1f);
+    void draw_points(const std::vector<Vec2> &pts, Color color, float alpha = 1.f, Scalar radius = 0.1f, Scalar z = 0.f, Vec2 move = {0.f, 0.f});
+    void draw_points(const std::vector<Vec3> &pts, Color color, float alpha = 1.f, Scalar radius = 0.1f, Vec3 move = {0.f, 0.f, 0.f});
 
-    void draw_light_polyline2(const std::vector<Vec2> &pts, Color color, float z = 0.f, float alpha = 1.f);
-    void draw_bold_polyline2(const std::vector<Vec2> &pts, Color color, float z = 0.f, float thickness = 0.03f, float alpha = 1.f);
-    void draw_light_polyline3(const std::vector<Vec3> &pts, Color color, float alpha = 1.f);
-    void draw_bold_polyline3(const std::vector<Vec3> &pts, Color color, float thickness = 0.03f, float alpha = 1.f);
+    void draw_light_polyline2(const std::vector<Vec2> &pts, Color color, float z = 0.f, float alpha = 1.f, Vec2 move = {0.f, 0.f});
+    void draw_bold_polyline2(const std::vector<Vec2> &pts, Color color, float z = 0.f, float thickness = 0.03f, float alpha = 1.f, Vec2 move = {0.f, 0.f});
+    void draw_light_polyline3(const std::vector<Vec3> &pts, Color color, float alpha = 1.f, Vec3 move = {0.f, 0.f, 0.f});
+    void draw_bold_polyline3(const std::vector<Vec3> &pts, Color color, float thickness = 0.03f, float alpha = 1.f, Vec3 move = {0.f, 0.f, 0.f});
 
     void fill_polymesh(const std::vector<std::vector<Vector3>> &mesh, Color color, float alpha = 1.f);
 
-    void draw_vector(const Vec3 &start, const Vec3 &dir, Color color, float scale = 1.f, float startThickness = 0.01f, float endThickness = 0.05f, float alpha = 1.f);
-    void draw_vector(const Vec2 &start, const Vec2 &dir, Color color, float scale = 1.f, float startThickness = 0.01f, float endThickness = 0.05f, float z = 0.f, float alpha = 1.f);
+    void draw_vector(const Vec3 &start, const Vec3 &dir, Color color, float scale = 1.f, float startThickness = 0.01f, float endThickness = 0.05f, float alpha = 1.f, Vec3 move = {0.f, 0.f, 0.f});
+    void draw_vector(const Vec2 &start, const Vec2 &dir, Color color, float scale = 1.f, float startThickness = 0.01f, float endThickness = 0.05f, float z = 0.f, float alpha = 1.f, Vec2 move = {0.f, 0.f});
     inline Vector3 vec2_to_Vector3(const Vec2 &v2, float z)
     {
         return {v2.x(), z, -v2.y()};
@@ -95,7 +95,7 @@ namespace render
 
     struct PointDrawData
     {
-        Color color = BLACK;
+        Color color = RL_BLACK;
         float colorF[4] = {0.f, 0.f, 0.f, 1.f};
         float size = 0.2f;
         
@@ -117,7 +117,7 @@ namespace render
 
     struct VectorDrawData
     {
-        Color color = BLACK;
+        Color color = RL_BLACK;
         float colorF[4] = {0.f, 0.f, 0.f, 1.f};
         float scale = 1.f;
         float startThickness = 0.02f;
@@ -138,7 +138,7 @@ namespace render
 
 
     struct FontDrawData{
-        Color color = BLACK;
+        Color color = RL_BLACK;
         float colorF[4] = {0.f, 0.f, 0.f, 1.f};
         int size = 12;
 
@@ -156,7 +156,7 @@ namespace render
     };
 
     struct LineDrawData{
-        Color color = BLACK;
+        Color color = RL_BLACK;
         float colorF[4] = {0.f, 0.f, 0.f, 1.f};
         float Thickness = 0.03f;
 

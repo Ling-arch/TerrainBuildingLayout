@@ -60,7 +60,7 @@ void print_vec2_array(const std::vector<Vec2> &arr, const std::string &name = "a
 static Color room_color_from_id(size_t room_id, size_t num_room)
 {
     if (room_id == INVALID)
-        return BLACK;
+        return RL_BLACK;
     float t = float(room_id) / float(std::max<size_t>(1, num_room));
     float h = t * 360.0f; // hue
     float s = 0.6f;
@@ -309,27 +309,27 @@ int main()
                     Polyloop2 cell = result.cellPolys[i];
                     // size_t room_id = site2room[i];
                     Polyloop3 cell3d = Polyloop3(polyloop::convert_points_to_3d(cell.points(),0.f));
-                    render::stroke_light_polygon2(cell, BLACK, 0.f);
+                    render::stroke_light_polygon2(cell, RL_BLACK, 0.f);
                     // render.fill_polygon2(cell, room_color_from_id(result.site2room[i], num_room), 0.0f, 0.5f);
-                    render::fill_polygon3(cell3d, GREEN, 0.5F);
+                    render::fill_polygon3(cell3d, RL_GREEN, 0.5F);
                 }
 
                 for (size_t i = 0; i < result.diffPolys.size(); i++)
                 {
                     Polyloop2 cell = result.diffPolys[i];
                     // size_t room_id = site2room[i];
-                    render::stroke_light_polygon2(cell, GREEN, 0.f);
+                    render::stroke_light_polygon2(cell, RL_GREEN, 0.f);
                     // render.fill_polygon2(cell, room_color_from_id(result.site2room[i], num_room), 0.0f, 0.5f);
                 }
-                render::draw_points(result.sites, RED);
-                render::draw_points(result.vtxv_real_pos, RED, 0.5f, 0.1f);
+                render::draw_points(result.sites, RL_RED);
+                render::draw_points(result.vtxv_real_pos, RL_RED, 0.5f, 0.1f);
 
             },
             [&]() { // 二维屏幕空间绘图
-                DrawText("Hello", 10, 10, 20, BLACK);
-                render.draw_index_fonts(result.site_world_pos, 16, BLUE);
-                render.draw_index_fonts(result.vtxv_world_pos, 20, RED);
-                render.draw_index_fonts(result.vtxv_diff_pos, 20, DARKBLUE);
+                DrawText("Hello", 10, 10, 20, RL_BLACK);
+                render.draw_index_fonts(result.site_world_pos, 16, RL_BLUE);
+                render.draw_index_fonts(result.vtxv_world_pos, 20, RL_RED);
+                render.draw_index_fonts(result.vtxv_diff_pos, 20, RL_DARKBLUE);
             }});
 
     return 0;

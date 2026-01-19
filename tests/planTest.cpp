@@ -68,25 +68,25 @@ int main()
             }
         },
         [&]() { // 3维空间绘图内容部分
-            render::stroke_bold_polygon2(Polyloop2(boundary), BLACK, 0.f, 0.03f); 
+            render::stroke_bold_polygon2(Polyloop2(boundary), RL_BLACK, 0.f, 0.03f);
             for (size_t i = 0; i < draw_data.cellPolys.size(); i++)
             {
-                render::stroke_light_polygon3(draw_data.cellPolys[i], BLACK);
+                render::stroke_light_polygon3(draw_data.cellPolys[i], RL_BLACK);
                 render::fill_polygon3(draw_data.cellPolys[i], room2colors[plan_prob.site2room[i]],0.8f);
             }
-            render::draw_points(draw_data.sites_world, RED);
+            render::draw_points(draw_data.sites_world, RL_RED);
 
             for (size_t i = 0; i < draw_data.wall_edge_list.size(); i++)
             {
-                render::draw_bold_polyline3(draw_data.wall_edge_list[i], BLACK, 0.06f);
+                render::draw_bold_polyline3(draw_data.wall_edge_list[i], RL_BLACK, 0.06f);
             }
         },
         [&]() { // 二维屏幕空间绘图
             rlImGuiBegin();
-            DrawText(TextFormat("iter = %d", cur_iter), 10, 10, 20, BLACK);
+            DrawText(TextFormat("iter = %d", cur_iter), 10, 10, 20, RL_BLACK);
             // render.draw_index_fonts(site_world_pos, 21, BLUE);
             rlImGuiEnd();
         }});
-    
+
     return 0;
 }

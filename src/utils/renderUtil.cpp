@@ -5,7 +5,7 @@ namespace renderUtil{
     Color room_color_from_id(size_t room_id, size_t num_room)
     {
         if (room_id >= num_room)
-            return BLACK;
+            return RL_BLACK;
         float t = float(room_id) / float(std::max<size_t>(1, num_room));
         float h = t * 360.0f; // hue
         float s = 0.6f;

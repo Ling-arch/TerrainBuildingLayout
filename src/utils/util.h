@@ -751,8 +751,8 @@ namespace util
             }
 
             // 保证CCW
-            if (signed_polygon_area(polygon) < Scalar(0))
-                std::reverse(ring.begin(), ring.end());
+            // if (signed_polygon_area(polygon) < Scalar(0))
+            //     std::reverse(ring.begin(), ring.end());
 
             std::vector<Ring> out;
             out.push_back(ring);
