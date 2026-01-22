@@ -1,13 +1,16 @@
 #include "geo.h"
 
+namespace geo
+{
+    
 
-namespace geo{
+
     PointKey makeKey(const Eigen::Vector3f &p, float eps)
     {
         return {
-            static_cast<int> (std::round(p.x() / eps)),
-            static_cast<int> (std::round(p.y() / eps)),
-            static_cast<int> (std::round(p.z() / eps))};
+            static_cast<int>(std::round(p.x() / eps)),
+            static_cast<int>(std::round(p.y() / eps)),
+            static_cast<int>(std::round(p.z() / eps))};
     }
 
     std::vector<Polyline3> buildPolylines(const std::vector<geo::Segment> &segments, float eps)
@@ -64,7 +67,7 @@ namespace geo{
         int startSeg,
         int startEnd,
         const std::vector<geo::Segment> &segments,
-        const std::unordered_map<PointKey,std::vector<Edge>, PointKeyHash> &adj,
+        const std::unordered_map<PointKey, std::vector<Edge>, PointKeyHash> &adj,
         std::vector<bool> &used,
         float eps,
         Polyline3 &out)
@@ -145,7 +148,6 @@ namespace geo{
             v.position = points[i] + offset;
             v.normal = normal;
             mesh.vertices.push_back(v);
-       
         }
 
         // --- 底面 ---
@@ -155,7 +157,6 @@ namespace geo{
             v.position = points[i];
             v.normal = -normal;
             mesh.vertices.push_back(v);
-           
         }
 
         // ===== 3. 顶 / 底面索引 =====
@@ -212,8 +213,9 @@ namespace geo{
         }
     }
 
-    Mesh buildRaylibMesh(const MeshData &src){
-        
+    Mesh buildRaylibMesh(const MeshData &src)
+    {
+
         Mesh mesh = {0};
 
         mesh.vertexCount = (int)src.vertices.size();
@@ -257,17 +259,20 @@ namespace geo{
         return mesh;
     }
 
-    void PolygonMesh::upload(){
+    void PolygonMesh::upload()
+    {
         model = LoadModelFromMesh(buildRaylibMesh(mesh));
     }
 
-    void PolygonMesh::draw(Color color, float colorAlpha, bool outline,bool wireframe,float wireframeAlpha){
+    void PolygonMesh::draw(Color color, float colorAlpha, bool outline, bool wireframe, float wireframeAlpha)
+    {
         // 绘制模型
-        if(model.meshCount == 0)
+        if (model.meshCount == 0)
             return;
-        DrawModel(model, {0,0,0}, 1.0f, Fade(color, colorAlpha));
+        DrawModel(model, {0, 0, 0}, 1.0f, Fade(color, colorAlpha));
 
-        if(outline){
+        if (outline)
+        {
             const uint32_t n = static_cast<uint32_t>(mesh.vertices.size());
             const uint32_t half = n / 2;
 
@@ -296,19 +301,22 @@ namespace geo{
                     RL_BLACK);
             }
         }
-        if(wireframe){
+        if (wireframe)
+        {
             // 绘制线框
             DrawModelWires(model, {0, 0, 0}, 1.0f, Fade(RL_BLACK, wireframeAlpha));
         }
     }
 
-    void PolygonMesh::regenerate(float newHeight){
+    void PolygonMesh::regenerate(float newHeight)
+    {
         height = newHeight;
         build();
         if (model.meshCount > 0)
             UnloadModel(model);
         upload();
     }
+
 
     
 }

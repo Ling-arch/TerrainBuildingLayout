@@ -176,7 +176,7 @@ namespace diffVoronoi
     class Vtx2XYZToEdgeVectorLayer
     {
     public:
-        Vtx2XYZToEdgeVectorLayer(std::vector<size_t> edge2vtx_)
+        Vtx2XYZToEdgeVectorLayer(const std::vector<size_t> &edge2vtx_)
             : edge2vtx(edge2vtx_) {}
 
         torch::Tensor forward(const torch::Tensor &vtx2xy) const
@@ -185,6 +185,34 @@ namespace diffVoronoi
         }
 
         const std::vector<size_t> &get_egde2vtx() const { return edge2vtx; }
+
+    private:
+        std::vector<size_t> edge2vtx;
+    };
+
+    class EdgeTensorAlignFunction : public torch::autograd::Function<EdgeTensorAlignFunction>
+    {
+    public:
+        static torch::Tensor forward(
+            torch::autograd::AutogradContext *ctx,
+            const torch::Tensor &vtx2xy,         // (num_vtx, 2)
+            const std::vector<size_t> &edge2vtx, // len = num_edge * 2
+            const torch::Tensor &theta_field     // (num_edge, 2), constant
+        );
+
+        static torch::autograd::tensor_list backward(torch::autograd::AutogradContext *ctx, torch::autograd::tensor_list grad_outputs);
+    };
+
+    class EdgeTensorAlignLayer
+    {
+    public:
+        EdgeTensorAlignLayer(const std::vector<size_t> &edge2vtx_)
+            : edge2vtx(edge2vtx_) {}
+
+        torch::Tensor forward(const torch::Tensor &vtx2xy,const torch::Tensor &theta_field) const
+        {
+            return EdgeTensorAlignFunction::apply(vtx2xy, edge2vtx, theta_field);
+        }
 
     private:
         std::vector<size_t> edge2vtx;

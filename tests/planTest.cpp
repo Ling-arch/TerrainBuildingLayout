@@ -49,7 +49,20 @@ int main()
     size_t cur_iter = 0;
     auto start = std::chrono::high_resolution_clock::now();
     bool is_optimizing = false;
- 
+
+    auto optimize_step_safe = [&]()
+    {
+        try
+        {
+            optimize_draw_bystep(plan_prob, cur_iter, 250, draw_data);
+            return true;
+        }
+        catch (const std::exception &e)
+        {
+            std::cerr << "Optimization failed: " << e.what() << std::endl;
+            return false;
+        }
+    };
     //----------------------------相当于draw部分------------------------
     rlImGuiSetup(true);
     render.runMainLoop(render::FrameCallbacks{
@@ -64,7 +77,13 @@ int main()
 
             if (is_optimizing)
             {
-                optimize_draw_bystep(plan_prob, cur_iter, 250, draw_data);
+                bool ok = optimize_step_safe();
+                if (!ok)
+                {
+                    plan_prob =  define_problem(0, boundary, area_ratio, room_connections, {}, {});
+                    cur_iter = 0;
+                    is_optimizing = true; // 或 false
+                }
             }
         },
         [&]() { // 3维空间绘图内容部分

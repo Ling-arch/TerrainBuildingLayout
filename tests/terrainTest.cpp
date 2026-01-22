@@ -5,19 +5,15 @@
 #include "renderUtil.h"
 #include <rlImGui.h>
 #include <imgui.h>
-// #undef RED
-// #undef BLACK
-// #undef WHITE
-// #undef BLUE
-// #undef GREEN
-// #undef YELLOW
 #include "tensorField.h"
+#include "optimizer.h"
 
 using Eigen::Vector2f, Eigen::Vector3f, Eigen::Vector2d;
 using field::Polyline2_t, field::TensorField2D, field::PointAtrractor, field::TerrainTensor;
 using render::Renderer3D;
 using terrain::Terrain, terrain::TerrainCell, terrain::TerrainViewMode, terrain::ContourLayer, terrain::Road;
 using namespace render;
+using namespace optimizer;
 
 int main()
 {
@@ -123,11 +119,39 @@ int main()
     }
 
     Polyline2_t<float> testPolyA({{0.f, 0.f}, {10.f, 10.f}, {20.f, 0.f}, {20.f, 20.f}, {0.f, 20.f}, {0.f, 0.f}}, true);
-    Polyline2_t<float> testPolyB({{10.f, 0.f}, {30.f, 10.f}, {12.f, 14.f}, {10.f, 0.f}}, true);
+    Polyline2_t<float> testPolyB({{10.f, 0.f}, {31.f, 11.f}, {12.f, 14.f}, {10.f, 0.f}}, true);
+    std::vector<Vector2f> cutPoints = {{0.f, 10.f}, {20.f, 10.f}, {10.f, 30.f}, {-5.f, 10.f}};
+    // cutPoints.insert(cutPoints.end(), std::make_move_iterator(cutPoints.end()), std::make_move_iterator(cutPoints.begin()));
+    Polyline2_t<float> cutline(cutPoints);
 
     Polyline2_t<float> unionPoly = geo::unionPolygon(testPolyA, testPolyB);
     std::vector<Polyline2_t<float>> subedPolys = geo::subPolygon(testPolyA, testPolyB);
     std::vector<Polyline2_t<float>> interPolys = geo::intersectPolygon(testPolyA, testPolyB);
+    std::vector<Polyline2_t<float>> cuttedPolys = geo::splitPolygonByPolylines(testPolyA, {cutline});
+    std::cout << "cuttedpolys is " << cuttedPolys.size() << std::endl;
+    std::vector<Polyline2_t<float>> offsetPolys;
+    static float offsetDist = -1.f;
+    bool offsetPoly = false;
+    for (const auto &poly : cuttedPolys)
+    {
+        std::vector<Polyline2_t<float>> offsets = geo::offsetPolygon(poly, offsetDist);
+        offsetPolys.insert(offsetPolys.end(), offsets.begin(), offsets.end());
+    }
+
+    const std::vector<float> area_ratio = {0.4f, 0.3f, 0.2f, 0.1f, 0.1f, 0.1f};
+    const std::vector<std::pair<size_t, size_t>> room_connections = {{0, 1}, {0, 2}, {1, 3}, {0, 4}, {4, 5}};
+    PlanProblem plan_prob;
+    std::vector<Vector2f> testParcelBounds;
+    if (parcels.size() > 0)
+    {
+        plan_prob = define_field_problem(0, tensorField, parcels[0].points, area_ratio, room_connections, {}, {});
+        testParcelBounds = polyloop::denormalize_to_pts(plan_prob.vtxl2xy_norm,plan_prob.tf);
+    }
+
+    std::vector<Color> room2colors = renderUtil::room2colors(area_ratio.size());
+    OptimizeDrawData draw_data;
+    size_t cur_iter = 0;
+    bool is_optimizing = false;
     // geo::PolygonMesh extrudeMesh = geo::PolygonMesh({{0, 0, 0}, {30, 0, 0}, {30, 15, 0}, {45, 15, 0}, {45, 30, 0}, {0, 30, 0}}, extrudeHeight);
     // geo::PolygonMesh extrudeMesh_2 = geo::PolygonMesh({{0, 0, extrudeHeight}, {30, 0, extrudeHeight}, {30, 30, extrudeHeight}, {0, 30, extrudeHeight}}, extrudeHeight);
     // geo::PolygonMesh extrudeMesh_3 = geo::PolygonMesh({{30, 0, 0}, {45, 0, 0}, {45, 15, 0}, {30, 15, 0}}, extrudeHeight);
@@ -171,6 +195,18 @@ int main()
 
     render.runMainLoop(render::FrameCallbacks{
         [&]() { // 按键更新，重新绘图等事件
+            if (IsKeyPressed(KEY_R) && parcels.size() > 0)
+            {
+                plan_prob = define_field_problem(0, tensorField, parcels[0].points, area_ratio, room_connections, {}, {});
+                testParcelBounds = polyloop::denormalize_to_pts(plan_prob.vtxl2xy_norm, plan_prob.tf);
+                is_optimizing = true;
+                cur_iter = 0;
+            }
+
+            if (is_optimizing)
+            {
+                optimize_field_problem_and_draw_bystep(plan_prob, cur_iter, 250, draw_data);
+            }
             if (debugRank != lastRank)
             {
                 adj = terrain.buildAdjacencyGraph(debugRank);
@@ -279,8 +315,30 @@ int main()
                 parcelsRebuild();
                 radiusChanged = false;
             }
+            if (offsetPoly)
+            {
+                offsetPolys.clear();
+                for (const auto &poly : cuttedPolys)
+                {
+                    std::vector<Polyline2_t<float>> offsets = geo::offsetPolygon(poly, offsetDist);
+                    offsetPolys.insert(offsetPolys.end(), offsets.begin(), offsets.end());
+                }
+            }
         },
         [&]() { // 3维空间绘图内容部分
+            for (size_t i = 0; i < draw_data.cellPolys.size(); i++)
+            {
+                render::stroke_light_polygon3(draw_data.cellPolys[i], RL_BLACK, 1.f, {terrain.getWidth() * terrain.getCellSize(), 0, 0});
+                render::fill_polygon3(draw_data.cellPolys[i], room2colors[plan_prob.site2room[i]], 0.8f, {terrain.getWidth() * terrain.getCellSize(), 0, 0});
+            }
+            render::draw_points(draw_data.sites_world, RL_RED);
+
+            for (size_t i = 0; i < draw_data.wall_edge_list.size(); i++)
+            {
+                render::draw_bold_polyline3(draw_data.wall_edge_list[i], RL_BLACK, 0.06f, 1.f, {terrain.getWidth() * terrain.getCellSize(), 0, 0});
+            }
+
+            render::draw_points(testParcelBounds, ptData.color, ptData.color.a, ptData.size, 0.f, {terrain.getWidth() * terrain.getCellSize(), 0});
             terrain.draw();
             terrain.drawContours(layers);
             if (mainPaths.size() > 0)
@@ -357,6 +415,16 @@ int main()
             for (const auto &poly : interPolys)
             {
                 render::draw_bold_polyline2(poly.points, RL_DARKBLUE, 50.f, pathWidth, lineData.color.a, {terrain.getWidth() * terrain.getCellSize(), 0});
+            }
+
+            for (const auto &poly : cuttedPolys)
+            {
+                render::draw_bold_polyline2(poly.points, RL_DARKPURPLE, 60.f, pathWidth, lineData.color.a, {terrain.getWidth() * terrain.getCellSize(), 0});
+            }
+
+            for (const auto &poly : offsetPolys)
+            {
+                render::draw_bold_polyline2(poly.points, RL_DARKGREEN, 60.f, pathWidth, lineData.color.a, {terrain.getWidth() * terrain.getCellSize(), 0});
             }
 
             // extrudeMesh.draw(color, colorAlpha,outline, wireframe, wireframeAlpha);
@@ -585,7 +653,7 @@ int main()
                     genTensorfield |= ImGui::SliderInt("Tensor Div Nums", &minGridNum, 10, 60);
                     terrainfieldWeightChanged |= ImGui::SliderFloat("Terrain Field Weight", &terrainWeight, 1.f, 10.f, "%.1f");
                     radiusChanged |= ImGui::SliderFloat("Point Radius", &radius, 7.f, 30.f, "%.1f");
-
+                    offsetPoly |= ImGui::SliderFloat("OffsetDist", &offsetDist, -10.f, 10.f, "%.1f");
                     ImGui::Unindent();
                 }
             }

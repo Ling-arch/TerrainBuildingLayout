@@ -15,7 +15,8 @@
 
 namespace field
 {
-    constexpr double M_PI = 3.14159265358979323846;
+    
+    constexpr double Litten_M_PI = 3.14159265358979323846;
 
     template <typename Scalar>
     using Vector2 = Eigen::Matrix<Scalar, 2, 1>;
@@ -77,7 +78,7 @@ namespace field
     template <typename Scalar>
     inline Scalar wrapTheta(Scalar theta)
     {
-        const Scalar half_pi = Scalar(M_PI * 0.5);
+        const Scalar half_pi = Scalar(Litten_M_PI * 0.5);
         theta = std::fmod(theta, half_pi);
         if (theta < Scalar(0))
             theta += half_pi;
@@ -149,6 +150,7 @@ namespace field
 
         //-----------------------------functions-------------------------
         std::array<Vector2<Scalar>, 4> getTensorAt(const Vector2<Scalar> &pos) const;
+        Scalar sampleTheta(const Vector2<Scalar> &pos) const;
         void addConstraint(const std::vector<Polyline2_t<Scalar>> &polylines, const std::vector<PointAtrractor<Scalar>> &attractors, const std::unordered_map<int, TerrainTensor<Scalar>> &terrainTensors);
         void setTensorWeight(Scalar weight);
         void resolveTensor();
@@ -467,7 +469,7 @@ namespace field
             // ===== 权重设计（关键）=====
             // slope 越大，方向性越强
             // slope ∈ [0, pi/2]，归一化
-            Scalar slope01 = terrainT.slope / Scalar(0.5 * M_PI);
+            Scalar slope01 = terrainT.slope / Scalar(0.5 * Litten_M_PI);
             slope01 = std::clamp(slope01, Scalar(0), Scalar(1));
             // if (slope01 < Scalar(1e-6))
             //     continue;
@@ -561,7 +563,7 @@ namespace field
 
             Scalar theta = Scalar(0.25) * std::atan2(sin4, cos4);
             if (theta < 0)
-                theta += Scalar(0.5 * M_PI);
+                theta += Scalar(0.5 * Litten_M_PI);
 
             theta_[i] = theta;
 
@@ -655,6 +657,54 @@ namespace field
         Vector2<Scalar> v3(-v1.x(), -v1.y());
 
         return {v0, v1, v2, v3};
+    }
+
+    template <typename Scalar>
+    Scalar TensorField2D<Scalar>::sampleTheta(const Vector2<Scalar> &p) const
+    {
+        // 假设 p 在 bound_ 内
+        Vector2<Scalar> local = (p - bound_.min()) / gridSize_;
+
+        int ix = int(std::floor(local.x()));
+        int iy = int(std::floor(local.y()));
+
+        ix = std::clamp(ix, 0, nx_ - 1);
+        iy = std::clamp(iy, 0, ny_ - 1);
+
+        Scalar fx = local.x() - ix;
+        Scalar fy = local.y() - iy;
+
+        int idx = iy * nx_ + ix;
+        const auto &cell = gridTensors_[idx];
+
+        // 注意：θ 是 π/2 对称的，用 sin4 / cos4 插值最稳
+        auto interp = [&](Scalar t00, Scalar t10, Scalar t01, Scalar t11)
+        {
+            Scalar s00 = std::sin(4 * t00), c00 = std::cos(4 * t00);
+            Scalar s10 = std::sin(4 * t10), c10 = std::cos(4 * t10);
+            Scalar s01 = std::sin(4 * t01), c01 = std::cos(4 * t01);
+            Scalar s11 = std::sin(4 * t11), c11 = std::cos(4 * t11);
+
+            Scalar sx0 = (1 - fx) * s00 + fx * s10;
+            Scalar sx1 = (1 - fx) * s01 + fx * s11;
+            Scalar cx0 = (1 - fx) * c00 + fx * c10;
+            Scalar cx1 = (1 - fx) * c01 + fx * c11;
+
+            Scalar s = (1 - fy) * sx0 + fy * sx1;
+            Scalar c = (1 - fy) * cx0 + fy * cx1;
+
+            Scalar theta = Scalar(0.25) * std::atan2(s, c);
+            if (theta < 0)
+                theta += Scalar(0.5 * Litten_M_PI);
+            return theta;
+        };
+
+        return interp(
+            cell.theta[0], // 左上
+            cell.theta[1], // 右上
+            cell.theta[2], // 左下
+            cell.theta[3]  // 右下
+        );
     }
 
     template <typename Scalar>
@@ -885,7 +935,7 @@ namespace field
         // === 与 Java 完全一致的 threshold 修正 ===
         Scalar thre = (threshold >= Scalar(1) || threshold <= Scalar(0)) ? Scalar(0.5) : threshold;
 
-        Scalar angleStep = Scalar(2) * Scalar(M_PI) / Scalar(ptNum);
+        Scalar angleStep = Scalar(2) * Scalar(Litten_M_PI) / Scalar(ptNum);
 
         poly.points.reserve(ptNum + 1);
 

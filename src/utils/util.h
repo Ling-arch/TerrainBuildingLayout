@@ -212,7 +212,6 @@ namespace util
             return Scalar(0.5) * s;
         }
 
-
         static inline Scalar polygon_area(const vector<Vector2> &poly)
         {
             return Eigen::numext::abs(signed_polygon_area(poly));
@@ -453,10 +452,10 @@ namespace util
             return samples;
         }
 
-        struct PoissonResult{
+        struct PoissonResult
+        {
             std::vector<Vector2> samples;
             std::vector<size_t> seed_indices;
-
         };
 
         static PoissonResult gen_poisson_sites_in_poly_with_seeds(
@@ -807,7 +806,67 @@ namespace util
             return triangles;
         }
 
-        static bool compute_plane(const std::vector<Vector3> &pts,Vector3 &normal, Scalar eps)
+        static inline Vector2 getPolygonCentroid(const std::vector<Vector2> &points)
+        {
+            if (points.empty())
+            {
+                return Vector2::Zero();
+            }
+            Vector2 centroid = Vector2::Zero();
+            for (const auto &pt : points){
+                centroid += pt;
+            }
+                
+            return centroid / static_cast<Scalar>(points.size());
+        }
+
+        static Vector2 getPointStrictInSidePolygon(const std::vector<Vector2> &poly)
+        {
+            if (poly.empty() || poly.size() < 3)
+            {
+                return Vector2::Zero();
+            }
+
+            // 核心修正：const容器不能修改，创建临时副本处理首尾重合！！！
+            std::vector<Vector2> poly_temp = poly;
+            // 判断多边形是否首尾重合（闭合），重合则删除最后一个顶点
+            if ((poly_temp.front() - poly_temp.back()).squaredNorm() < Scalar(1e-6))
+            {
+                poly_temp.pop_back();
+            }
+            int n = static_cast<int>(poly_temp.size());
+
+            // 三角形直接返回质心（三角形质心一定在内部）
+            if (n == 3)
+            {
+                return getPolygonCentroid(poly_temp);
+            }
+
+            std::vector<Tri> triangles = triangulate_poly(poly_temp);
+
+            // 遍历所有三角片，找第一个有效面积的三角形
+            for (const Tri &tri : triangles)
+            {
+                if (tri.at(0) >= n || tri.at(1) >= n || tri.at(2) >= n)
+                {
+                    continue;
+                }
+               
+                Vector2 a = poly_temp[tri.at(0)];
+                Vector2 b = poly_temp[tri.at(1)];
+                Vector2 c = poly_temp[tri.at(2)];
+                
+                if (polygon_area({a, b, c}) > Scalar(1e-6))
+                {
+                    return getPolygonCentroid({a, b, c});
+                }
+            }
+
+            // 所有三角片无效时，返回原多边形的质心
+            return getPolygonCentroid(poly_temp);
+        }
+
+        static bool compute_plane(const std::vector<Vector3> &pts, Vector3 &normal, Scalar eps)
         {
             if (pts.size() < 3)
                 return false;
@@ -816,8 +875,8 @@ namespace util
             Vector3 n = Vector3::Zero();
             for (size_t i = 0; i < pts.size(); ++i)
             {
-                const Vector3& a = pts[i];
-                const Vector3& b = pts[(i + 1) % pts.size()];
+                const Vector3 &a = pts[i];
+                const Vector3 &b = pts[(i + 1) % pts.size()];
                 n += a.cross(b);
             }
 
@@ -825,7 +884,6 @@ namespace util
                 return false; // 全共线
 
             normal = n.normalized();
-            
 
             // 检查所有点到平面的距离
             for (auto &p : pts)
@@ -855,7 +913,7 @@ namespace util
         {
             std::vector<Vector2> out;
             out.reserve(pts.size());
- 
+
             for (const auto &p : pts)
             {
                 Vector3 d = p - pts[0];

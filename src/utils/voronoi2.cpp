@@ -194,7 +194,14 @@ namespace voronoi2
                   [](auto &a, auto &b)
                   { return std::get<0>(a) < std::get<0>(b); });
 
-        assert(vtxnews.size() % 2 == 0);
+        if (vtxnews.size() % 2 != 0)
+        {
+            std::ostringstream oss;
+            oss << "cut_polygon_by_line failed: "
+                << "intersection count = " << vtxnews.size()
+                << ", num_vtx = " << cell.vtx2xy.size();
+            throw std::runtime_error(oss.str());
+        }
 
         std::vector<size_t> vtx2vtxnew(cell.vtx2xy.size(), INVALID_INDEX);
         for (size_t i = 0; i < vtxnews.size(); ++i)

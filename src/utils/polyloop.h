@@ -3,7 +3,6 @@
 #include <cassert>
 #include "util.h"
 
-
 namespace polyloop
 {
 
@@ -13,7 +12,7 @@ namespace polyloop
     using Vector3 = typename M2::Vector3;
     using Matrix2 = typename M2::Matrix2;
     using Tri = util::Tri;
-    
+
     struct AABB2
     {
         float minx, miny;
@@ -66,7 +65,6 @@ namespace polyloop
     {
     public:
         Polyloop2(const std::vector<Vector2> &points);
-      
 
         const std::vector<Vector2> &points() const { return points_; }
 
@@ -83,7 +81,7 @@ namespace polyloop
     {
     public:
         Polyloop3(const std::vector<Vector3> &points);
-       
+
         const std::vector<Vector3> &points() const { return points_; }
         const std::vector<Vector2> &projected_points() const { return projected_points_; }
         const std::vector<Tri> &triangles() const { return triangles_; }
@@ -123,7 +121,7 @@ namespace polyloop
         return len;
     }
 
-    //T is float/double, N is demension of points coordinates
+    // T is float/double, N is demension of points coordinates
     template <typename T, int N>
     std::vector<T> resample(const std::vector<T> &vtx2xyz_in, size_t num_edge_out)
     {
@@ -230,9 +228,8 @@ namespace polyloop
         return out;
     }
 
-
     template <typename Real>
-    std::vector<Real> map_pt_normalized(const std::vector<Real> &pt2xy, const std::array<Real, 2> &center_pos, const NormalizeTransform2D<Real>& tf)
+    std::vector<Real> map_pt_normalized(const std::vector<Real> &pt2xy, const std::array<Real, 2> &center_pos, const NormalizeTransform2D<Real> &tf)
     {
         assert(pt2xy.size() % 2 == 0);
         std::vector<Real> out;
@@ -256,9 +253,7 @@ namespace polyloop
     }
 
     template <typename Real>
-    std::vector<Real> denormalize(
-        const std::vector<Real> &vtx2xy_norm,
-        const NormalizeTransform2D<Real> &tf)
+    std::vector<Real> denormalize(const std::vector<Real> &vtx2xy_norm, const NormalizeTransform2D<Real> &tf)
     {
         assert(vtx2xy_norm.size() % 2 == 0);
 
@@ -275,9 +270,24 @@ namespace polyloop
         return out;
     }
 
-    inline std::vector<Vector2> denormalize(
-        const std::vector<Vector2> &vtx_norm,
-        const NormalizeTransform2D<Scalar> &tf)
+    template <typename Real>
+    std::vector<Vector2> denormalize_to_pts(const std::vector<Real> &vtx2xy_norm, const NormalizeTransform2D<Real> &tf)
+    {
+        assert(vtx2xy_norm.size() % 2 == 0);
+
+        std::vector<Vector2> out;
+        out.reserve(vtx2xy_norm.size() % 2);
+
+        for (size_t i = 0; i < vtx2xy_norm.size(); i += 2)
+        {
+            Real x = (vtx2xy_norm[i] - tf.tx) / tf.scale + tf.cx;
+            Real y = (vtx2xy_norm[i + 1] - tf.ty) / tf.scale + tf.cy;
+            out.emplace_back(x,y);
+        }
+        return out;
+    }
+
+    inline std::vector<Vector2> denormalize(const std::vector<Vector2> &vtx_norm, const NormalizeTransform2D<Scalar> &tf)
     {
 
         std::vector<Vector2> out;
@@ -289,6 +299,11 @@ namespace polyloop
             out.push_back(v_origin);
         }
         return out;
+    }
+
+    inline Vector2 denormalize(float vx, float vy, const NormalizeTransform2D<Scalar> &tf)
+    {
+        return {(vx - tf.tx) / tf.scale + tf.cx, (vy - tf.ty) / tf.scale + tf.cy};
     }
 
     inline std::vector<Polyloop3> convert_polyloop2_to_3d(std::vector<Polyloop2> polys, Scalar z)
@@ -306,7 +321,8 @@ namespace polyloop
         return out;
     }
 
-    inline Polyloop3 convert_points_to_polyloop3d(std::vector<Vector2> points, Scalar z){
+    inline Polyloop3 convert_points_to_polyloop3d(std::vector<Vector2> points, Scalar z)
+    {
         std::vector<Vector3> points_3d;
         for (Vector2 pt : points)
         {

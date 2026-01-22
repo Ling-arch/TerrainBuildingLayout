@@ -6,6 +6,7 @@
 #include "polygonMesh.h"
 #include "polyloop.h"
 #include <vector>
+#include "tensorfield.h"
 
 namespace optimizer
 {
@@ -23,7 +24,6 @@ namespace optimizer
     //优先考虑相交区域，将跨层的房间id先分配给
     struct MultiPlanProblem{
         vector<vector<Scalar>> vtxl2xy_norms;
-
     };
     
     struct PlanProblem
@@ -31,6 +31,7 @@ namespace optimizer
         //归一化后的plan
         vector<Scalar> vtxl2xy_norm;
         polyloop::NormalizeTransform2D<Scalar> tf;
+        field::TensorField2D<Scalar> field;
         int64_t num_room;
         int floor;
 
@@ -68,9 +69,7 @@ namespace optimizer
     };
 
     PlanProblem define_problem(const int floor, const vector<Vector2> &boundary, const vector<float> &area_ratio, const vector<pair<size_t, size_t>> &room_connections, const vector<Vector2> &fix_sites, const vector<size_t> &fix_rooms);
-
+    PlanProblem define_field_problem(const int floor,field::TensorField2D<float> field, const vector<Vector2> &boundary, const vector<float> &area_ratio, const vector<pair<size_t, size_t>> &room_connections, const vector<Vector2> &fix_sites, const vector<size_t> &fix_rooms);
     void optimize_draw_bystep(PlanProblem& plan_prob, size_t &cur_iter, const size_t max_iter, OptimizeDrawData &diff_voronoi_show_data);
-
-   
-   
+    void optimize_field_problem_and_draw_bystep(PlanProblem &plan_prob, size_t &cur_iter, const size_t max_iter, OptimizeDrawData &diff_voronoi_show_data);
 }

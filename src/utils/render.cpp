@@ -152,6 +152,8 @@ namespace render
     {
         vector<Vector3> pts_vector3 = vec2_to_Vector3_arr(poly.points(), float(z));
         size_t n = pts_vector3.size();
+        if (n <= 1)
+            return;
         Vector3 delta = {move.x(), 0, -move.y()};
         for (size_t i = 0; i < n; ++i)
         {
@@ -163,6 +165,8 @@ namespace render
     {
         vector<Vector3> pts_vector3 = vec2_to_Vector3_arr(poly.points(), float(z));
         size_t n = pts_vector3.size();
+        if (n <= 1)
+            return;
         Vector3 delta = {move.x(), 0, -move.y()};
         for (size_t i = 0; i < n; ++i)
         {
@@ -170,10 +174,12 @@ namespace render
         }
     }
 
-    void stroke_light_polygon3(const Polyloop3 &poly, Color color, float alpha,Vec3 move)
+    void stroke_light_polygon3(const Polyloop3 &poly, Color color, float alpha, Vec3 move)
     {
         vector<Vector3> pts_vector3 = vec3_to_Vector3_arr(poly.points());
         size_t n = pts_vector3.size();
+        if (n <= 1)
+            return;
         Vector3 delta = {move.x(), move.z(), -move.y()};
         for (size_t i = 0; i < n; ++i)
         {
@@ -185,6 +191,8 @@ namespace render
     {
         vector<Vector3> pts_vector3 = vec3_to_Vector3_arr(poly.points());
         size_t n = pts_vector3.size();
+        if (n <= 1)
+            return;
         Vector3 delta = {move.x(), move.z(), -move.y()};
         for (size_t i = 0; i < n; ++i)
         {
@@ -247,6 +255,8 @@ namespace render
 
     void draw_points(const std::vector<Vec2> &pts, Color color, float alpha, Scalar radius, Scalar z, Vec2 move)
     {
+        if (pts.size() < 0)
+            return;
         for (auto &pt : pts)
         {
             DrawCube({pt.x() + move.x(), z, -pt.y() - move.y()}, radius, radius, radius, Fade(color, alpha));
@@ -257,6 +267,8 @@ namespace render
 
     void draw_points(const std::vector<Vec3> &pts, Color color, float alpha, Scalar radius, Vec3 move)
     {
+        if (pts.size() < 0)
+            return;
         for (auto &pt : pts)
         {
             DrawCube({pt.x() + move.x(), pt.z() + move.z(), -pt.y() - move.y()}, radius, radius, radius, Fade(color, alpha));

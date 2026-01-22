@@ -2,7 +2,9 @@
 
 namespace loss
 {
-
+    using diffVoronoi::PolygonMesh2ToCogsLayer, diffVoronoi::PolygonMesh2ToAreaLayer, diffVoronoi::EdgeTensorAlignLayer,
+        diffVoronoi::PolygonMesh2ToCogsFunction, diffVoronoi::PolygonMesh2ToAreaFunction;
+    using namespace polygonMesh;
     // num_group,  site2group,   room2group
     std::tuple<size_t, std::vector<size_t>, std::vector<std::vector<size_t>>> topology(
         const VoronoiInfo &voronoi_info,
@@ -64,7 +66,7 @@ namespace loss
 
     std::vector<std::vector<size_t>> inverse_map(size_t num_group, const std::vector<size_t> &site2group)
     {
-    
+
         // group -> ordered unique sites
         std::vector<std::set<size_t>> group2site_set(num_group);
 
@@ -283,7 +285,7 @@ namespace loss
         return (site2xy - site2xytrg_tensor).pow(2).sum();
     }
 
-    std::vector<size_t> edge2vtvx_wall(const VoronoiInfo &voronoi_info,const std::vector<size_t> &site2room)
+    std::vector<size_t> edge2vtvx_wall(const VoronoiInfo &voronoi_info, const std::vector<size_t> &site2room)
     {
         const auto &site2idx = voronoi_info.site2idx;
         const auto &idx2vtxv = voronoi_info.idx2vtxv;
@@ -414,7 +416,7 @@ namespace loss
         /* ------------------------------------------------------------
          * 3. polygonmesh2_to_cogs
          * ------------------------------------------------------------ */
-        PolygonMesh2ToCogsLayer polygonmesh2_to_cogs(voronoi_info.site2idx,voronoi_info.idx2vtxv);
+        PolygonMesh2ToCogsLayer polygonmesh2_to_cogs(voronoi_info.site2idx, voronoi_info.idx2vtxv);
         torch::Tensor site2cogs = polygonmesh2_to_cogs.forward(vtxv2xy);
 
         /* ------------------------------------------------------------
@@ -436,17 +438,17 @@ namespace loss
         TORCH_CHECK(vtxv2xy.device().is_cpu());
         TORCH_CHECK(vtxv2xy.dim() == 2 && vtxv2xy.size(1) == 2);
 
-        //std::cout << "TORCH_CHECK OK" << std::endl;
+        // std::cout << "TORCH_CHECK OK" << std::endl;
         /* ------------------------------------------------------------
          * 1. site2areas via PolygonMesh2ToAreas
          * ------------------------------------------------------------ */
-        PolygonMesh2ToAreaLayer polygonmesh2_to_areas(site2idx,idx2vtxv);
+        PolygonMesh2ToAreaLayer polygonmesh2_to_areas(site2idx, idx2vtxv);
 
         torch::Tensor site2areas = polygonmesh2_to_areas.forward(vtxv2xy);
-        //std::cout << "polygonmesh2_to_areas forward OK" << std::endl;
-        // reshape to (num_site, 1) for matmul
+        // std::cout << "polygonmesh2_to_areas forward OK" << std::endl;
+        //  reshape to (num_site, 1) for matmul
         site2areas = site2areas.view({site2areas.size(0), 1});
-        //std::cout << "site2areas has calculated" << std::endl;
+        // std::cout << "site2areas has calculated" << std::endl;
         /* ------------------------------------------------------------
          * 2. build (num_room, num_site) accumulation matrix
          * ------------------------------------------------------------ */
@@ -470,7 +472,7 @@ namespace loss
                                  torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU))
                                  .clone(); // owning tensor
 
-        //std::cout << "room_site_mat has calculated" << std::endl;
+        // std::cout << "room_site_mat has calculated" << std::endl;
         /* ------------------------------------------------------------
          * 3. matmul -> room2area
          * ------------------------------------------------------------ */
@@ -630,10 +632,9 @@ namespace loss
         for (float a : room2area)
             total_area += a;
 
-
         const size_t num_site_assign = num_site - num_room;
         float area_per_site = total_area / static_cast<float>(num_site_assign);
-        
+
         std::vector<float> cumsum(num_room);
         {
             float acc = 0.f;
@@ -654,7 +655,7 @@ namespace loss
             if (room_fixed_count[i_room] == 0 && free_idx < free_sites.size())
             {
                 site2room[free_sites[free_idx]] = i_room;
-                free_idx ++;
+                free_idx++;
             }
 
             while (free_idx < free_sites.size())
@@ -696,5 +697,140 @@ namespace loss
         torch::Tensor diff = site2xy - site2cogs;
 
         return diff.pow(2).sum();
+    }
+
+    torch::Tensor loss_field(const std::vector<size_t> &edge2vtx, const field::TensorField2D<float> &field, const torch::Tensor &vtxv2xy, const polyloop::NormalizeTransform2D<Scalar> &tf)
+    {
+        TORCH_CHECK(vtxv2xy.dim() == 2 && vtxv2xy.size(1) == 2);
+
+        const float *vtx_ptr = vtxv2xy.data_ptr<float>();
+        size_t num_edge = edge2vtx.size() / 2;
+
+        torch::Tensor field_dirs =
+            torch::zeros({(int64_t)num_edge, 2}, vtxv2xy.options());
+        float *field_ptr = field_dirs.data_ptr<float>();
+
+        for (size_t e = 0; e < num_edge; ++e)
+        {
+            int v0 = edge2vtx[2 * e + 0];
+            int v1 = edge2vtx[2 * e + 1];
+
+            float v0x = vtx_ptr[2 * v0 + 0];
+            float v0y = vtx_ptr[2 * v0 + 1];
+            float v1x = vtx_ptr[2 * v1 + 0];
+            float v1y = vtx_ptr[2 * v1 + 1];
+
+            float cenX = 0.5f * (v0x + v1x);
+            float cenY = 0.5f * (v0y + v1y);
+
+            Vector2 realCen = polyloop::denormalize(cenX, cenY, tf);
+
+            auto dirs = field.getTensorAt(realCen);
+
+            Vector2 edgeDir{v1x - v0x, v1y - v0y};
+
+            Vector2 bestDir = dirs[0];
+            float maxDot = bestDir.dot(edgeDir);
+            for (auto &d : dirs)
+            {
+                float v = d.dot(edgeDir);
+                if (v > maxDot)
+                {
+                    maxDot = v;
+                    bestDir = d;
+                }
+            }
+
+            field_ptr[e * 2 + 0] = bestDir.x();
+            field_ptr[e * 2 + 1] = bestDir.y();
+        }
+
+        EdgeTensorAlignLayer layer(edge2vtx);
+        return layer.forward(vtxv2xy, field_dirs);
+    }
+
+    torch::Tensor loss_field_continuous(
+        const std::vector<size_t> &edge2vtx,
+        const field::TensorField2D<float> &field,
+        const torch::Tensor &vtx2xy,
+        const polyloop::NormalizeTransform2D<float> &tf)
+    {
+        TORCH_CHECK(vtx2xy.is_cpu());
+        TORCH_CHECK(vtx2xy.dtype() == torch::kFloat32);
+
+        const float *vtx = vtx2xy.data_ptr<float>();
+        int64_t num_edge = edge2vtx.size() / 2;
+
+        torch::Tensor loss = torch::zeros({num_edge}, vtx2xy.options());
+        float *loss_ptr = loss.data_ptr<float>();
+
+        for (int64_t e = 0; e < num_edge; ++e)
+        {
+            int i0 = edge2vtx[2 * e + 0];
+            int i1 = edge2vtx[2 * e + 1];
+
+            float x0 = vtx[2 * i0 + 0];
+            float y0 = vtx[2 * i0 + 1];
+            float x1 = vtx[2 * i1 + 0];
+            float y1 = vtx[2 * i1 + 1];
+
+            float ex = x1 - x0;
+            float ey = y1 - y0;
+            // float len = std::sqrt(ex * ex + ey * ey) + 1e-8f;
+            // ex /= len;
+            // ey /= len;
+
+            float cx = 0.5f * (x0 + x1);
+            float cy = 0.5f * (y0 + y1);
+            float phi = std::atan2(ey, ex);
+            Vector2 realC = polyloop::denormalize(cx, cy, tf);
+            float theta = field.sampleTheta(realC); // ∈ [0, π/2)
+
+            float d = phi - theta;
+
+            // wrap 到 [-pi, pi]，数值更稳
+            while (d > M_PI)
+                d -= 2 * M_PI;
+            while (d < -M_PI)
+                d += 2 * M_PI;
+
+            // 4-fold symmetric alignment
+            float c = std::cos(4.0f * d);
+
+            // L2 型能量（推荐）
+            loss_ptr[e] = 1.f - c * c;
+        }
+
+        // 常用：mean 而不是 sum（尺度更稳）
+        return loss.mean();
+    }
+
+    torch::Tensor build_edge_tensor_dir(
+        const std::vector<size_t> &edge2vtx,
+        const field::TensorField2D<float> &field,
+        const torch::Tensor &vtx2xy,
+        const polyloop::NormalizeTransform2D<float> &tf)
+    {
+        int64_t num_edge = edge2vtx.size() / 2;
+        auto dir = torch::zeros({num_edge, 2}, vtx2xy.options());
+        float *dptr = dir.data_ptr<float>();
+        const float *vtx = vtx2xy.data_ptr<float>();
+
+        for (int64_t e = 0; e < num_edge; ++e)
+        {
+            int i0 = edge2vtx[2 * e];
+            int i1 = edge2vtx[2 * e + 1];
+
+            float cx = 0.5f * (vtx[2 * i0] + vtx[2 * i1]);
+            float cy = 0.5f * (vtx[2 * i0 + 1] + vtx[2 * i1 + 1]);
+
+            Vector2 realC = polyloop::denormalize(cx, cy, tf);
+            float theta = field.sampleTheta(realC); // ∈ [0, π/2)
+
+            //  4-fold 对齐：直接给主方向即可
+            dptr[2 * e + 0] = std::cos(theta);
+            dptr[2 * e + 1] = std::sin(theta);
+        }
+        return dir;
     }
 }

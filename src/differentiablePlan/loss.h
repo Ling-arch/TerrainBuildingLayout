@@ -9,12 +9,13 @@
 #include <cassert>
 #include <limits>
 #include "polygonMesh.h"
+#include "tensorfield.h"
+#include "polyloop.h"
+#include "corecrt_math_defines.h"
 
 namespace loss
 {
-    using diffVoronoi::PolygonMesh2ToCogsLayer, diffVoronoi::PolygonMesh2ToAreaLayer;
-    using diffVoronoi::VoronoiInfo, diffVoronoi::PolygonMesh2ToCogsFunction, diffVoronoi::PolygonMesh2ToAreaFunction;
-    using namespace polygonMesh;
+    using diffVoronoi::VoronoiInfo;
     using Scalar = voronoi2::Scalar;
     using M2 = util::Math2<voronoi2::Scalar>;
     using Vector2 = typename M2::Vector2;
@@ -80,11 +81,24 @@ namespace loss
         const std::vector<float> &room2area,
         const std::vector<size_t> &fixed_site_indices,
         const std::vector<size_t> &fixed_rooms);
-        
+
     torch::Tensor loss_lloyd(
         const std::vector<size_t> &elem2idx,
         const std::vector<size_t> &idx2vtx,
         const torch::Tensor &site2xy, // (num_sites,2) float32
         const torch::Tensor &vtxv2xy  // (num_vtxv,2) float32
     );
+
+    torch::Tensor loss_field(const std::vector<size_t> &edge2vtx, const field::TensorField2D<float> &field, const torch::Tensor &vtxv2xy, const polyloop::NormalizeTransform2D<Scalar> &tf);
+    torch::Tensor loss_field_continuous(
+        const std::vector<size_t> &edge2vtx,
+        const field::TensorField2D<float> &field,
+        const torch::Tensor &vtx2xy,
+        const polyloop::NormalizeTransform2D<float> &tf);
+
+      torch::Tensor build_edge_tensor_dir(
+        const std::vector<size_t> &edge2vtx,
+        const field::TensorField2D<float> &field,
+        const torch::Tensor &vtx2xy,
+        const polyloop::NormalizeTransform2D<float> &tf);
 }

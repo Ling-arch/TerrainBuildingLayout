@@ -6,16 +6,28 @@
 #include <CGAL/Polygon_2.h>
 #include <CGAL/Polygon_with_holes_2.h>
 #include <CGAL/Boolean_set_operations_2.h>
+#include <CGAL/Straight_skeleton_2.h>
+#include <CGAL/create_offset_polygons_2.h>
+#include <CGAL/Polygon_offset_builder_2.h>
+#include <CGAL/Arrangement_2.h>
+#include <CGAL/Arr_segment_traits_2.h>
 #include <list>
+#include "util.h"
 
 namespace geo
 {
+
+    using Kernel = CGAL::Exact_predicates_inexact_constructions_kernel;
+    using Point_2 = Kernel::Point_2;
+    using Segment_2 = Kernel::Segment_2;
+    using Polygon2 = CGAL::Polygon_2<Kernel>;
+    using PolygonWithHoles = CGAL::Polygon_with_holes_2<Kernel>;
+    using Traits = CGAL::Arr_segment_traits_2<Kernel>;
+    using Arrangement = CGAL::Arrangement_2<Traits>;
+    using Ss = CGAL::Straight_skeleton_2<Kernel>;
+
     template <typename Scalar>
     using Vector2 = Eigen::Matrix<Scalar, 2, 1>;
-    using Kernel = CGAL::Exact_predicates_exact_constructions_kernel;
-    using Point = Kernel::Point_2;
-    using Polygon = CGAL::Polygon_2<Kernel>;
-    using PolygonWithHoles = CGAL::Polygon_with_holes_2<Kernel>;
 
     struct Segment
     {
@@ -126,6 +138,9 @@ namespace geo
         return a.y() < b.y();
     }
 
+    /*
+     *cross product of Eigen vector2
+     */
     template <typename Scalar>
     Scalar cross(const Vector2<Scalar> &a,
                  const Vector2<Scalar> &b,
@@ -134,6 +149,9 @@ namespace geo
         return (b - a).x() * (c - a).y() - (b - a).y() * (c - a).x();
     }
 
+    /*
+     * if s0(a,b) & s1(c,d) intersect
+     */
     template <typename Scalar>
     bool segmentsIntersect(const Vector2<Scalar> &a, const Vector2<Scalar> &b, const Vector2<Scalar> &c, const Vector2<Scalar> &d)
     {
@@ -145,6 +163,9 @@ namespace geo
         return (c1 * c2 < 0) && (c3 * c4 < 0);
     }
 
+    /*
+     *polyline2 struct with closed polygon and polyline
+     */
     template <typename Scalar>
     struct Polyline2_t
     {
@@ -152,15 +173,30 @@ namespace geo
         bool isClosed = false;
         Polyline2_t() = default;
         Polyline2_t(const std::vector<Vector2<Scalar>> &pts, bool isClosed)
-            : points(pts), isClosed(isClosed) {}
+            : points(pts), isClosed(isClosed)
+        {
+            if (isClosed && (pts.front() - pts.back()).squaredNorm() > Scalar(1e-6))
+            {
+                points.push_back(pts.front());
+            }
+        }
         Polyline2_t(const std::vector<Vector2<Scalar>> &pts)
-            : points(pts) {}
+            : points(pts)
+        {
+            if (isClosed && (pts.front() - pts.back()).squaredNorm() > Scalar(1e-6))
+            {
+                points.push_back(pts.front());
+            }
+        }
         Vector2<Scalar> getTangentAt(int idx) const;
         Vector2<Scalar> getNormalAt(int idx) const;
         Eigen::AlignedBox<Scalar, 2> getAABB2() const;
         bool isSelfIntersecting() const;
     };
 
+    /*
+     *get tangent vector at point with point index
+     */
     template <typename Scalar>
     Vector2<Scalar> Polyline2_t<Scalar>::getTangentAt(int idx) const
     {
@@ -207,6 +243,9 @@ namespace geo
         return t / len;
     }
 
+    /*
+     *get normal vector at point with point index
+     */
     template <typename Scalar>
     Vector2<Scalar> Polyline2_t<Scalar>::getNormalAt(int idx) const
     {
@@ -261,6 +300,9 @@ namespace geo
         return false;
     }
 
+    /*
+     *rortate vector clock wise 90 degree
+     */
     template <typename Scalar>
     inline Vector2<Scalar> rotate90CW(const Vector2<Scalar> &v)
     {
@@ -273,8 +315,11 @@ namespace geo
         return Vector2<Scalar>(-v.y(), v.x());
     }
 
+    /*
+     *get polyline2 aabb
+     */
     template <typename Scalar>
-    Eigen::AlignedBox<Scalar, 2> Polyline2_t<Scalar>::getAABB2() const
+    inline Eigen::AlignedBox<Scalar, 2> Polyline2_t<Scalar>::getAABB2() const
     {
         Eigen::AlignedBox<Scalar, 2> aabb;
         aabb.setEmpty();
@@ -284,6 +329,36 @@ namespace geo
         for (const auto &p : points)
             aabb.extend(p);
         return aabb;
+    }
+
+    /*
+     *get points aabb
+     */
+    template <typename Scalar>
+    inline Eigen::AlignedBox<Scalar, 2> getAABB2(const std::vector<Vector2<Scalar>> &points)
+    {
+        Eigen::AlignedBox<Scalar, 2> aabb;
+        aabb.setEmpty();
+        if (points.empty())
+            return aabb;
+
+        for (const auto &p : points)
+            aabb.extend(p);
+        return aabb;
+    }
+
+    template <typename Scalar>
+    inline Vector2<Scalar> getPolygonCentroid(const std::vector<Vector2<Scalar>> &points)
+    {
+        if (points.empty())
+        {
+            return Vector2<Scalar>::Zero();
+        }
+        Vector2<Scalar> centroid = Vector2<Scalar>::Zero();
+        for (const auto &pt : points)
+            centroid += pt;
+
+        return centroid / static_cast<Scalar>(points.size());
     }
 
     // 获取凸包的函数
@@ -512,14 +587,18 @@ namespace geo
     }
 
     template <typename Scalar>
-    Polygon toCgalPolygon(const Polyline2_t<Scalar> &poly)
+    inline Polygon2 toCgalPolygon(const Polyline2_t<Scalar> &poly)
     {
-        Polygon p;
-        int n = (int)poly.points.size();
+        Polygon2 p;
+        int n;
+        if ((poly.points.front() - poly.points.back()).squaredNorm() < Scalar(1e-6))
+            n = (int)poly.points.size() - 1;
+        else
+            n = (int)poly.points.size();
 
-        for (int i = 0; i < n - 1; ++i) // 去掉闭合重复点
+        for (int i = 0; i < n; ++i) // 去掉闭合重复点
         {
-            p.push_back(Point(typename Kernel::FT(poly.points[i].x()), typename Kernel::FT(poly.points[i].y())));
+            p.push_back(Point_2(typename Kernel::FT(poly.points[i].x()), typename Kernel::FT(poly.points[i].y())));
         }
 
         if (p.orientation() != CGAL::COUNTERCLOCKWISE)
@@ -532,7 +611,7 @@ namespace geo
      * convert Polyline to CGAL Polygon
      */
     template <typename Scalar>
-    Polyline2_t<Scalar> cgalPolygonToPolyline(const Polygon &poly)
+    inline Polyline2_t<Scalar> cgalPolygonToPolyline(const Polygon2 &poly)
     {
         Polyline2_t<Scalar> out;
 
@@ -564,11 +643,11 @@ namespace geo
     Polyline2_t<Scalar> unionPolygon(const Polyline2_t<Scalar> &polyA, const Polyline2_t<Scalar> &polyB)
     {
         std::vector<Polyline2_t<Scalar>> polys;
-        Polygon A = toCgalPolygon(polyA);
-        Polygon B = toCgalPolygon(polyB);
+        Polygon2 A = toCgalPolygon(polyA);
+        Polygon2 B = toCgalPolygon(polyB);
 
         PolygonWithHoles result;
-        
+
         if (CGAL::join(A, B, result))
             return cgalPolygonToPolyline<Scalar>(result.outer_boundary());
         else
@@ -579,8 +658,8 @@ namespace geo
     std::vector<Polyline2_t<Scalar>> subPolygon(const Polyline2_t<Scalar> &polyA, const Polyline2_t<Scalar> &polyB)
     {
         std::vector<Polyline2_t<Scalar>> polys;
-        Polygon A = toCgalPolygon(polyA);
-        Polygon B = toCgalPolygon(polyB);
+        Polygon2 A = toCgalPolygon(polyA);
+        Polygon2 B = toCgalPolygon(polyB);
 
         std::list<PolygonWithHoles> result;
         CGAL::difference(A, B, std::back_inserter(result));
@@ -596,10 +675,10 @@ namespace geo
     template <typename Scalar>
     std::vector<Polyline2_t<Scalar>> intersectPolygon(const Polyline2_t<Scalar> &polyA, const Polyline2_t<Scalar> &polyB)
     {
-        
+
         std::vector<Polyline2_t<Scalar>> polys;
-        Polygon A = toCgalPolygon(polyA);
-        Polygon B = toCgalPolygon(polyB);
+        Polygon2 A = toCgalPolygon(polyA);
+        Polygon2 B = toCgalPolygon(polyB);
 
         std::list<PolygonWithHoles> result;
         CGAL::intersection(A, B, std::back_inserter(result));
@@ -612,9 +691,109 @@ namespace geo
         return polys;
     }
 
+
+    /*
+    *offset polygon,
+    */
     template <typename Scalar>
-    std::vector<Polyline2_t<Scalar>> splitPolygonByPolylines(std::vector<Polyline2_t<Scalar>> polylines, Polyline2_t<Scalar> polygon)
+    std::vector<Polyline2_t<Scalar>> offsetPolygon(const Polyline2_t<Scalar> &poly, Scalar dist)
     {
+        std::vector<Polyline2_t<Scalar>> out;
+        using Ss = CGAL::Straight_skeleton_2<Kernel>;
+        using SsPtr = std::shared_ptr<Ss>;
+        using OffsetPolygonPtr = std::shared_ptr<Polygon2>;
+        Polygon2 cgalPoly = toCgalPolygon(poly);
+
+        // 先生成 Straight Skeleton
+        SsPtr ss = CGAL::create_interior_straight_skeleton_2(cgalPoly);
+
+        if (!ss)
+            return out;
+
+        //  再从 skeleton 生成 offset polygon
+        auto offset_polys = CGAL::create_offset_polygons_2<Polygon2>(-dist, *ss);
+
+        for (const auto &op : offset_polys)
+            out.push_back(cgalPolygonToPolyline<Scalar>(*op));
+
+        return out;
     }
 
+    template <typename Scalar>
+    void insertPolygonEdges(const Polyline2_t<Scalar> &poly, Arrangement &arr)
+    {
+        int n = (int)poly.points.size();
+        if (n < 3)
+            return;
+        for (int i = 0; i < n - 1; ++i)
+        {
+            const auto &p0 = poly.points[i];
+            const auto &p1 = poly.points[(i + 1) % n];
+
+            if ((p0 - p1).squaredNorm() < (Scalar)1e-8)
+                continue;
+
+            CGAL::insert(arr, Segment_2(Point_2(typename Kernel::FT(p0.x()), typename Kernel::FT(p0.y())),
+                                        Point_2(typename Kernel::FT(p1.x()), typename Kernel::FT(p1.y()))));
+        }
+    }
+
+    template <typename Scalar>
+    void insertPolyline(const Polyline2_t<Scalar> &pl, Arrangement &arr)
+    {
+        int n = (int)pl.points.size();
+        for (int i = 0; i + 1 < n; ++i)
+        {
+            const auto &p0 = pl.points[i];
+            const auto &p1 = pl.points[i + 1];
+
+            if ((p0 - p1).squaredNorm() < 1e-12f)
+                continue;
+
+            CGAL::insert(arr, Segment_2(Point_2(typename Kernel::FT(p0.x()), typename Kernel::FT(p0.y())),
+                                        Point_2(typename Kernel::FT(p1.x()), typename Kernel::FT(p1.y()))));
+        }
+    }
+
+    template <typename Scalar>
+    std::vector<Polyline2_t<Scalar>> extractFaces(const Arrangement &arr, const Polyline2_t<Scalar> &originalPoly)
+    {
+        std::vector<Polyline2_t<Scalar>> result;
+        for (auto fit = arr.faces_begin(); fit != arr.faces_end(); ++fit)
+        {
+            if (fit->is_unbounded())
+                continue;
+            auto ccb = fit->outer_ccb();
+            if (ccb == nullptr)
+                continue;
+            std::vector<Vector2<Scalar>> ring;
+            auto curr = ccb;
+            do
+            {
+                auto src = curr->source()->point();
+                ring.emplace_back(static_cast<Scalar>(CGAL::to_double(src.x())), static_cast<Scalar>(CGAL::to_double(src.y())));
+                ++curr;
+            } while (curr != ccb);
+            Vector2<Scalar> center = util::Math2<Scalar>::getPointStrictInSidePolygon(ring);
+            if (util::Math2<Scalar>::point_in_poly(originalPoly.points, center))
+            {
+                Polyline2_t<Scalar> poly;
+                poly.points = ring;
+                poly.isClosed = true;
+                poly.points.push_back(poly.points.front());
+                result.push_back(poly);
+            }
+        }
+        return result;
+    }
+
+    template <typename Scalar>
+    std::vector<Polyline2_t<Scalar>> splitPolygonByPolylines(const Polyline2_t<Scalar> &polygon, const std::vector<Polyline2_t<Scalar>> &cutters)
+    {
+        Arrangement arr;
+        insertPolygonEdges(polygon, arr);
+        for (const auto &pl : cutters)
+            insertPolyline(pl, arr);
+        return extractFaces(arr, polygon);
+    }
 }
