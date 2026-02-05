@@ -246,7 +246,7 @@ namespace optimizer
 
         // set fix sites and then gennerate possion sites
         vector<Vector2> fix_sites_norm = polyloop::map_pt_normalized(fix_sites, {0.5, 0.5}, plan_prob.tf);
-        M2::PoissonResult poisson_result = M2::gen_poisson_sites_in_poly_with_seeds(M2::to_vec2_array(plan_prob.vtxl2xy_norm), fix_sites_norm, Scalar(0.08), 50, (unsigned)time(nullptr));
+        M2::PoissonResult poisson_result = M2::gen_poisson_sites_in_poly_with_seeds(M2::to_vec2_array(plan_prob.vtxl2xy_norm), fix_sites_norm, Scalar(0.07), 50, (unsigned)time(nullptr));
         plan_prob.sites_norm = poisson_result.samples;
         size_t num_site = plan_prob.sites_norm.size();
         std::cout << "num_site is " << num_site << std::endl;
@@ -323,7 +323,7 @@ namespace optimizer
         if (cur_iter >= max_iter)
             return;
 
-        if (cur_iter == 150)
+        if (cur_iter == 200)
         {
             for (auto &g : plan_prob.optimizer->param_groups())
                 static_cast<torch::optim::AdamWOptions &>(g.options()).lr(0.005);
@@ -342,17 +342,18 @@ namespace optimizer
         // std::cout << "can each area " << std::endl;
         torch::Tensor loss_total_area = (room2area.sum() - torch::tensor(plan_prob.total_area_trg, plan_prob.options)).abs();
         // std::cout << "can total area " << std::endl;
-        // diffVoronoi::EdgeTensorAlignLayer edge_layer(edge2vtxv_wall);
+
         diffVoronoi::Vtx2XYZToEdgeVectorLayer edge_layer(edge2vtxv_wall);
         torch::Tensor edge2xy = edge_layer.forward(vtxv2xy);
         // std::cout << "can edge2xy " << std::endl;
-        torch::Tensor loss_walllen = edge2xy.abs().sum();
-        torch::Tensor tensor_dir = loss::build_edge_tensor_dir(edge2vtxv_wall,plan_prob.field,vtxv2xy,tf);
+        torch::Tensor loss_wallen = edge2xy.abs().sum();
+        torch::Tensor tensor_dir = loss::build_edge_tensor_dir(edge2vtxv_wall, plan_prob.field, vtxv2xy, tf);
         diffVoronoi::EdgeTensorAlignLayer edge_field_layer(edge2vtxv_wall);
         torch::Tensor loss_field = edge_field_layer.forward(vtxv2xy, tensor_dir);
-        
+        std::vector<std::vector<size_t>> chains = loss::build_wall_chains(edge2vtxv_wall);
+        diffVoronoi::WallChainLossLayer wall_chain_layer(chains);
         // std::cout << "can edge2xy " << std::endl;
-
+        torch::Tensor loss_chain = wall_chain_layer.forward(vtxv2xy);
         // std::cout << "can wallen " << std::endl;
         torch::Tensor loss_topo = loss::unidirectional(
             site2xy,
@@ -368,15 +369,34 @@ namespace optimizer
             voronoi_info.idx2vtxv,
             site2xy,
             vtxv2xy);
-
-        loss_each_area = loss_each_area * 1.0;
-        loss_total_area = loss_total_area * 10.0;
-        loss_field = loss_field * 0.1;
-        loss_walllen = loss_walllen * 0.05;
-        loss_topo = loss_topo * 1.0;
+        float w_each_area = 1.f;
+        float w_total_area = 10.f;
+        float w_topo = 1.0f;
+        float w_chain = 0.0f;
+        float w_field = 0.0f;
+        float w_wallen = 0.2f;
+        // if (cur_iter > 80)
+        // {
+        //     w_chain = 0.05f;
+        // }
+        if (cur_iter > 230)
+        {
+            w_each_area = 0.15f;
+            w_total_area = 5.f;
+            w_field = 0.15f;
+            w_wallen = 0.15f;
+            w_chain = 0.03f;
+            w_topo = 1.5f; // 后期放松 topo
+        }
+        loss_each_area = loss_each_area * w_each_area;
+        loss_total_area = loss_total_area * w_total_area;
+        loss_field = loss_field * w_field;
+        loss_chain = loss_chain * w_chain;
+        loss_wallen = loss_wallen * w_wallen;
+        loss_topo = loss_topo * w_topo;
         loss_fix = loss_fix * 100.0;
         loss_lloyd = loss_lloyd * 0.1;
-        torch::Tensor loss = loss_each_area + loss_total_area + loss_field + loss_walllen + loss_topo + loss_fix + loss_lloyd;
+        torch::Tensor loss = loss_each_area + loss_total_area + loss_field + loss_wallen + loss_chain + loss_topo + loss_fix + loss_lloyd;
 
         // 每25次迭代打印损失信息
         if (cur_iter % 25 == 0)
@@ -386,7 +406,8 @@ namespace optimizer
                       << ", total_areas: " << loss_total_area.item<float>()
                       << ", topo: " << loss_topo.item<float>()
                       << ", fix: " << loss_fix.item<float>()
-                      << ", wall: " << loss_walllen.item<float>()
+                      << ", wall :" << loss_wallen.item<float>()
+                      << ", chain: " << loss_chain.item<float>()
                       << ", field: " << loss_field.item<float>() << ")" << std::endl;
         }
 

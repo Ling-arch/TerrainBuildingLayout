@@ -101,4 +101,8 @@ namespace loss
         const field::TensorField2D<float> &field,
         const torch::Tensor &vtx2xy,
         const polyloop::NormalizeTransform2D<float> &tf);
+
+      std::vector<std::vector<size_t>> build_wall_chains(const std::vector<size_t> &edge2vtxv);
+      std::vector<size_t> chain_to_edge2vtxv(const std::vector<size_t> &chain);
+      
 }

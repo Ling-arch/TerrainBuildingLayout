@@ -218,6 +218,33 @@ namespace diffVoronoi
         std::vector<size_t> edge2vtx;
     };
 
+    class WallChainLossFunction : public torch::autograd::Function<WallChainLossFunction>
+    {
+    public:
+        static torch::Tensor forward(
+            torch::autograd::AutogradContext *ctx,
+            const torch::Tensor &vtx2xy, // (num_vtx, 2)
+            const std::vector<std::vector<size_t>> &chains);
+
+        static torch::autograd::tensor_list backward(
+            torch::autograd::AutogradContext *ctx,
+            torch::autograd::tensor_list grad_outputs);
+    };
+
+    class WallChainLossLayer
+    {
+    public:
+        WallChainLossLayer(const std::vector<std::vector<size_t>> &chains_)
+            : chains(chains_) {}
+
+        torch::Tensor forward(const torch::Tensor &vtx2xy) const
+        {
+            return WallChainLossFunction::apply(vtx2xy, chains);
+        }
+
+    private:
+        std::vector<std::vector<size_t>> chains;
+    };
     // ---- Utility: convert Vector2 -> float32 tensor (N,2)
     std::vector<float> flat_tensor_to_float(const torch::Tensor &t);
 

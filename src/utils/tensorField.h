@@ -979,52 +979,7 @@ namespace field
         return box;
     }
 
-    template <typename Scalar>
-    Polyline2_t<Scalar> rebuildPolyline(const Polyline2_t<Scalar> &polyline, Scalar threshold)
-    {
-        Polyline2_t<Scalar> result;
-        result.isClosed = polyline.isClosed;
-
-        const auto &pts = polyline.points;
-        if (pts.size() < 2 || threshold <= Scalar(0))
-        {
-            result.points = pts;
-            return result;
-        }
-
-        const int segCount = static_cast<int>(pts.size()) - 1;
-
-        for (int i = 0; i < segCount; ++i)
-        {
-            const Vector2<Scalar> &p0 = pts[i];
-            const Vector2<Scalar> &p1 = pts[(i + 1) % pts.size()];
-
-            // 先压入起点
-            result.points.push_back(p0);
-
-            Scalar dist = (p1 - p0).norm();
-            int n = static_cast<int>(std::floor(dist / threshold));
-
-            if (n > 1)
-            {
-                // 均匀插值
-                for (int k = 1; k < n; ++k)
-                {
-                    Scalar t = Scalar(k) / Scalar(n);
-                    Vector2<Scalar> p = (Scalar(1) - t) * p0 + t * p1;
-                    result.points.push_back(p);
-                }
-            }
-        }
-
-        // 非闭合 polyline，补最后一个点
-        if (!polyline.isClosed)
-        {
-            result.points.push_back(pts.back());
-        }
-
-        return result;
-    }
+    
 
     template <typename Scalar>
     std::unordered_map<int, std::vector<Polyline2_t<Scalar>>>
@@ -1040,7 +995,7 @@ namespace field
 
         for (int pid = 0; pid < (int)polylines_.size(); ++pid)
         {
-            Polyline2_t<Scalar> poly = rebuildPolyline(polylines_[pid], rebuildStep);
+            Polyline2_t<Scalar> poly = geo::rebuildPolyline(polylines_[pid], rebuildStep);
             const int nPts = (int)poly.points.size();
 
             if (nPts < gapRange.x())

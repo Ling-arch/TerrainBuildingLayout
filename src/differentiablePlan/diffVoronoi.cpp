@@ -699,6 +699,163 @@ namespace diffVoronoi
         };
     }
 
+    torch::Tensor WallChainLossFunction::forward(
+        torch::autograd::AutogradContext *ctx,
+        const torch::Tensor &vtx2xy,
+        const std::vector<std::vector<size_t>> &chains)
+    {
+        TORCH_CHECK(vtx2xy.is_cpu());
+        TORCH_CHECK(vtx2xy.dtype() == torch::kFloat32);
+
+        const float *vtx = vtx2xy.data_ptr<float>();
+
+        std::vector<int64_t> edge_i0, edge_i1, chain_id;
+        std::vector<int64_t> chain_offset;
+
+        chain_offset.push_back(0);
+
+        for (size_t c = 0; c < chains.size(); ++c)
+        {
+            const auto &chain = chains[c];
+            if (chain.size() < 3)
+                continue;
+
+            for (size_t i = 0; i + 1 < chain.size(); ++i)
+            {
+                edge_i0.push_back(chain[i]);
+                edge_i1.push_back(chain[i + 1]);
+                chain_id.push_back(c);
+            }
+            chain_offset.push_back(edge_i0.size());
+        }
+
+        int64_t E = edge_i0.size();
+        int64_t C = chain_offset.size() - 1;
+
+        auto opts_i = torch::TensorOptions().dtype(torch::kInt64);
+        auto opts_f = vtx2xy.options();
+
+        torch::Tensor t_i0 = torch::from_blob(edge_i0.data(), {E}, opts_i).clone();
+        torch::Tensor t_i1 = torch::from_blob(edge_i1.data(), {E}, opts_i).clone();
+        torch::Tensor t_cid = torch::from_blob(chain_id.data(), {E}, opts_i).clone();
+        torch::Tensor t_coff = torch::from_blob(chain_offset.data(), {C + 1}, opts_i).clone();
+
+        torch::Tensor loss = torch::zeros({}, opts_f);
+
+        for (int64_t c = 0; c < C; ++c)
+        {
+            int64_t beg = chain_offset[c];
+            int64_t end = chain_offset[c + 1];
+
+            float sx = 0.f, sy = 0.f;
+
+            for (int64_t e = beg; e < end; ++e)
+            {
+                size_t i0 = edge_i0[e];
+                size_t i1 = edge_i1[e];
+
+                float ex = vtx[i1 * 2] - vtx[i0 * 2];
+                float ey = vtx[i1 * 2 + 1] - vtx[i0 * 2 + 1];
+                float len = std::sqrt(ex * ex + ey * ey) + 1e-8f;
+                ex /= len;
+                ey /= len;
+
+                sx += ex;
+                sy += ey;
+            }
+
+            float sl = std::sqrt(sx * sx + sy * sy) + 1e-8f;
+            float nx = sx / sl, ny = sy / sl;
+
+            for (int64_t e = beg; e < end; ++e)
+            {
+                size_t i0 = edge_i0[e];
+                size_t i1 = edge_i1[e];
+                float ex = vtx[i1 * 2] - vtx[i0 * 2];
+                float ey = vtx[i1 * 2 + 1] - vtx[i0 * 2 + 1];
+                float len = std::sqrt(ex * ex + ey * ey) + 1e-8f;
+                ex /= len;
+                ey /= len;
+
+                float dot = ex * nx + ey * ny;
+                loss += 1.f - dot * dot;
+            }
+        }
+
+        ctx->save_for_backward({vtx2xy, t_i0, t_i1, t_coff});
+        ctx->saved_data["num_edges"] = E;
+
+        return loss / std::max<int64_t>(1, E);
+    }
+
+    torch::autograd::tensor_list WallChainLossFunction::backward(
+        torch::autograd::AutogradContext *ctx,
+        torch::autograd::tensor_list grad_outputs)
+    {
+        float g = grad_outputs[0].item<float>();
+
+        auto saved = ctx->get_saved_variables();
+        auto vtx2xy = saved[0];
+        auto t_i0 = saved[1];
+        auto t_i1 = saved[2];
+        auto t_coff = saved[3];
+
+        const float *vtx = vtx2xy.data_ptr<float>();
+        const int64_t *i0 = t_i0.data_ptr<int64_t>();
+        const int64_t *i1 = t_i1.data_ptr<int64_t>();
+        const int64_t *coff = t_coff.data_ptr<int64_t>();
+
+        int64_t C = t_coff.numel() - 1;
+        int64_t E = ctx->saved_data["num_edges"].toInt();
+
+        torch::Tensor grad_vtx = torch::zeros_like(vtx2xy);
+        float *gv = grad_vtx.data_ptr<float>();
+
+        float scale = g / std::max<int64_t>(1, E);
+
+        for (int64_t c = 0; c < C; ++c)
+        {
+            int64_t beg = coff[c];
+            int64_t end = coff[c + 1];
+
+            float sx = 0.f, sy = 0.f;
+            for (int64_t e = beg; e < end; ++e)
+            {
+                float ex = vtx[i1[e] * 2] - vtx[i0[e] * 2];
+                float ey = vtx[i1[e] * 2 + 1] - vtx[i0[e] * 2 + 1];
+                float len = std::sqrt(ex * ex + ey * ey) + 1e-8f;
+                sx += ex / len;
+                sy += ey / len;
+            }
+
+            float sl = std::sqrt(sx * sx + sy * sy) + 1e-8f;
+            float nx = sx / sl, ny = sy / sl;
+
+            for (int64_t e = beg; e < end; ++e)
+            {
+                size_t a = i0[e], b = i1[e];
+                float ex = vtx[b * 2] - vtx[a * 2];
+                float ey = vtx[b * 2 + 1] - vtx[a * 2 + 1];
+                float len = std::sqrt(ex * ex + ey * ey) + 1e-8f;
+                ex /= len;
+                ey /= len;
+
+                float dot = ex * nx + ey * ny;
+                float gx = -2.f * dot * nx * scale;
+                float gy = -2.f * dot * ny * scale;
+
+                gv[a * 2] -= gx;
+                gv[a * 2 + 1] -= gy;
+                gv[b * 2] += gx;
+                gv[b * 2 + 1] += gy;
+            }
+        }
+
+        return {grad_vtx, torch::Tensor()};
+    }
+
+   
+
     static bool has_nan_inf(const torch::Tensor &t)
     {
         auto cont = t.contiguous().to(torch::kCPU);

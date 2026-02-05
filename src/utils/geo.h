@@ -13,6 +13,11 @@
 #include <CGAL/Arr_segment_traits_2.h>
 #include <list>
 #include "util.h"
+#include <CGAL/Constrained_Delaunay_triangulation_2.h>
+#include <CGAL/Triangulation_face_base_with_info_2.h>
+#include <CGAL/Voronoi_diagram_2.h>
+#include <CGAL/Delaunay_triangulation_adaptation_traits_2.h>
+#include <CGAL/Delaunay_triangulation_adaptation_policies_2.h>
 
 namespace geo
 {
@@ -25,6 +30,13 @@ namespace geo
     using Traits = CGAL::Arr_segment_traits_2<Kernel>;
     using Arrangement = CGAL::Arrangement_2<Traits>;
     using Ss = CGAL::Straight_skeleton_2<Kernel>;
+    using Vb = CGAL::Triangulation_vertex_base_2<Kernel>;
+    using Fb = CGAL::Constrained_triangulation_face_base_2<Kernel>;
+    using TDS = CGAL::Triangulation_data_structure_2<Vb, Fb>;
+    using CDT = CGAL::Constrained_Delaunay_triangulation_2<Kernel, TDS>;
+    using AT = CGAL::Delaunay_triangulation_adaptation_traits_2<CDT>;
+    using AP = CGAL::Delaunay_triangulation_caching_degeneracy_removal_policy_2<CDT>;
+    using VD = CGAL::Voronoi_diagram_2<CDT, AT, AP>;
 
     template <typename Scalar>
     using Vector2 = Eigen::Matrix<Scalar, 2, 1>;
@@ -161,6 +173,65 @@ namespace geo
         Scalar c4 = cross(c, d, b);
 
         return (c1 * c2 < 0) && (c3 * c4 < 0);
+    }
+
+    template <typename Scalar>
+    bool trianglesDoIntersect2D(
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> &T1,
+        const Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> &T2)
+    {
+        using Vec2 = Eigen::Matrix<Scalar, 2, 1>;
+
+        Vec2 t1[3], t2[3];
+
+        for (int i = 0; i < 3; ++i)
+        {
+            t1[i] = T1.row(i).template head<2>().transpose();
+            t2[i] = T2.row(i).template head<2>().transpose();
+        }
+
+        // edge-edge intersection
+        for (int i = 0; i < 3; ++i)
+        {
+            for (int j = 0; j < 3; ++j)
+            {
+                if (segmentsIntersect<Scalar>(
+                        t1[i],
+                        t1[(i + 1) % 3],
+                        t2[j],
+                        t2[(j + 1) % 3]))
+                    return true;
+            }
+        }
+
+        // T2 inside T1
+        bool allInside = true;
+        for (int i = 0; i < 3; ++i)
+        {
+            if (!util::Math2<Scalar>::point_in_poly(
+                    {t1[0], t1[1], t1[2]}, t2[i]))
+            {
+                allInside = false;
+                break;
+            }
+        }
+
+        if (allInside)
+            return true;
+
+        // T1 inside T2
+        allInside = true;
+        for (int i = 0; i < 3; ++i)
+        {
+            if (!util::Math2<Scalar>::point_in_poly(
+                    {t2[0], t2[1], t2[2]}, t1[i]))
+            {
+                allInside = false;
+                break;
+            }
+        }
+
+        return allInside;
     }
 
     /*
@@ -639,6 +710,54 @@ namespace geo
         return out;
     }
 
+
+     template <typename Scalar>
+    Polyline2_t<Scalar> rebuildPolyline(const Polyline2_t<Scalar> &polyline, Scalar threshold)
+    {
+        Polyline2_t<Scalar> result;
+        result.isClosed = polyline.isClosed;
+
+        const auto &pts = polyline.points;
+        if (pts.size() < 2 || threshold <= Scalar(0))
+        {
+            result.points = pts;
+            return result;
+        }
+
+        const int segCount = static_cast<int>(pts.size()) - 1;
+
+        for (int i = 0; i < segCount; ++i)
+        {
+            const Vector2<Scalar> &p0 = pts[i];
+            const Vector2<Scalar> &p1 = pts[(i + 1) % pts.size()];
+
+            // 先压入起点
+            result.points.push_back(p0);
+
+            Scalar dist = (p1 - p0).norm();
+            int n = static_cast<int>(std::floor(dist / threshold));
+
+            if (n > 1)
+            {
+                // 均匀插值
+                for (int k = 1; k < n; ++k)
+                {
+                    Scalar t = Scalar(k) / Scalar(n);
+                    Vector2<Scalar> p = (Scalar(1) - t) * p0 + t * p1;
+                    result.points.push_back(p);
+                }
+            }
+        }
+
+        // 非闭合 polyline，补最后一个点
+        if (!polyline.isClosed)
+        {
+            result.points.push_back(pts.back());
+        }
+
+        return result;
+    }
+
     template <typename Scalar>
     Polyline2_t<Scalar> unionPolygon(const Polyline2_t<Scalar> &polyA, const Polyline2_t<Scalar> &polyB)
     {
@@ -653,6 +772,8 @@ namespace geo
         else
             return polyA;
     }
+
+   
 
     template <typename Scalar>
     std::vector<Polyline2_t<Scalar>> subPolygon(const Polyline2_t<Scalar> &polyA, const Polyline2_t<Scalar> &polyB)
@@ -691,10 +812,9 @@ namespace geo
         return polys;
     }
 
-
     /*
-    *offset polygon,
-    */
+     *offset polygon,
+     */
     template <typename Scalar>
     std::vector<Polyline2_t<Scalar>> offsetPolygon(const Polyline2_t<Scalar> &poly, Scalar dist)
     {
@@ -795,5 +915,96 @@ namespace geo
         for (const auto &pl : cutters)
             insertPolyline(pl, arr);
         return extractFaces(arr, polygon);
+    }
+
+    template <typename Scalar>
+    struct VoronoiResult2
+    {
+        CDT cdt;
+        std::vector<std::pair<Vector2<Scalar>, Vector2<Scalar>>> voronoi_edges;
+        std::vector<Polyline2_t<Scalar>> voronoi_cells;
+        VoronoiResult2() = default;
+    };
+
+    /*
+     *convert eigen vector to cgal point
+     */
+    template <typename Scalar>
+    inline Point_2 to_cgal_point(const Vector2<Scalar> &p)
+    {
+        return Point_2(typename Kernel::FT(p.x()), typename Kernel::FT(p.y()));
+    }
+
+    template <typename Scalar>
+    Polyline2_t<Scalar> extract_voronoi_cell(const VD::Face_handle &face)
+    {
+        Polyline2_t<Scalar> poly;
+        poly.isClosed = true;
+
+        VD::Ccb_halfedge_circulator circ = face->ccb();
+        VD::Ccb_halfedge_circulator curr = circ;
+
+        do
+        {
+            if (curr->has_source())
+            {
+                const auto &p = curr->source()->point();
+                poly.points.emplace_back(
+                    static_cast<Scalar>(p.x()),
+                    static_cast<Scalar>(p.y()));
+            }
+            ++curr;
+        } while (curr != circ);
+
+        // 闭合
+        if (!poly.points.empty() &&
+            (poly.points.front() - poly.points.back()).squaredNorm() > Scalar(1e-6))
+        {
+            poly.points.push_back(poly.points.front());
+        }
+
+        return poly;
+    }
+
+    template <typename Scalar>
+    VoronoiResult2<Scalar> build_voronoi_from_pslg(const Polyline2_t<Scalar> &boundary, const std::vector<Polyline2_t<Scalar>> &constraints)
+    {
+        VoronoiResult2<Scalar> result;
+        CDT &cdt = result.cdt;
+        int boundary_pt_num = 0;
+        if ((boundary.points.back() - boundary.points.front()).squaredNorm() < (Scalar)1e-6)
+            boundary_pt_num = boundary.points.size() - 1;
+        else
+            boundary_pt_num = boundary.points.size();
+        for (int i = 0; i < boundary_pt_num; i++)
+        {
+            cdt.insert_constraint(to_cgal_point(boundary.points[i]), to_cgal_point(boundary.points[(i + 1) % boundary_pt_num]));
+        }
+
+        if(constraints.size() > 0) {
+            for (const auto &pl : constraints)
+            {
+                const auto &pts = pl.points;
+                const int n = static_cast<int>(pts.size());
+
+                for (int i = 0; i + 1 < n; ++i)
+                {
+                    cdt.insert_constraint(to_cgal_point(pts[i]), to_cgal_point(pts[i + 1]));
+                }
+            }
+        }
+       
+        VD vd(cdt);
+        for (auto fit = vd.faces_begin(); fit != vd.faces_end(); ++fit)
+        {
+            if (fit->is_unbounded())
+                continue;
+
+            Polyline2_t<Scalar> cell = extract_voronoi_cell<Scalar>(fit);
+
+            if (cell.points.size() >= 3)
+                result.voronoi_cells.push_back(std::move(cell));
+        }
+        return result;
     }
 }

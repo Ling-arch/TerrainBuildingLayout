@@ -833,4 +833,104 @@ namespace loss
         }
         return dir;
     }
+
+    std::vector<std::vector<size_t>> build_wall_chains(const std::vector<size_t> &edge2vtxv)
+    {
+        using Edge = std::pair<size_t, size_t>;
+
+        // ---- collect edges ----
+        std::vector<Edge> edges;
+        for (size_t i = 0; i + 1 < edge2vtxv.size(); i += 2)
+            edges.emplace_back(edge2vtxv[i], edge2vtxv[i + 1]);
+
+        // ---- adjacency ----
+        std::unordered_map<size_t, std::vector<size_t>> adj;
+        for (auto &[a, b] : edges)
+        {
+            adj[a].push_back(b);
+            adj[b].push_back(a);
+        }
+
+        // ---- edge visited ----
+        std::unordered_set<uint64_t> used_edge;
+        auto edge_key = [](size_t a, size_t b)
+        {
+            if (a > b)
+                std::swap(a, b);
+            return (uint64_t(a) << 32) | uint64_t(b);
+        };
+
+        std::vector<std::vector<size_t>> chains;
+
+        // ---- helper: walk chain ----
+        auto walk = [&](size_t start, size_t next)
+        {
+            std::vector<size_t> chain;
+            size_t prev = start;
+            size_t curr = next;
+
+            chain.push_back(start);
+            chain.push_back(curr);
+            used_edge.insert(edge_key(start, curr));
+
+            while (adj[curr].size() == 2)
+            {
+                size_t n0 = adj[curr][0];
+                size_t n1 = adj[curr][1];
+                size_t nxt = (n0 == prev) ? n1 : n0;
+
+                uint64_t ek = edge_key(curr, nxt);
+                if (used_edge.count(ek))
+                    break;
+
+                chain.push_back(nxt);
+                used_edge.insert(ek);
+
+                prev = curr;
+                curr = nxt;
+            }
+            return chain;
+        };
+
+        // ---- start from degree != 2 ----
+        for (auto &[v, nbrs] : adj)
+        {
+            if (nbrs.size() == 2)
+                continue;
+
+            for (size_t n : nbrs)
+            {
+                uint64_t ek = edge_key(v, n);
+                if (used_edge.count(ek))
+                    continue;
+
+                chains.push_back(walk(v, n));
+            }
+        }
+
+        // ---- remaining loops ----
+        for (auto &[a, b] : edges)
+        {
+            uint64_t ek = edge_key(a, b);
+            if (used_edge.count(ek))
+                continue;
+
+            // closed loop
+            chains.push_back(walk(a, b));
+        }
+
+        return chains;
+    }
+
+    std::vector<size_t> chain_to_edge2vtxv(const std::vector<size_t> &chain)
+    {
+        std::vector<size_t> e;
+        for (size_t i = 0; i + 1 < chain.size(); ++i)
+        {
+            e.push_back(chain[i]);
+            e.push_back(chain[i + 1]);
+        }
+        return e;
+    }
+
 }
