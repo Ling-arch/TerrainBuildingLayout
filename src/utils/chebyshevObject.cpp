@@ -66,11 +66,23 @@ namespace infinityVoronoi
         float domainExtent)
     {
         // 每个 polygon 的 centroid
-        std::vector<Vec> polysCentroids =
-            cellSec.getPolysCentroids(true);
+        std::vector<Vec> polysCentroids = cellSec.getPolysCentroids();
+        // ===== DEBUG: print polys centroids =====
 
         int polyCount = (int)polysCentroids.size();
-
+        DBG(
+            "[clipCellGeometry] polysCentroids = " << ([&]()
+                                                       {
+        std::ostringstream oss;
+        oss << "[";
+        for (int i = 0; i < (int)polysCentroids.size(); ++i)
+        {
+            const Vec &c = polysCentroids[i];
+            if (i) oss << ", ";
+            oss << "(" << c[0] << "," << c[1] << ")";
+        }
+        oss << "]";
+        return oss.str(); })());
         std::vector<float> distsA(polyCount);
         std::vector<float> distsL2A(polyCount);
         std::vector<bool> msk(polyCount, true);
@@ -275,10 +287,22 @@ namespace infinityVoronoi
             Vec2 v = initCellVerts[vidx].cwiseProduct(vertScales[i]);
             vertices[i] = site + M.transpose() * v;
             edgeCenters[i] = site + M.transpose() * (EDGE_CENTERS[EDGE_CENTER_IDX[di][i]].cwiseProduct(eCenterScales[i]));
-            edgeNormals[i] = (site + M.transpose() * (EDGE_NORMALS[EDGE_NORMAL_IDX[di][i]].cwiseProduct(eNormalScales[i]))).normalized();
+            edgeNormals[i] = (M.transpose() * (EDGE_NORMALS[EDGE_NORMAL_IDX[di][i]].cwiseProduct(eNormalScales[i]))).normalized();
+
             int key = -(i + 4);
             edgesPlanes[key] = {edgeCenters[i], edgeNormals[i]};
         }
+
+        // std::ostringstream oss;
+        // oss << "[Tricut] ";
+
+        // for (const auto &[key, plane] : edgesPlanes)
+        // {
+        //     const auto &o = plane.o;
+        //     const auto &n = plane.n;
+        //     oss << "key=" << key << ",o=(" << o.x() << "," << o.y() << "),n=(" << n.x() << "," << n.y() << "); ";
+        // }
+        // DBG(oss.str());
     }
 
     void TriCutObject::clipWithPlane(
@@ -295,10 +319,24 @@ namespace infinityVoronoi
         int cutPlaneKey)
     {
         const float eps = 1e-6f;
-        DBG("  [TriCutObject::cutWithPlane]");
-        DBG("    cutPlaneKey = " << cutPlaneKey);
-        DBG("    o = [" << o.transpose() << "]");
-        DBG("    n = [" << n.transpose() << "]");
+        // DBG("  [TriCutObject::cutWithPlane]");
+        // std::ostringstream oss;
+        // oss << "    cutPlaneKey=" << cutPlaneKey
+        //     << ", o=[" << o.transpose() << "]"
+        //     << ", n=[" << n.transpose() << "]";
+        // DBG(oss.str());
+
+        std::ostringstream oss1;
+        oss1 << "    vertices: ";
+
+        for (int i = 0; i < vertices.size(); ++i)
+        {
+            oss1 << "v" << i << "=" << vec2ToStr(vertices[i]);
+            if (i + 1 < vertices.size())
+                oss1 << ", ";
+        }
+
+        DBG(oss1.str());
         // ---- vertex signs ----
         Eigen::VectorXf dots(vertices.size());
         for (int i = 0; i < vertices.size(); ++i)
@@ -491,9 +529,9 @@ namespace infinityVoronoi
 
                     // split edge 加回 polys
                     const Vec2i &epi2 = newEdgePolyIdxs[eIdx];
-                    for (int nepi : newEdgePolyIdxs[eIdx])
+                    for (int k = 0; k < 2; k++)
                     {
-                        // int nepi = epi2[k];
+                        int nepi = epi2[k];
                         if (nepi > 0)
                         {
                             // 1. 获取该多边形对应的边列表（不存在则自动初始化空列表）
@@ -506,9 +544,9 @@ namespace infinityVoronoi
                         }
                     }
                     const Vec2i &epi2_new = newEdgePolyIdxs[newEdgeIdx];
-                    for (int nepi : newEdgePolyIdxs[newEdgeIdx])
+                    for (int k = 0; k < 2; k++)
                     {
-                        // int nepi = epi2_new[k];
+                        int nepi = epi2_new[k];
 
                         if (nepi > 0)
                         {
@@ -531,10 +569,15 @@ namespace infinityVoronoi
                         newPolys[pk * 2 + 1].push_back(eIdx);
                 }
             }
+            // new cut edge
+            if (newEdgeInner.size() != 2 || newEdgeInner[0] == newEdgeInner[1])
+            {
+                continue;
+            }
             newPolys[pk * 2].push_back(edges.size());
             newPolys[pk * 2 + 1].push_back(edges.size());
             newEdgePolyIdxs.push_back({pk * 2, pk * 2 + 1});
-            // new cut edge
+            
             edges.push_back({newEdgeInner[0], newEdgeInner[1]});
             edgePlaneKeys.push_back(cutPlaneKey);
         }
@@ -548,27 +591,41 @@ namespace infinityVoronoi
         {
             std::vector<std::pair<Vec2, Vec2>> planes;
             // std::cout << "cut plane keys are ";
-            for (int k : cutPlaneKeys)
+            // for (int k : cutPlaneKeys)
+            // {
+            //     planes.push_back({edgesPlanes[k].o, edgesPlanes[k].n});
+            // }
+            for (int i = 0; i < cutPlaneKeys.size(); ++i)
             {
-                planes.push_back({edgesPlanes[k].o, edgesPlanes[k].n});
+                int k = cutPlaneKeys[i];
+                const auto &pl = edgesPlanes[k];
+                planes.push_back({pl.o, pl.n});
+                // DBG("    with plane key " << k
+                //                           << " : p = " << vec2ToStr(pl.o)
+                //                           << ", dir = " << vec2ToStr(pl.n));
             }
             auto newVerts = chebyshevUtils::intersectLinesLine2D(planes, o, n);
             vertices.insert(vertices.end(), newVerts.begin(), newVerts.end());
         }
 
         polys = newPolys;
+        for (auto &[pk, eIdxs] : polys)
+        {
+            std::sort(eIdxs.begin(), eIdxs.end());
+            eIdxs.erase(std::unique(eIdxs.begin(), eIdxs.end()), eIdxs.end());
+        }
         edgePolyIdxs = newEdgePolyIdxs;
         DBG("    ---- polys (after cut) ----");
-        // for (auto &[pk, eIdxs] : polys)
-        // {
-        //     std::ostringstream oss;
-        //     oss << "      poly[" << pk << "] edges = ";
-        //     for (int e : eIdxs)
-        //         oss << e << " ";
-        //     DBG(oss.str());
-        // }
+        for (auto &[pk, eIdxs] : polys)
+        {
+            std::ostringstream oss;
+            oss << "      poly[" << pk << "] edges = ";
+            for (int e : eIdxs)
+                oss << e << " ";
+            DBG(oss.str());
+        }
 
-        DBG("    ---- polys (after cut) ----");
+        // DBG("    ---- polys (after cut) ----");
 
         for (auto &[pk, eIdxs] : polys)
         {
@@ -586,28 +643,29 @@ namespace infinityVoronoi
                 int v0 = e[0];
                 int v1 = e[1];
 
-                DBG("        edge[" << eIdx << "] : "
-                                    << v0 << " -> " << v1);
+                std::ostringstream oss;
+                oss << "        edge[" << eIdx << "] : "
+                    << v0 << " -> " << v1;
 
                 if (v0 >= 0 && v0 < vertices.size())
                 {
-                    DBG("          v" << v0 << " = "
-                                      << vec2ToStr(vertices[v0]));
+                    oss << ", v" << v0 << "=" << vec2ToStr(vertices[v0]);
                 }
                 else
                 {
-                    DBG("          v" << v0 << " = <invalid>");
+                    oss << ", v" << v0 << "=<invalid>";
                 }
 
                 if (v1 >= 0 && v1 < vertices.size())
                 {
-                    DBG("          v" << v1 << " = "
-                                      << vec2ToStr(vertices[v1]));
+                    oss << ", v" << v1 << "=" << vec2ToStr(vertices[v1]);
                 }
                 else
                 {
-                    DBG("          v" << v1 << " = <invalid>");
+                    oss << ", v" << v1 << "=<invalid>";
                 }
+
+                DBG(oss.str());
             }
         }
     }
@@ -1026,7 +1084,63 @@ namespace infinityVoronoi
                 if (nDim == 2)
                 {
                     cellSectors[sIdx][di] = std::make_unique<TriCutObject>(sites.row(sIdx).transpose(), di, scale, Ms[sIdx]);
+                    // // 打印 Ms 矩阵
+                    // {
+                    //     const auto &M = Ms[sIdx];
+                    //     std::ostringstream oss;
+                    //     oss << "[initCells] sIdx=" << sIdx << ", Ms = [";
+                    //     for (int r = 0; r < M.rows(); ++r)
+                    //     {
+                    //         oss << "[";
+                    //         for (int c = 0; c < M.cols(); ++c)
+                    //         {
+                    //             oss << M(r, c);
+                    //             if (c != M.cols() - 1)
+                    //                 oss << ",";
+                    //         }
+                    //         oss << "]";
+                    //         if (r != M.rows() - 1)
+                    //             oss << ",";
+                    //     }
+                    //     oss << "]";
+                    //     DBG(oss.str());
+                    // }
+                    // // 打印 scale 数组
+                    // {
+                    //     std::ostringstream oss;
+                    //     oss << "[initCells] sIdx=" << sIdx << ", di=" << di << ", scale=[";
+                    //     for (int i = 0; i < scale.size(); ++i)
+                    //         oss << scale[i] << (i == scale.size() - 1 ? "" : ",");
+                    //     oss << "]";
+                    //     DBG(oss.str());
+                    // }
 
+                    // // 打印顶点坐标
+                    // {
+                    //     const auto &verts = cellSectors[sIdx][di]->getVertices();
+                    //     std::ostringstream oss;
+                    //     oss << "[initCells] sIdx=" << sIdx << ", di=" << di << ", vertices=[";
+                    //     for (int i = 0; i < verts.size(); ++i)
+                    //     {
+                    //         oss << "(" << verts[i].x() << "," << verts[i].y() << ")";
+                    //         if (i != verts.size() - 1)
+                    //             oss << ",";
+                    //     }
+                    //     oss << "]";
+                    //     DBG(oss.str());
+                    // }
+
+                    // // 你已有的 edgesPlanes 打印
+                    // std::ostringstream oss;
+                    // oss << "[initCells] sIdx=" << sIdx << ", di=" << di << ", edgesPlanes: ";
+                    // const auto &edgesPlanes = cellSectors[sIdx][di]->edgesPlanes;
+                    // for (const auto &[key, plane] : edgesPlanes)
+                    // {
+                    //     const auto &o = plane.o;
+                    //     const auto &n = plane.n;
+                    //     oss << "key=" << key << ",o=(" << o.x() << "," << o.y() << "),n=(" << n.x() << "," << n.y() << "); ";
+                    // }
+                    // DBG(oss.str());
                     // --- domain intersection check ---
                     const auto &verts = cellSectors[sIdx][di]->getVertices();
                     Eigen::Vector2f mins = verts[0];
@@ -1280,15 +1394,19 @@ namespace infinityVoronoi
                 for (auto key : cutPlaneKeys[sIdx][di])
                 {
                     auto &plane = cutPlanes[key].first;
-                    DBG("=================================================");
-                    DBG("[ChebyshevObject::cutWithPlanes]");
-                    DBG("  sIdx = " << sIdx << ", di = " << di << ", cutPlaneKey = " << key);
-                    DBG("  plane origin o = [" << plane.first.transpose() << "]");
-                    DBG("  plane normal n = [" << plane.second.transpose() << "]");
-                    DBG("-------------------------------------------------");
+                    // DBG("=================================================");
+                    std::ostringstream oss;
+                    oss << "[ChebyshevObject::cutWithPlanes] "
+                        << "sIdx=" << sIdx
+                        << ", di=" << di
+                        << ", cutPlaneKey=" << key
+                        << ", o=" << vec2ToStr(plane.first)
+                        << ", n=" << vec2ToStr(plane.second);
+
+                    DBG(oss.str());
                     sector->cutWithPlane(
-                        plane.first,
-                        plane.second,
+                        plane.first.transpose(),
+                        plane.second.transpose(),
                         key);
                 }
 
@@ -1332,7 +1450,13 @@ namespace infinityVoronoi
                     MvecsB.push_back(Mvecs[nbIdx]); // (2*nDim × nDim)
                     lambdasB.push_back(lambdas.row(nbIdx));
                 }
-
+                DBG(
+                    "[ChebyshevObject::clipCellGeometry] sIdx=" << sIdx
+                                                                << ", di=" << di
+                                                                << ", siteA=(" << siteA[0] << "," << siteA[1] << ")"
+                                                                << ", MvecA=(" << MvecA[0] << "," << MvecA[1] << ")"
+                                                                << ", lambdaA=" << lambdaA
+                                                                << ", neighborCount=" << sitesB.size());
                 // ---- 调用函数 ----
                 infinityVoronoi::clipCellGeometry(
                     *cellSec,
@@ -1817,7 +1941,7 @@ namespace infinityVoronoi
         for (const auto &siteSectors : cellSectors)
         {
             // const auto &siteSectors = cellSectors[0];
-            
+
             for (const auto &sectorPtr : siteSectors)
             {
                 if (!sectorPtr)
@@ -1829,7 +1953,6 @@ namespace infinityVoronoi
                 {
                     cuttedPolys.emplace_back(sector.buildPolyFromKey(k));
                 }
-              
             }
         }
         for (int i = 0; i < cuttedPolys.size(); i++)
@@ -1878,6 +2001,38 @@ namespace infinityVoronoi
 
             render::stroke_bold_polygon2(cell, c, 0.f, thickness, c.a);
             render::fill_polygon2(cell, c, 0.f, 0.13f);
+        }
+    }
+
+    void ChebyshevObject::drawAdjacencyEdges(Color edgeColor, float lineWidth) const
+    {
+        for (const auto &edge : cellAdjacencyEdges)
+        {
+            Vec pA = sites.row(edge(0)).transpose();
+            Vec pB = sites.row(edge(1)).transpose();
+            render::draw_bold_polyline2({pA, pB}, edgeColor, 0.f, lineWidth);
+        }
+    }
+
+    void ChebyshevObject::drawCells() const
+    {
+        for (int sIdx = 0; sIdx < numSites; ++sIdx)
+        {
+            Color c = renderUtil::ColorFromHue(float(sIdx) / numSites);
+
+            for (const auto &polyVerts : cellVertexSets[sIdx])
+            {
+                std::vector<Vec2> verts2d;
+                verts2d.reserve(polyVerts.size());
+                for (const Vec &v : polyVerts)
+                {
+                    verts2d.emplace_back(v.x(), v.y());
+                }
+
+                render::fill_polygon2(verts2d, c, 0.f, 1.f);
+
+                render::stroke_bold_polygon2(verts2d, RL_BLACK, 0.f, 0.03f, 1.f);
+            }
         }
     }
 }

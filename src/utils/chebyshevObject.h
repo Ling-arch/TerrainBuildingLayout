@@ -15,7 +15,6 @@
 #include "render.h"
 #include "renderUtil.h"
 
-
 #define CHEBYSHEV_DEBUG
 
 #ifdef CHEBYSHEV_DEBUG
@@ -61,6 +60,7 @@ namespace infinityVoronoi
     public:
         std::vector<int> hullPlaneKeys;
         std::map<int, std::vector<int>> polys;
+        std::unordered_map<int, Plane2> edgesPlanes;
 
     public:
         SectorCutObject() = default;
@@ -72,7 +72,7 @@ namespace infinityVoronoi
         virtual void setPolyIoLabels(const std::vector<bool> &msk) = 0;
         virtual std::vector<std::vector<Vec>> getHullVerts() = 0;
         virtual std::vector<Vec> getVertices() = 0;
-        //virtual std::vector<int> getPolyKeys() const = 0;
+        // virtual std::vector<int> getPolyKeys() const = 0;
         virtual std::vector<Vec2> buildPolyFromKey(int k) const = 0;
     };
 
@@ -87,12 +87,12 @@ namespace infinityVoronoi
 
         // ---------- topology ----------
         std::vector<Vec2i> edges;
-        //std::map<int, std::vector<int>> polys;
+        // std::map<int, std::vector<int>> polys;
         std::vector<Vec2i> edgePolyIdxs;
 
         // ---------- geometry ----------
         std::vector<Vec2> vertices;
-        std::unordered_map<int, Plane2> edgesPlanes;
+        // std::unordered_map<int, Plane2> edgesPlanes;
         std::vector<int> edgePlaneKeys;
 
         // ---------- poly info ----------
@@ -100,7 +100,6 @@ namespace infinityVoronoi
         std::vector<float> polysAreas;
         std::map<int, bool> polysIoLabel;
         std::vector<int> cellPolyIdxs;
-
         // ---------- hull ----------
         // std::vector<int> hullPlaneKeys;
 
@@ -147,7 +146,6 @@ namespace infinityVoronoi
         const std::vector<std::unique_ptr<SectorCutObject>> &sectors,
         int nDim);
 
-    
     class ChebyshevObject
     {
     public:
@@ -171,12 +169,14 @@ namespace infinityVoronoi
         const std::vector<std::vector<std::vector<Vec>>> &getCellVertexSet() const { return cellVertexSets; }
         const int &getNumSites() const { return numSites; }
         void drawSiteWithDirs(Color c, float thickness = 0.03f, float scale = 1.f) const;
-        void drawCutPlanes(Color c,float thickness = 0.03f,float extendScale = 1.f) const;
+        void drawCutPlanes(Color c, float thickness = 0.03f, float extendScale = 1.f) const;
         void drawCellSectors(float thickness = 0.02f) const;
         void drawCellSector(
             int sIdx,
             int di,
             float thickness = 0.02f) const;
+        void drawAdjacencyEdges(Color edgeColor, float lineWidth) const;
+        void drawCells() const;
         void debugPrintSitesAndLambdas() const;
 
     public:

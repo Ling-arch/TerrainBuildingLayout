@@ -48,13 +48,13 @@ int main()
     render::RENDER_MOVE_SPEED = 1.f;
     float extent = 10.f;
 
-    static float initAxisAngle = 30.f;
+    static float initAxisAngle = 0;
 
     static Vec2f cutPlaneOrigin(0.5, 0);
-    static Vec2f cutPlaneNormal(1, 0.6);
+    static Vec2f cutPlaneNormal(1, 0);
     bool reCut = false;/*  */
     bool reGenTriCut = false;
-    static std::vector<float> scales = {2, 1, 1.5f, 0.5f};
+    static std::vector<float> scales = {1, 1, 1, 1};
 
     //----------------------------------
     // generate sites
@@ -104,21 +104,21 @@ int main()
         return L;
     };
 
-    // Vec2f cutLineDir = geo::rotate90CW(cutPlaneNormal);
-    // cutLineDir.normalize();
-    // Vec2f end = cutPlaneOrigin + cutLineDir * 1000;
-    // Vec2f src = cutPlaneOrigin - cutLineDir * 1000;
+    Vec2f cutLineDir = geo::rotate90CW(cutPlaneNormal);
+    cutLineDir.normalize();
+    Vec2f end = cutPlaneOrigin + cutLineDir * 1000;
+    Vec2f src = cutPlaneOrigin - cutLineDir * 1000;
     //----------------------------------
     // create object
     //----------------------------------
     MatrixXf testSites(2,2);
-    testSites << 4.2,5.6,-7.1,-2.3;
+    testSites << 4.0,6.0,-3.0,-4.0;
     infinityVoronoi::ChebyshevObject2D obj(testSites, nullptr, nullptr, extent);
     //obj.debugPrintSitesAndLambdas();
 
     // std::vector<TriCutObject> triCuts;
     // for (int i = 0; i < 4; i++)
-    //     triCuts.push_back({{0.f, 0.f}, i, scales, createRotationMatrix2D(initAxisAngle)});
+    //     triCuts.push_back({{1.f, 1.f}, i, scales, createRotationMatrix2D(initAxisAngle)});
 
     // for (auto &tri : triCuts)
     //     tri.cutWithPlane(cutPlaneOrigin, cutPlaneNormal, 4);
@@ -131,11 +131,11 @@ int main()
     //----------------------------------
     // compute diagram
     //----------------------------------/*  */
-    //obj.computeDiagram();
-    obj.computeNeighborsAndPlanes();
-    obj.cutWithPlanes();
+    obj.computeDiagram();
+    //obj.computeNeighborsAndPlanes();
+    //obj.cutWithPlanes();
     // obj.lloydRelax(0.001f);
-    obj.debugPrintSitesAndLambdas();
+    //obj.debugPrintSitesAndLambdas();
     rlImGuiSetup(true);
     render.runMainLoop(render::FrameCallbacks{
         [&]() { // 按键更新，重新绘图等事件，poly修改过需要重新fill
@@ -143,7 +143,7 @@ int main()
             // {
             //     triCuts.clear();
             //     for (int i = 0; i < 4; i++)
-            //         triCuts.push_back({{0.f, 0.f}, i, scales, createRotationMatrix2D(initAxisAngle)});
+            //         triCuts.push_back({{1.f, 1.f}, i, scales, createRotationMatrix2D(initAxisAngle)});
 
             //     for (auto &tri : triCuts)
             //         tri.cutWithPlane(cutPlaneOrigin, cutPlaneNormal, 4);
@@ -170,12 +170,13 @@ int main()
             // }
             obj.drawSiteWithDirs(RL_BLACK, lineData.Thickness);
             obj.drawCutPlanes(RL_RED,0.03f,1.5f);
-            obj.drawCellSector(0,0);
-            DrawGrid(30, 1.f);
+            //obj.drawCellSector(0,0);
+            obj.drawCells();
+            DrawGrid(90, 1.f);
             DrawLine3D({0, 0, 0}, {1000, 0, 0}, RL_RED);
             DrawLine3D({0, 0, 0}, {0, 0, -1000}, RL_GREEN);
-            DrawLine3D({0, 0, 0}, {0, 1000, 0}, RL_BLUE);
-            // DrawLine3D({src.x(), 0, -src.y()}, {end.x(), 0, -end.y()}, RL_DARKPURPLE);
+            //DrawLine3D({0, 0, 0}, {0, 1000, 0}, RL_BLUE);
+            //DrawLine3D({src.x(), 0, -src.y()}, {end.x(), 0, -end.y()}, RL_DARKPURPLE);
             // for (int i = 0; i < cuttedPolys.size(); i++)
             // {
             //     const auto &cell = cuttedPolys[i];
