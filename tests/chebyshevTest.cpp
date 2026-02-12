@@ -170,8 +170,8 @@ int main()
             // }
             obj.drawSiteWithDirs(RL_BLACK, lineData.Thickness);
             obj.drawCutPlanes(RL_RED,0.03f,1.5f);
-            //obj.drawCellSector(0,0);
-            obj.drawCells();
+            obj.drawCellSector(0,0);
+            //obj.drawCells();
             DrawGrid(90, 1.f);
             DrawLine3D({0, 0, 0}, {1000, 0, 0}, RL_RED);
             DrawLine3D({0, 0, 0}, {0, 0, -1000}, RL_GREEN);

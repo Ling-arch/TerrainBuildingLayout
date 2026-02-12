@@ -577,7 +577,7 @@ namespace infinityVoronoi
             newPolys[pk * 2].push_back(edges.size());
             newPolys[pk * 2 + 1].push_back(edges.size());
             newEdgePolyIdxs.push_back({pk * 2, pk * 2 + 1});
-            
+
             edges.push_back({newEdgeInner[0], newEdgeInner[1]});
             edgePlaneKeys.push_back(cutPlaneKey);
         }
@@ -1181,7 +1181,7 @@ namespace infinityVoronoi
         std::vector<SectorGeometry> geometries;
 
         // ---------- 1. 收集候选 ----------
-        int candidateCount = 0;
+        // int candidateCount = 0;
         for (int sIdx = 0; sIdx < numSites; ++sIdx)
         {
             for (int sJdx = sIdx + 1; sJdx < numSites; ++sJdx)
@@ -1203,7 +1203,7 @@ namespace infinityVoronoi
 
                         tuples.push_back({sIdx, di, sJdx, dj});
                         geometries.push_back(geom);
-                        candidateCount++;
+                        // candidateCount++;
                     }
                 }
             }
@@ -1212,15 +1212,21 @@ namespace infinityVoronoi
 
         // ---------- 2. sectorsDoIntersect 过滤 ----------
         std::vector<SiteTuple> validTuples;
-        int intersectCount = 0;
 
         for (size_t i = 0; i < geometries.size(); ++i)
         {
             if (sectorsDoIntersect(geometries[i]))
-            {
                 validTuples.push_back(tuples[i]);
-                intersectCount++;
-            }
+        }
+        for (size_t i = 0; i < validTuples.size(); ++i)
+        {
+            const SiteTuple &t = validTuples[i];
+
+            DBG("[" << i << "] "
+                    << "sIdx=" << t.sIdx
+                    << ", di=" << t.di
+                    << ", sJdx=" << t.sJdx
+                    << ", dj=" << t.dj);
         }
         // std::cout << "[computeNeighborsAndPlanes] valid tuples after sectorsDoIntersect: " << intersectCount << "\n";
 
@@ -1396,7 +1402,7 @@ namespace infinityVoronoi
                     auto &plane = cutPlanes[key].first;
                     // DBG("=================================================");
                     std::ostringstream oss;
-                    oss << "[ChebyshevObject::cutWithPlanes] "
+                    oss << "[CutWithPlanes] "
                         << "sIdx=" << sIdx
                         << ", di=" << di
                         << ", cutPlaneKey=" << key
@@ -2016,23 +2022,26 @@ namespace infinityVoronoi
 
     void ChebyshevObject::drawCells() const
     {
+        std::vector<std::vector<Vec2>> verts2d;
         for (int sIdx = 0; sIdx < numSites; ++sIdx)
         {
-            Color c = renderUtil::ColorFromHue(float(sIdx) / numSites);
-
             for (const auto &polyVerts : cellVertexSets[sIdx])
             {
-                std::vector<Vec2> verts2d;
-                verts2d.reserve(polyVerts.size());
+                // verts2d.reserve(polyVerts.size());
+                std::vector<Vec2> verts;
                 for (const Vec &v : polyVerts)
                 {
-                    verts2d.emplace_back(v.x(), v.y());
+                    verts.emplace_back(v.x(), v.y());
                 }
-
-                render::fill_polygon2(verts2d, c, 0.f, 1.f);
-
-                render::stroke_bold_polygon2(verts2d, RL_BLACK, 0.f, 0.03f, 1.f);
+                verts2d.push_back(std::move(verts));
             }
+        }
+        for (int i = 0; i < verts2d.size(); i++)
+        {
+            const auto &verts = verts2d[i];
+            Color c = renderUtil::ColorFromHue(float(i) / verts2d.size());
+            render::fill_polygon2(verts, c, 0.f, 0.3f);
+            render::stroke_bold_polygon2(verts, c, 0.f, 0.03f, 1.f);
         }
     }
 }
