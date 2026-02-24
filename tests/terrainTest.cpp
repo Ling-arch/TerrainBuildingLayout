@@ -41,7 +41,7 @@ int main()
     static float w_down = 14.5f;
 
     static float score_threshold = 0.5f;
-    static int terrain_width = 128;
+
     static int terrainPow = 7;
     static float frequency = 0.01f;
     static float amplitude = 23.5f;
@@ -90,6 +90,7 @@ int main()
     TensorField2D<float> tensorField = TensorField2D(terrain.getAABB2(), minGridNum);
     std::unordered_map<int, field::TerrainTensor<float>> terrainTensors = terrain.sampleTensorAtGrids(tensorField.getGridPoints());
     tensorField.addConstraint(pathPolylines, attractors, terrainTensors);
+    static int terrain_width = terrain.getCellSize() * terrain.getWidth();
     std::vector<Vector2f> terrainBounding2 = {
         {-terrain_width / 2.f, -terrain_width / 2.f},
         {terrain_width / 2.f, -terrain_width / 2.f},
@@ -221,7 +222,7 @@ int main()
                 adj = terrain.buildAdjacencyGraph(debugRank);
                 mainPaths = terrain.buildRoads(seedPoints, roadControlPts, terrain.regionInfos, mainRoadNode, adj);
                 pathPolylines = terrain.convertRoadToFieldLine(mainPaths);
-                //result = build_voronoi_from_pslg(Polyline2_t<float>(terrainBounding2, true), pathPolylines);
+                // result = build_voronoi_from_pslg(Polyline2_t<float>(terrainBounding2, true), pathPolylines);
                 weightChanged = false;
             }
             if (scoreWeightChanged && terrain.getViewMode() == TerrainViewMode::Score)
@@ -230,8 +231,8 @@ int main()
                 terrain.applyFaceColor();
                 mainPaths = terrain.buildRoads(seedPoints, roadControlPts, terrain.regionInfos, mainRoadNode, adj);
                 pathPolylines = terrain.convertRoadToFieldLine(mainPaths);
-                //result = build_voronoi_from_pslg(Polyline2_t<float>(terrainBounding2, true), pathPolylines);
-                // std::cout << "polylines num is " << pathPolylines.size() << std::endl;
+                // result = build_voronoi_from_pslg(Polyline2_t<float>(terrainBounding2, true), pathPolylines);
+                //  std::cout << "polylines num is " << pathPolylines.size() << std::endl;
                 tensorFieldRebuild();
                 parcelsRebuild();
                 scoreWeightChanged = false;
@@ -244,7 +245,7 @@ int main()
                 terrain.applyFaceColor();
                 mainPaths = terrain.buildRoads(seedPoints, roadControlPts, terrain.regionInfos, mainRoadNode, adj);
                 pathPolylines = terrain.convertRoadToFieldLine(mainPaths);
-                //result = build_voronoi_from_pslg(Polyline2_t<float>(terrainBounding2, true), pathPolylines);
+                // result = build_voronoi_from_pslg(Polyline2_t<float>(terrainBounding2, true), pathPolylines);
                 tensorFieldRebuild();
                 parcelsRebuild();
             }
@@ -254,7 +255,7 @@ int main()
                 lastMainRoadNode = mainRoadNode;
                 mainPaths = terrain.buildRoads(seedPoints, roadControlPts, terrain.regionInfos, mainRoadNode, adj);
                 pathPolylines = terrain.convertRoadToFieldLine(mainPaths);
-                //result = build_voronoi_from_pslg(Polyline2_t<float>(terrainBounding2, true), pathPolylines);
+                // result = build_voronoi_from_pslg(Polyline2_t<float>(terrainBounding2, true), pathPolylines);
                 tensorFieldRebuild();
                 parcelsRebuild();
             }
@@ -264,7 +265,7 @@ int main()
                 adj = terrain.buildAdjacencyGraph(debugRank);
                 mainPaths = terrain.buildRoads(seedPoints, roadControlPts, terrain.regionInfos, mainRoadNode, adj);
                 pathPolylines = terrain.convertRoadToFieldLine(mainPaths);
-                //result = build_voronoi_from_pslg(Polyline2_t<float>(terrainBounding2, true), pathPolylines);
+                // result = build_voronoi_from_pslg(Polyline2_t<float>(terrainBounding2, true), pathPolylines);
                 layers = terrain.extractContours(1.f);
                 terrain.applyFaceColor();
                 tensorField = TensorField2D(terrain.getAABB2(), minGridNum);
@@ -354,34 +355,32 @@ int main()
             //         render::stroke_bold_polygon2(Polyloop2(p.points), RL_DARKPURPLE, 0.F, pathWidth, 1.F, {terrain.getWidth() * terrain.getCellSize(), 0});
             //     }
             // }
-          
-
-           
 
             render::draw_points(testParcelBounds, ptData.color, ptData.color.a, ptData.size, 0.f, {terrain.getWidth() * terrain.getCellSize(), 0});
             terrain.draw();
             terrain.drawContours(layers);
-            if (mainPaths.size() > 0)
-                for (const auto &path : mainPaths)
-                    terrain.drawPath(path.path, pathWidth);
+            // if (mainPaths.size() > 0)
+            //     for (const auto &path : mainPaths)
+            //         terrain.drawPath(path.path, pathWidth);
             // terrain.drawGraphEdges(debugCx,debugCy,debugRank);
             // DrawGrid(20,1.f);
             // DrawLine3D({0, 0, 0}, {10000, 0, 0}, RED);
             // DrawLine3D({0, 0, 0}, {0, 10000, 0}, BLUE);
             // DrawLine3D({0, 0, 0}, {0, 0, -10000}, GREEN);
 
-            render::draw_points(seedPoints, RL_YELLOW, 0.25f, 1.2f);
-            render::draw_points(roadControlPts, RL_GREEN, 0.25f, 0.6f);
-            for (int i = 0; i < parcels.size(); i++)
-            {
-                // render::draw_points(parcels[i].points, ptData.color, ptData.color.a, ptData.size, 0.f, {terrain.getWidth() * terrain.getCellSize(), 0});
-                render::draw_points(parcelObbs[i].points, ptData.color, ptData.color.a, ptData.size, 0.f, {terrain.getWidth() * terrain.getCellSize(), 0});
-            }
+            //----------------------------------------road path point debug----------------------------------------
+            // render::draw_points(seedPoints, RL_YELLOW, 0.25f, 1.2f);
+            // render::draw_points(roadControlPts, RL_GREEN, 0.25f, 0.6f);
+            // for (int i = 0; i < parcels.size(); i++)
+            // {
+            //     // render::draw_points(parcels[i].points, ptData.color, ptData.color.a, ptData.size, 0.f, {terrain.getWidth() * terrain.getCellSize(), 0});
+            //     render::draw_points(parcelObbs[i].points, ptData.color, ptData.color.a, ptData.size, 0.f, {terrain.getWidth() * terrain.getCellSize(), 0});
+            // }
 
-            for (const auto &path : pathPolylines)
-            {
-                render::draw_bold_polyline2(path.points, RL_RED, 0.F, pathWidth, 1.f, {terrain.getWidth() * terrain.getCellSize(), 0});
-            }
+            // for (const auto &path : pathPolylines)
+            // {
+            //     render::draw_bold_polyline2(path.points, RL_RED, 0.F, pathWidth, 1.f, {terrain.getWidth() * terrain.getCellSize(), 0});
+            // }
             for (const field::Tensor<float> &t : tensorField.getAllTensors())
             {
                 for (int i = 0; i < 4; ++i)
@@ -405,14 +404,15 @@ int main()
                 }
             }
 
-            for (const auto &attr : tensorField.getAttractors())
-                attr.draw();
+            //----------------------------attractor debug--------------------------------
+            // for (const auto &attr : tensorField.getAttractors())
+            //     attr.draw();
 
-            for (int i = 0; i < projParcels.size(); i++)
-            {
-                Color c = renderUtil::room_color_from_id(i, projParcels.size());
-                render::draw_bold_polyline3(projParcels[i], c, pathWidth, lineData.color.a);
-            }
+            // for (int i = 0; i < projParcels.size(); i++)
+            // {
+            //     Color c = renderUtil::room_color_from_id(i, projParcels.size());
+            //     render::draw_bold_polyline3(projParcels[i], c, pathWidth, lineData.color.a);
+            // }
 
             if (/*parcels.size() > 0 && parcelObbs.size() > 0 && parcelhulls.size()>0&& parcelhullObbs.size()>0*/ true)
             {
@@ -542,7 +542,7 @@ int main()
                         adj = terrain.buildAdjacencyGraph(debugRank);
                         mainPaths = terrain.buildRoads(seedPoints, roadControlPts, terrain.regionInfos, mainRoadNode, adj);
                         pathPolylines = terrain.convertRoadToFieldLine(mainPaths);
-                        //result = build_voronoi_from_pslg(Polyline2_t<float>(terrainBounding2, true), pathPolylines);
+                        // result = build_voronoi_from_pslg(Polyline2_t<float>(terrainBounding2, true), pathPolylines);
                         layers = terrain.extractContours(1.f);
                         tensorField = TensorField2D(terrain.getAABB2(), minGridNum);
                         terrainTensors = terrain.sampleTensorAtGrids(tensorField.getGridPoints());

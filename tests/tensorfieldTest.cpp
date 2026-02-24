@@ -39,6 +39,7 @@ int main()
     static float scale = 300.f;
     static float threshold = 0.5f;
     static float radius = 50.f;
+    static float vecZ = 0.f;
     PointDrawData ptData;
     VectorDrawData vecData;
     FontDrawData fontData;
@@ -49,7 +50,7 @@ int main()
     Polyline2_t<float> poly = field::createRandomPolygon(ptNum, scale, threshold, Vector2f(0.f, 0.f));
     std::vector<PointAtrractor<float>> attractors;
     attractors.emplace_back(Vector2f(0.f, 0.f), radius);
-    TensorField2D<float> tensorField(field::computeAABB<float>({poly}), 20, {poly}, attractors);
+    TensorField2D<float> tensorField(geo::computeAABB<float>({poly}), 20, {poly}, attractors);
     std::vector<Vector2f> seedPoints = M2::gen_poisson_sites_in_poly(poly.points, 1.2f * tensorField.getGridSize(), 30, (unsigned)time(nullptr));
     std::vector<Polyline2_t<float>> streamlines = tensorField.genStreamlines(seedPoints);
     bool hasTestTensor = false;
@@ -61,7 +62,7 @@ int main()
             if (genPlot)
             {
                 poly = field::createRandomPolygon(ptNum, scale, threshold, Vector2f(0.f, 0.f));
-                tensorField = TensorField2D<float>(field::computeAABB<float>({poly}), 20, {poly}, attractors);
+                tensorField = TensorField2D<float>(geo::computeAABB<float>({poly}), 20, {poly}, attractors);
                 seedPoints = M2::gen_poisson_sites_in_poly(poly.points, 1.2f * tensorField.getGridSize(), 30, (unsigned)time(nullptr));
                 streamlines = tensorField.genStreamlines(seedPoints);
                 genPlot = false;
@@ -69,9 +70,9 @@ int main()
 
             if (radiusChanged)
             {
-                for(auto &attr : attractors)
+                for (auto &attr : attractors)
                     attr.radius = radius;
-                tensorField = TensorField2D<float>(field::computeAABB<float>({poly}), 20, {poly}, attractors);
+                tensorField = TensorField2D<float>(geo::computeAABB<float>({poly}), 20, {poly}, attractors);
                 streamlines = tensorField.genStreamlines(seedPoints);
                 radiusChanged = false;
             }
@@ -102,7 +103,7 @@ int main()
                 if (ScreenToWorldXZ(render.getCamera(), mouse, worldPos, outWorldPos2D))
                 {
                     attractors.emplace_back(outWorldPos2D, radius);
-                    tensorField = TensorField2D<float>(field::computeAABB<float>({poly}), 20, {poly}, attractors);
+                    tensorField = TensorField2D<float>(geo::computeAABB<float>({poly}), 20, {poly}, attractors);
                     streamlines = tensorField.genStreamlines(seedPoints);
                 }
             }
@@ -117,35 +118,40 @@ int main()
                 {
                     float minDist2 = std::numeric_limits<float>::max();
                     int removeIdx = -1;
-                    for(const auto &attr : attractors)
+                    for (const auto &attr : attractors)
                     {
                         float dist2 = (attr.pos - outWorldPos2D).squaredNorm();
-                        if(dist2 < minDist2)
+                        if (dist2 < minDist2)
                         {
                             minDist2 = dist2;
                             removeIdx = &attr - &attractors[0];
                         }
                     }
-                    if(removeIdx != -1)
+                    if (removeIdx != -1)
                         attractors.erase(attractors.begin() + removeIdx);
-                    tensorField = TensorField2D<float>(field::computeAABB<float>({poly}), 20, {poly}, attractors);
+                    tensorField = TensorField2D<float>(geo::computeAABB<float>({poly}), 20, {poly}, attractors);
                     streamlines = tensorField.genStreamlines(seedPoints);
                 }
             }
 
         },
         [&]() { // 3维空间绘图内容部分
-            DrawLine3D({0, 0, 0}, {10000, 0, 0}, RL_RED);
-            DrawLine3D({0, 0, 0}, {0, 10000, 0}, RL_BLUE);
-            DrawLine3D({0, 0, 0}, {0, 0, -10000}, RL_GREEN);
+            // DrawLine3D({0, 0, 0}, {10000, 0, 0}, RL_RED);
+            // DrawLine3D({0, 0, 0}, {0, 10000, 0}, RL_BLUE);
+            // DrawLine3D({0, 0, 0}, {0, 0, -10000}, RL_GREEN);
             // DrawGrid(100, 100.f);
-            render::stroke_bold_polygon2(polyloop::Polyloop2(poly.points), RL_BLACK, 0.f, 1.25f, 1.f);
+            render::stroke_bold_polygon2(polyloop::Polyloop2(poly.points), RL_BLACK, 0.f, 0.7f, 1.f);
             // render::fill_polygon2(polyloop::Polyloop2(poly.points), YELLOW, 0.f, 0.3f, false);
             render::draw_points(tensorField.getAllPoints(), ptData.color, 1.f, ptData.size);
-            for (const field::Tensor<float> &t : tensorField.getAllTensors())
+            for (int i = 0; i < tensorField.getAllTensors().size(); ++i)
             {
-                for (int i = 0; i < 4; ++i)
-                    render::draw_vector(t.pos, t.dirs[i], vecData.color, vecData.scale, vecData.startThickness, vecData.endThickness, 0.f, vecData.color.a);
+                const field::Tensor<float> &t = tensorField.getAllTensors()[i];
+                if (i < (tensorField.getGridNX() + 1) * (tensorField.getGridNY() + 1))
+                    for (int i = 0; i < 4; ++i)
+                        render::draw_vector(t.pos, t.dirs[i], RL_BLACK, vecData.scale, vecData.startThickness, vecData.endThickness, 0.f, vecData.color.a);
+                else
+                    for (int i = 0; i < 4; ++i)
+                        render::draw_vector(t.pos, t.dirs[i], RL_RED, vecData.scale, vecData.startThickness, vecData.endThickness, 0.f, vecData.color.a);
             }
             for (const auto &line : streamlines)
             {
@@ -156,10 +162,10 @@ int main()
             if (testTensor.dirs.size() == 4 && hasTestTensor)
             {
                 for (int i = 0; i < 4; ++i)
-                    render::draw_vector(testTensor.pos, testTensor.dirs[i], RL_GREEN, vecData.scale, vecData.startThickness, vecData.endThickness, 0.f, vecData.color.a);
+                    render::draw_vector(testTensor.pos, testTensor.dirs[i], RL_GREEN, vecData.scale, vecData.startThickness, vecData.endThickness, vecZ, vecData.color.a);
             }
 
-            for(const auto &attr : attractors)
+            for (const auto &attr : attractors)
                 attr.draw();
 
         },
@@ -174,50 +180,41 @@ int main()
 
             // 2. 自定义GUI窗口（纯2D固定在屏幕上）
             bool customOpen = true;
-            if (ImGui::Begin("Render Settings", &customOpen))
+            render.setCameraUI(customOpen);
+            if (ImGui::Begin("Geo Settings", &customOpen))
             {
-                if (ImGui::CollapsingHeader("Camera Control", ImGuiTreeNodeFlags_DefaultOpen))
+
+                if (ImGui::TreeNodeEx("Point Settings", ImGuiTreeNodeFlags_DefaultOpen))
                 {
-                    ImGui::SliderFloat("Camera Move Speed", &render::RENDER_MOVE_SPEED, 0.f, 2.f, "%.2f");
-                    ImGui::SliderFloat("Camera Rotate Speed", &render::RENDER_ROTATE_SPEED, 0.f, 0.009f, "%.3f");
-                    ImGui::SliderFloat("Camera Zoom Speed", &render::RENDER_ZOOM_SPEED, 0.f, 10.f, "%.2f");
+                    ImGui::SliderFloat("Point Size", &ptData.size, 0.01f, 10.f, "%.2f");
+                    if (ImGui::ColorEdit4("Point Color", (float *)&ptData.colorF, ImGuiColorEditFlags_Float | ImGuiColorEditFlags_PickerHueWheel))
+                        ptData.syncFloatToColor();
+                    ImGui::TreePop();
+                }
+                if (ImGui::TreeNodeEx("Vector Settings", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    ImGui::SliderFloat("Vector Scale", &vecData.scale, 1.f, 20.f, "%.1f");
+                    ImGui::SliderFloat("Start Thickness", &vecData.startThickness, 0.1f, 10.f, "%.1f");
+                    ImGui::SliderFloat("End Thickness", &vecData.endThickness, 0.1f, 10.f, "%.1f");
+                    ImGui::SliderFloat("Vec Z", &vecZ, -100.0f, 100.f, "%.1f");
+                    if (ImGui::ColorEdit4("Vector Color", (float *)&vecData.colorF, ImGuiColorEditFlags_Float | ImGuiColorEditFlags_PickerHueWheel))
+                        vecData.syncFloatToColor();
+                    ImGui::TreePop();
                 }
 
-                if (ImGui::TreeNodeEx("Geo Settings", ImGuiTreeNodeFlags_DefaultOpen))
+                if (ImGui::TreeNodeEx("Font Settings", ImGuiTreeNodeFlags_DefaultOpen))
                 {
-                    if (ImGui::TreeNodeEx("Point Settings", ImGuiTreeNodeFlags_DefaultOpen))
-                    {
-                        ImGui::SliderFloat("Point Size", &ptData.size, 0.01f, 10.f, "%.1f");
-                        if (ImGui::ColorEdit4("Point Color", (float *)&ptData.colorF, ImGuiColorEditFlags_Float | ImGuiColorEditFlags_PickerHueWheel))
-                            ptData.syncFloatToColor();
-                        ImGui::TreePop();
-                    }
-                    if (ImGui::TreeNodeEx("Vector Settings", ImGuiTreeNodeFlags_DefaultOpen))
-                    {
-                        ImGui::SliderFloat("Vector Scale", &vecData.scale, 1.f, 20.f, "%.1f");
-                        ImGui::SliderFloat("Start Thickness", &vecData.startThickness, 0.1f, 10.f, "%.1f");
-                        ImGui::SliderFloat("End Thickness", &vecData.endThickness, 0.1f, 10.f, "%.1f");
-                        if (ImGui::ColorEdit4("Vector Color", (float *)&vecData.colorF, ImGuiColorEditFlags_Float | ImGuiColorEditFlags_PickerHueWheel))
-                            vecData.syncFloatToColor();
-                        ImGui::TreePop();
-                    }
+                    ImGui::SliderInt("Font Size", &fontData.size, 1, 30);
+                    if (ImGui::ColorEdit4("Font Color", (float *)&fontData.colorF, ImGuiColorEditFlags_Float | ImGuiColorEditFlags_PickerHueWheel))
+                        fontData.syncFloatToColor();
+                    ImGui::TreePop();
+                }
 
-                    if (ImGui::TreeNodeEx("Font Settings", ImGuiTreeNodeFlags_DefaultOpen))
-                    {
-                        ImGui::SliderInt("Font Size", &fontData.size, 1, 30);
-                        if (ImGui::ColorEdit4("Font Color", (float *)&fontData.colorF, ImGuiColorEditFlags_Float | ImGuiColorEditFlags_PickerHueWheel))
-                            fontData.syncFloatToColor();
-                        ImGui::TreePop();
-                    }
-
-                    if (ImGui::TreeNodeEx("Line Settings", ImGuiTreeNodeFlags_DefaultOpen))
-                    {
-                        ImGui::SliderFloat("Line Thickness", &lineData.Thickness, 0.01f, 1.f, "%.2f");
-                        if (ImGui::ColorEdit4("Line Color", (float *)&lineData.colorF, ImGuiColorEditFlags_Float | ImGuiColorEditFlags_PickerHueWheel))
-                            lineData.syncFloatToColor();
-                        ImGui::TreePop();
-                    }
-
+                if (ImGui::TreeNodeEx("Line Settings", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    ImGui::SliderFloat("Line Thickness", &lineData.Thickness, 0.01f, 1.f, "%.2f");
+                    if (ImGui::ColorEdit4("Line Color", (float *)&lineData.colorF, ImGuiColorEditFlags_Float | ImGuiColorEditFlags_PickerHueWheel))
+                        lineData.syncFloatToColor();
                     ImGui::TreePop();
                 }
             }

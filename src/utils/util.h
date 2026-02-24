@@ -357,7 +357,7 @@ namespace util
             std::uniform_real_distribution<Scalar> dr(r, Scalar(2 * r));
 
             // ---------- grid ----------
-            const Scalar cell_size = r / std::sqrt(2);
+            const Scalar cell_size = Scalar(r / std::sqrt(2));
             const int grid_w = int((maxx - minx) / cell_size) + 1;
             const int grid_h = int((maxy - miny) / cell_size) + 1;
 

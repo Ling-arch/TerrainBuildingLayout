@@ -70,19 +70,19 @@ namespace infinityVoronoi
         // ===== DEBUG: print polys centroids =====
 
         int polyCount = (int)polysCentroids.size();
-        DBG(
-            "[clipCellGeometry] polysCentroids = " << ([&]()
-                                                       {
-        std::ostringstream oss;
-        oss << "[";
-        for (int i = 0; i < (int)polysCentroids.size(); ++i)
-        {
-            const Vec &c = polysCentroids[i];
-            if (i) oss << ", ";
-            oss << "(" << c[0] << "," << c[1] << ")";
-        }
-        oss << "]";
-        return oss.str(); })());
+        // DBG(
+        //     "[clipCellGeometry] polysCentroids = " << ([&]()
+        //                                                {
+        // std::ostringstream oss;
+        // oss << "[";
+        // for (int i = 0; i < (int)polysCentroids.size(); ++i)
+        // {
+        //     const Vec &c = polysCentroids[i];
+        //     if (i) oss << ", ";
+        //     oss << "(" << c[0] << "," << c[1] << ")";
+        // }
+        // oss << "]";
+        // return oss.str(); })());
         std::vector<float> distsA(polyCount);
         std::vector<float> distsL2A(polyCount);
         std::vector<bool> msk(polyCount, true);
@@ -93,7 +93,7 @@ namespace infinityVoronoi
             Vec diff = polysCentroids[i] - siteA;
 
             distsA[i] = diff.dot(MvecA) / lambdaA;
-            distsL2A[i] = diff.norm();
+            distsL2A[i] = diff.squaredNorm();
 
             // domain clipping
             if (polysCentroids[i].cwiseAbs().maxCoeff() >= domainExtent)
@@ -103,40 +103,100 @@ namespace infinityVoronoi
         // ---------- neighbor sites ----------
         int neighborCount = (int)sitesB.size();
 
-        for (int nb = 0; nb < neighborCount; ++nb)
+        for (int i = 0; i < polyCount; ++i)
         {
-            const Vec &siteB = sitesB[nb];
-            const auto &MvecB = MvecsB[nb];
-            const Vec &lambdaB = lambdasB[nb];
+            if (!msk[i])
+                continue;
 
-            for (int i = 0; i < polyCount; ++i)
+            const Vec &centroid = polysCentroids[i];
+
+            for (int nb = 0; nb < neighborCount; ++nb)
             {
-                Vec diff = polysCentroids[i] - siteB;
+                const Vec &siteB = sitesB[nb];
+                const auto &MvecB = MvecsB[nb];
+                const Vec &lambdaB = lambdasB[nb];
+
+                Vec diffB = centroid - siteB;
 
                 float maxDistB = -std::numeric_limits<float>::max();
 
-                // max(dot(diff, MvecB_row)/lambda)
-                for (int k = 0; k < MvecB.rows(); ++k)
+                int rowCount = MvecB.rows();
+                for (int k = 0; k < rowCount; ++k)
                 {
-                    float d =
-                        diff.dot(MvecB.row(k)) / lambdaB[k];
-
-                    maxDistB = std::max(maxDistB, d);
+                    float d = diffB.dot(MvecB.row(k)) / lambdaB[k];
+                    if (d > maxDistB)
+                        maxDistB = d;
                 }
 
                 bool dMsk = distsA[i] < maxDistB;
+                bool fallbackUsed = false;
 
-                // equality fallback (L2)
-                if (std::fabs(distsA[i] - maxDistB) < 1e-6)
+                if (std::fabs(distsA[i] - maxDistB) < 1e-6f)
                 {
-                    float distsL2B = diff.norm();
+                    float distsL2B = diffB.squaredNorm();
                     if (distsL2A[i] < distsL2B)
+                    {
                         dMsk = true;
+                        fallbackUsed = true;
+                    }
                 }
 
-                msk[i] = msk[i] && dMsk;
+                // ================== FULL DEBUG PRINT ==================
+                // std::cout
+                //     << "------------------------------------------\n"
+                //     << "[Poly " << i << "] vs Neighbor " << nb << "\n"
+                //     << " centroid = (" << centroid.x() << ", " << centroid.y() << ")\n"
+
+                //     << " siteA    = (" << siteA.x() << ", " << siteA.y() << ")\n"
+                //     << " diffA    = (" << (centroid.x() - siteA.x())
+                //     << ", " << (centroid.y() - siteA.y()) << ")\n"
+                //     << " dA       = " << distsA[i]
+                //     << " | dA_L2 = " << distsL2A[i] << "\n"
+
+                //     << " siteB    = (" << siteB.x() << ", " << siteB.y() << ")\n"
+                //     << " diffB    = (" << diffB.x() << ", " << diffB.y() << ")\n"
+                //     << " maxDistB= " << maxDistB
+                //     << " | dB_L2 = " << diffB.squaredNorm() << "\n"
+
+                //     << " compare  : dA < maxDistB = "
+                //     << (distsA[i] < maxDistB ? "true" : "false") << "\n"
+
+                //     << " fallback : " << (fallbackUsed ? "USED" : "no") << "\n"
+                //     << " RESULT   : " << (dMsk ? "KEEP" : "CUT") << "\n";
+
+                // 如果你想看每一条 Mvec 投影，再打开这个：
+                for (int k = 0; k < rowCount; ++k)
+                {
+                    float d = diffB.dot(MvecB.row(k)) / lambdaB[k];
+                    // std::cout
+                    //     << "   k=" << k
+                    //     << " M=(" << MvecB(k, 0) << "," << MvecB(k, 1) << ")"
+                    //     << " lambda=" << lambdaB[k]
+                    //     << " d=" << d << "\n";
+                }
+
+                // std::cout << std::endl;
+                // ======================================================
+
+                if (!dMsk)
+                {
+                    msk[i] = false;
+                    break;
+                }
             }
         }
+
+        // DBG("[clipCellGeometry] mask = " << ([&]()
+        //                                      {
+        // std::ostringstream oss;
+        // oss << "[";
+        // for (int i = 0; i < (int)msk.size(); ++i)
+        // {
+        //     if (i) oss << ", ";
+        //     oss << msk[i];
+        // }
+        // oss << "]";
+        // return oss.str(); })());
 
         cellSec.setPolyIoLabels(msk);
     }
@@ -151,68 +211,87 @@ namespace infinityVoronoi
         {
             std::vector<std::vector<Vec>> parts;
 
+            std::cout << "\n==== [DISSOLVE BEGIN] ====\n";
+
             int sIdx = 0;
             for (auto &sec : sectors)
             {
                 if (!sec)
                 {
+                    std::cout << " Sector " << sIdx << " : null\n";
                     ++sIdx;
                     continue;
                 }
 
                 const auto &hv = sec->getHullVerts();
+
                 size_t totalVerts = 0;
                 for (size_t i = 0; i < hv.size(); ++i)
-                {
                     totalVerts += hv[i].size();
-                }
+
+                std::cout << " Sector " << sIdx
+                          << " | parts=" << hv.size()
+                          << " | totalVerts=" << totalVerts
+                          << " | planeKeys=";
+
+                for (auto k : sec->hullPlaneKeys)
+                    std::cout << k << " ";
+
+                std::cout << "\n";
+
                 parts.insert(parts.end(), hv.begin(), hv.end());
-
-                auto keys = sec->hullPlaneKeys;
-
                 result.planeKeys.insert(
                     result.planeKeys.end(),
-                    keys.begin(), keys.end());
+                    sec->hullPlaneKeys.begin(),
+                    sec->hullPlaneKeys.end());
 
                 ++sIdx;
             }
 
             if (parts.empty())
             {
-                std::cout << " [dissolve]  WARNING: no parts collected\n";
+                std::cout << " [dissolve] WARNING: no parts collected\n";
                 return result;
             }
 
+            std::cout << " Collected parts = " << parts.size() << "\n";
+
             auto merged = chebyshevUtils::concatPolyParts(parts);
 
-            // std::cout << " [dissolve]  merged polys = "
-            //           << merged.size()
-            //           << std::endl;
+
+            std::cout << " After concatPolyParts : merged polys = "
+                      << merged.size() << "\n";
 
             for (size_t i = 0; i < merged.size(); ++i)
             {
+                std::cout << "  Merged[" << i
+                          << "] | rawVerts=" << merged[i].size();
 
                 auto poly = chebyshevUtils::limitedDissolve2D(merged[i]);
 
-                // std::cout << " [dissolve]  after dissolve verts = "
-                //           << poly.size()
-                //           << std::endl;
+                std::cout << " | afterDissolve=" << poly.size();
 
                 if (!poly.empty())
+                {
                     result.polys.push_back(std::move(poly));
+                    std::cout << " | kept\n";
+                }
                 else
-                    std::cout
-                        << "[dissolve]  WARNING: poly vanished after dissolve\n";
+                {
+                    std::cout << " | vanished ⚠\n";
+                }
             }
 
-            // std::cout << " [dissolve]  final poly count = "
-            //           << result.polys.size()
-            //           << std::endl;
+            std::cout << " Final poly count = "
+                      << result.polys.size()
+                      << "\n";
+
+            std::cout << "==== [DISSOLVE END] ====\n";
 
             return result;
         }
 
-        std::cout << " [dissolve]  unsupported configuration\n";
+        std::cout << " [dissolve] unsupported configuration\n";
         return result;
     }
 
@@ -285,9 +364,9 @@ namespace infinityVoronoi
         {
             int vidx = VERT_IDX[di][i];
             Vec2 v = initCellVerts[vidx].cwiseProduct(vertScales[i]);
-            vertices[i] = site + M.transpose() * v;
-            edgeCenters[i] = site + M.transpose() * (EDGE_CENTERS[EDGE_CENTER_IDX[di][i]].cwiseProduct(eCenterScales[i]));
-            edgeNormals[i] = (M.transpose() * (EDGE_NORMALS[EDGE_NORMAL_IDX[di][i]].cwiseProduct(eNormalScales[i]))).normalized();
+            vertices[i] = site + M * v;
+            edgeCenters[i] = site + M * (EDGE_CENTERS[EDGE_CENTER_IDX[di][i]].cwiseProduct(eCenterScales[i]));
+            edgeNormals[i] = (M * (EDGE_NORMALS[EDGE_NORMAL_IDX[di][i]].cwiseProduct(eNormalScales[i]))).normalized();
 
             int key = -(i + 4);
             edgesPlanes[key] = {edgeCenters[i], edgeNormals[i]};
@@ -308,7 +387,7 @@ namespace infinityVoronoi
     void TriCutObject::clipWithPlane(
         const Vec2 &o,
         const Vec2 &n,
-        int cutPlaneKey)
+        long long cutPlaneKey)
     {
         cutWithPlane(o, n, cutPlaneKey);
     }
@@ -316,7 +395,7 @@ namespace infinityVoronoi
     void TriCutObject::cutWithPlane(
         const Vec2 &o,
         const Vec2 &n,
-        int cutPlaneKey)
+        long long cutPlaneKey)
     {
         const float eps = 1e-6f;
         // DBG("  [TriCutObject::cutWithPlane]");
@@ -326,17 +405,17 @@ namespace infinityVoronoi
         //     << ", n=[" << n.transpose() << "]";
         // DBG(oss.str());
 
-        std::ostringstream oss1;
-        oss1 << "    vertices: ";
+        // std::ostringstream oss1;
+        // oss1 << "    vertices: ";
 
-        for (int i = 0; i < vertices.size(); ++i)
-        {
-            oss1 << "v" << i << "=" << vec2ToStr(vertices[i]);
-            if (i + 1 < vertices.size())
-                oss1 << ", ";
-        }
+        // for (int i = 0; i < vertices.size(); ++i)
+        // {
+        //     oss1 << "v" << i << "=" << vec2ToStr(vertices[i]);
+        //     if (i + 1 < vertices.size())
+        //         oss1 << ", ";
+        // }
 
-        DBG(oss1.str());
+        // DBG(oss1.str());
         // ---- vertex signs ----
         Eigen::VectorXf dots(vertices.size());
         for (int i = 0; i < vertices.size(); ++i)
@@ -355,12 +434,12 @@ namespace infinityVoronoi
         auto edgeHashs = chebyshevUtils::cantorPiV(edges);
 
         // ---- split polys ----
-        std::map<int, std::vector<int>> newPolys;
-        std::unordered_set<int> cutPolyKeys;
+        std::map<long long, std::vector<int>> newPolys;
+        std::unordered_set<long long> cutPolyKeys;
 
         for (auto &[pk, eIdxs] : polys)
         {
-            std::unordered_set<int> signs;
+            std::unordered_set<long long> signs;
             for (int eIdx : eIdxs)
             {
                 signs.insert(edgeMasks[eIdx][0]);
@@ -461,11 +540,11 @@ namespace infinityVoronoi
 
         // ---- split edges ----
         int numVerts = vertices.size();
-        std::vector<int> cutPlaneKeys;
+        std::vector<long long> cutPlaneKeys;
         std::unordered_map<uint64_t, std::pair<int, int>> edgesReplaced;
         std::vector<std::pair<int, int>> edgeUpdates;
 
-        for (int pk : cutPolyKeys)
+        for (long long pk : cutPolyKeys)
         {
             std::vector<int> newEdgeInner;
 
@@ -615,59 +694,59 @@ namespace infinityVoronoi
             eIdxs.erase(std::unique(eIdxs.begin(), eIdxs.end()), eIdxs.end());
         }
         edgePolyIdxs = newEdgePolyIdxs;
-        DBG("    ---- polys (after cut) ----");
-        for (auto &[pk, eIdxs] : polys)
-        {
-            std::ostringstream oss;
-            oss << "      poly[" << pk << "] edges = ";
-            for (int e : eIdxs)
-                oss << e << " ";
-            DBG(oss.str());
-        }
+        // DBG("    ---- polys (after cut) ----");
+        // for (auto &[pk, eIdxs] : polys)
+        // {
+        //     std::ostringstream oss;
+        //     oss << "      poly[" << pk << "] edges = ";
+        //     for (int e : eIdxs)
+        //         oss << e << " ";
+        //     DBG(oss.str());
+        // }
 
         // DBG("    ---- polys (after cut) ----");
 
-        for (auto &[pk, eIdxs] : polys)
-        {
-            DBG("      poly[" << pk << "]");
+        // for (auto &[pk, eIdxs] : polys)
+        // {
+        //     DBG("      poly[" << pk << "]");
 
-            for (int eIdx : eIdxs)
-            {
-                if (eIdx < 0 || eIdx >= edges.size())
-                {
-                    DBG("        edge[" << eIdx << "] <invalid>");
-                    continue;
-                }
+        //     for (int eIdx : eIdxs)
+        //     {
+        //         if (eIdx < 0 || eIdx >= edges.size())
+        //         {
+        //             DBG("        edge[" << eIdx << "] <invalid>");
+        //             continue;
+        //         }
 
-                const Vec2i &e = edges[eIdx];
-                int v0 = e[0];
-                int v1 = e[1];
+        //         const Vec2i &e = edges[eIdx];
+        //         int v0 = e[0];
+        //         int v1 = e[1];
 
-                std::ostringstream oss;
-                oss << "        edge[" << eIdx << "] : "
-                    << v0 << " -> " << v1;
+        //         std::ostringstream oss;
+        //         oss << "        edge[" << eIdx << "] : "
+        //             << v0 << " -> " << v1;
 
-                if (v0 >= 0 && v0 < vertices.size())
-                {
-                    oss << ", v" << v0 << "=" << vec2ToStr(vertices[v0]);
-                }
-                else
-                {
-                    oss << ", v" << v0 << "=<invalid>";
-                }
+        //         if (v0 >= 0 && v0 < vertices.size())
+        //         {
+        //             oss << ", v" << v0 << "=" << vec2ToStr(vertices[v0]);
+        //         }
+        //         else
+        //         {
+        //             oss << ", v" << v0 << "=<invalid>";
+        //         }
 
-                if (v1 >= 0 && v1 < vertices.size())
-                {
-                    oss << ", v" << v1 << "=" << vec2ToStr(vertices[v1]);
-                }
-                else
-                {
-                    oss << ", v" << v1 << "=<invalid>";
-                }
+        //         if (v1 >= 0 && v1 < vertices.size())
+        //         {
+        //             oss << ", v" << v1 << "=" << vec2ToStr(vertices[v1]);
+        //         }
+        //         else
+        //         {
+        //             oss << ", v" << v1 << "=<invalid>";
+        //         }
 
-                DBG(oss.str());
-            }
-        }
+        //         DBG(oss.str());
+        //     }
+        // }
     }
 
     void TriCutObject::computePolysCentroidsAndWeights()
@@ -755,54 +834,116 @@ namespace infinityVoronoi
 
     std::vector<std::vector<Vec>> TriCutObject::getHullVerts()
     {
+        // DBG("==== getHullVerts BEGIN ====");
+
         std::unordered_map<int, std::vector<Vec2i>> es;
 
-        // 1. collect hull edges
-        for (size_t i = 0; i < edges.size(); ++i)
         {
-            Vec2i epi = edgePolyIdxs[i];
-            if ((epi.array() != 0).count() == 1)
+            // std::ostringstream oss;
+            // oss << "epi|sign: ";
+            // 1️⃣ collect hull edges
+            for (size_t i = 0; i < edges.size(); ++i)
             {
-                int pk = edgePlaneKeys[i];
-                es[pk].push_back(edges[i]);
+                Vec2i epi = edgePolyIdxs[i];
+
+                Eigen::VectorXi epiSign = chebyshevUtils::simpleSignI(epi);
+                // oss << "(" << epi(0) << "," << epi(1) << ")"
+                //     << "(" << edges[i].x() << "," << edges[i].y() << ")"
+                //     << "[" << epiSign(0) << "," << epiSign(1) << "] ";
+                if (epiSign.sum() == 1)
+                {
+                    int pk = edgePlaneKeys[i];
+                    es[pk].push_back(edges[i]);
+
+                    // DBG("HullEdge | plane =" << pk << "| edge =" << edges[i][0] << "-" << edges[i][1]);
+                }
             }
+            // DBG(oss.str());
         }
+
+        // DBG("HullPlanes =", es.size());
 
         // init state
         if (es.empty())
         {
             hullPlaneKeys = {-6};
-            return {{vertices[edges.back()[0]],
-                     vertices[edges.back()[0]]}};
+
+            // DBG("InitState | edge =" << edges.back()[0] << "-" << edges.back()[1]);
+
+            std::vector<Vec> poly;
+            for (int vid : edges.back())
+            {
+                Vec v(2);
+                v << vertices[vid].x(), vertices[vid].y();
+                poly.push_back(v);
+            }
+
+            // DBG("==== getHullVerts END (init) ====");
+            return {poly};
         }
 
-        // 2. collect hull segments
+        // 2️⃣ collect hull segments
         std::vector<Vec2i> segs;
+
         for (auto &[pk, eList] : es)
         {
+            // DBG("Plane" << pk << "| edgeCount =" << eList.size());
+
             auto segments = chebyshevUtils::findConnectedEdgeSegments(eList);
+
+            // DBG("  ConnectedSegments =" << segments.size());
+
             for (auto &seg : segments)
             {
                 auto pathOpt = chebyshevUtils::edgesToPath(chebyshevUtils::convertVector2array(seg));
+
                 if (!pathOpt)
+                {
+                    // DBG("  Segment | edgesToPath FAILED");
                     continue;
+                }
+
                 auto &path = pathOpt->path;
+
+                // DBG("  Segment | start =" << path.front() <<
+                //     "| end =" << path.back() <<
+                //     "| length =" << path.size());
+
                 segs.push_back({path.front(), path.back()});
             }
         }
 
+        // record plane keys
         hullPlaneKeys.clear();
         for (auto &[pk, _] : es)
             hullPlaneKeys.push_back(pk);
 
-        // 3. segments → closed paths
+        // 3️⃣ segments → closed paths
+        // DBG("SegmentsForPaths =" << segs.size());
+
         auto paths = chebyshevUtils::edgesToPaths(segs);
+
+        // DBG("ClosedPaths ="<< paths.size());
 
         std::vector<std::vector<Vec>> res;
         res.reserve(paths.size());
 
+        int idx = 0;
+
         for (auto &p : paths)
         {
+            // std::ostringstream oss;
+            // oss << "Path " << idx++ << " | ";
+
+            // for (size_t i = 0; i < p.size(); ++i)
+            // {
+            //     oss << p[i];
+            //     if (i + 1 < p.size())
+            //         oss << " -> ";
+            // }
+
+            // DBG(oss.str());
+
             std::vector<Vec> poly;
             poly.reserve(p.size());
 
@@ -815,6 +956,8 @@ namespace infinityVoronoi
 
             res.push_back(std::move(poly));
         }
+
+        // DBG("==== getHullVerts END ====");
 
         return res;
     }
@@ -841,7 +984,8 @@ namespace infinityVoronoi
         }
 
         cellPolyIdxs.clear();
-
+        // polyKeysInside.clear();
+        insidePolysVerts.clear();
         int pIdx = 0;
         for (auto &[pk, _] : polys)
         {
@@ -851,7 +995,10 @@ namespace infinityVoronoi
             if (io)
             {
                 cellPolyIdxs.push_back(pIdx);
+                insidePolysVerts.push_back(buildPolyFromKey(pk));
+                // polyKeysInside.insert(pk);
             }
+            
             else
             {
                 for (auto &epi : edgePolyIdxs)
@@ -864,9 +1011,22 @@ namespace infinityVoronoi
             }
             ++pIdx;
         }
+
+
+        // DBG("[TriCutObject] CellPolyIdx = " << ([&]()
+        //                                         {
+        // std::ostringstream oss;
+        // oss << "[";
+        // for (int i = 0; i < (int)cellPolyIdxs.size(); ++i)
+        // {
+        //     if (i) oss << ", ";
+        //     oss <<cellPolyIdxs[i];
+        // }
+        // oss << "]";
+        // return oss.str(); })());
     }
 
-    std::vector<Vec2> TriCutObject::buildPolyFromKey(int key) const
+    std::vector<Vec2> TriCutObject::buildPolyFromKey(long long key) const
     {
         std::vector<Vec2> poly;
 
@@ -934,6 +1094,80 @@ namespace infinityVoronoi
         return poly;
     }
 
+    std::vector<Vec2> TriCutObject::buildPolyFromKey(
+        long long key,
+        std::vector<int> *outVertIdxs) const
+    {
+        std::vector<Vec2> poly;
+
+        if (outVertIdxs)
+            outVertIdxs->clear();
+
+        // ---------- 1. 找 poly ----------
+        auto it = polys.find(key);
+        if (it == polys.end())
+            return poly;
+
+        const std::vector<int> &edgeIdxs = it->second;
+        if (edgeIdxs.empty())
+            return poly;
+
+        // ---------- 2. vertex -> edges ----------
+        std::unordered_map<int, std::vector<int>> v2edges;
+        for (int eIdx : edgeIdxs)
+        {
+            const auto &e = edges[eIdx];
+            v2edges[e[0]].push_back(eIdx);
+            v2edges[e[1]].push_back(eIdx);
+        }
+
+        // ---------- 3. 起点 ----------
+        int startEdge = edgeIdxs[0];
+        const auto &e0 = edges[startEdge];
+
+        int startV = e0[0];
+        int currV = startV;
+        int prevEdge = -1;
+
+        poly.push_back(vertices[currV]);
+        if (outVertIdxs)
+            outVertIdxs->push_back(currV); // 👈 记录 index
+
+        // ---------- 4. edge loop ----------
+        while (true)
+        {
+            const auto &edgesAtV = v2edges[currV];
+
+            int nextEdge = -1;
+            for (int eIdx : edgesAtV)
+            {
+                if (eIdx != prevEdge)
+                {
+                    nextEdge = eIdx;
+                    break;
+                }
+            }
+
+            if (nextEdge < 0)
+                break;
+
+            const auto &e = edges[nextEdge];
+            int nextV = (e[0] == currV) ? e[1] : e[0];
+
+            if (nextV == startV)
+                break;
+
+            poly.push_back(vertices[nextV]);
+            if (outVertIdxs)
+                outVertIdxs->push_back(nextV); // 👈 记录 index
+
+            prevEdge = nextEdge;
+            currV = nextV;
+        }
+
+        return poly;
+    }
+
     // =================================
 
     ChebyshevObject::ChebyshevObject(
@@ -978,7 +1212,7 @@ namespace infinityVoronoi
         }
 
         // 2 * extent / (sDiv if isGrid else 1)
-        cellScale = 2.f * domainExtent / (isGrid ? sDiv : 1.f);
+        cellScale = 3.f * domainExtent / (isGrid ? sDiv : 1.f);
         cellScales.assign(numSites, cellScale);
 
         baseDir.resize(2 * nDim, nDim);
@@ -1023,8 +1257,10 @@ namespace infinityVoronoi
         for (int i = 0; i < numSites; ++i)
         {
             Eigen::MatrixXf V(2 * nDim, nDim);
-            V << Ms[i].transpose(),
-                -Ms[i].transpose();
+            V << Ms[i].col(0).transpose(),
+                Ms[i].col(1).transpose(),
+                -Ms[i].col(0).transpose(),
+                -Ms[i].col(1).transpose();
             Mvecs[i] = V;
         }
 
@@ -1218,16 +1454,16 @@ namespace infinityVoronoi
             if (sectorsDoIntersect(geometries[i]))
                 validTuples.push_back(tuples[i]);
         }
-        for (size_t i = 0; i < validTuples.size(); ++i)
-        {
-            const SiteTuple &t = validTuples[i];
+        // for (size_t i = 0; i < validTuples.size(); ++i)
+        // {
+        //     const SiteTuple &t = validTuples[i];
 
-            DBG("[" << i << "] "
-                    << "sIdx=" << t.sIdx
-                    << ", di=" << t.di
-                    << ", sJdx=" << t.sJdx
-                    << ", dj=" << t.dj);
-        }
+        //     DBG("[" << i << "] "
+        //             << "sIdx=" << t.sIdx
+        //             << ", di=" << t.di
+        //             << ", sJdx=" << t.sJdx
+        //             << ", dj=" << t.dj);
+        // }
         // std::cout << "[computeNeighborsAndPlanes] valid tuples after sectorsDoIntersect: " << intersectCount << "\n";
 
         int N = static_cast<int>(validTuples.size());
@@ -1401,15 +1637,15 @@ namespace infinityVoronoi
                 {
                     auto &plane = cutPlanes[key].first;
                     // DBG("=================================================");
-                    std::ostringstream oss;
-                    oss << "[CutWithPlanes] "
-                        << "sIdx=" << sIdx
-                        << ", di=" << di
-                        << ", cutPlaneKey=" << key
-                        << ", o=" << vec2ToStr(plane.first)
-                        << ", n=" << vec2ToStr(plane.second);
+                    // std::ostringstream oss;
+                    // oss << "[CutWithPlanes] "
+                    //     << "sIdx=" << sIdx
+                    //     << ", di=" << di
+                    //     << ", cutPlaneKey=" << key
+                    //     << ", o=" << vec2ToStr(plane.first)
+                    //     << ", n=" << vec2ToStr(plane.second);
 
-                    DBG(oss.str());
+                    // DBG(oss.str());
                     sector->cutWithPlane(
                         plane.first.transpose(),
                         plane.second.transpose(),
@@ -1456,13 +1692,13 @@ namespace infinityVoronoi
                     MvecsB.push_back(Mvecs[nbIdx]); // (2*nDim × nDim)
                     lambdasB.push_back(lambdas.row(nbIdx));
                 }
-                DBG(
-                    "[ChebyshevObject::clipCellGeometry] sIdx=" << sIdx
-                                                                << ", di=" << di
-                                                                << ", siteA=(" << siteA[0] << "," << siteA[1] << ")"
-                                                                << ", MvecA=(" << MvecA[0] << "," << MvecA[1] << ")"
-                                                                << ", lambdaA=" << lambdaA
-                                                                << ", neighborCount=" << sitesB.size());
+                // DBG(
+                //     "[ChebyshevObject::clipCellGeometry] sIdx=" << sIdx
+                //                                                 << ", di=" << di
+                //                                                 << ", siteA=(" << siteA[0] << "," << siteA[1] << ")"
+                //                                                 << ", MvecA=(" << MvecA[0] << "," << MvecA[1] << ")"
+                //                                                 << ", lambdaA=" << lambdaA
+                //                                                 << ", neighborCount=" << sitesB.size());
                 // ---- 调用函数 ----
                 infinityVoronoi::clipCellGeometry(
                     *cellSec,
@@ -1640,14 +1876,12 @@ namespace infinityVoronoi
                 int a = std::min(sIdx, aIdx);
                 int b = std::max(sIdx, aIdx);
 
-                uint64_t key =
-                    (uint64_t(a) << 32) | uint32_t(b);
+                uint64_t key = (uint64_t(a) << 32) | uint32_t(b);
 
                 if (uniqueEdges.insert(key).second)
                     cellAdjacencyEdges.emplace_back(a, b);
             }
         }
-
         std::cout << "[dissolve] done\n";
     }
 
@@ -1834,33 +2068,70 @@ namespace infinityVoronoi
         // std::cout << "[processDissolved] done\n";
     }
 
-    void ChebyshevObject::debugPrintSitesAndLambdas() const
+    void ChebyshevObject::debugPrintSitesLambdasMs() const
     {
-        std::cout << "==== Chebyshev Debug: Sites & Lambdas ====\n";
+        std::cout << "==== Chebyshev Debug: Sites / Lambdas / Ms / Mvecs ====\n";
         std::cout << "numSites = " << sites.rows()
-                  << ", nDim = " << nDim << "\n";
+                  << ", nDim = " << nDim << "\n\n";
 
-        for (int i = 0; i < sites.rows(); i++)
+        for (int i = 0; i < sites.rows(); ++i)
         {
             Vec site = sites.row(i).transpose();
             Vec lambda = lambdas.row(i).transpose();
 
+            // ---- Site ----
             std::cout << "[Site " << i << "] ";
-            std::cout << "site = ("
-                      << site.x() << ", "
-                      << site.y();
-            if (nDim == 3)
-                std::cout << ", " << site.z();
-            std::cout << "), lambdas = ";
-
-            for (int j = 0; j < 2 * nDim; j++)
+            std::cout << "site=(";
+            for (int d = 0; d < nDim; ++d)
+            {
+                std::cout << site[d];
+                if (d + 1 < nDim)
+                    std::cout << ", ";
+            }
+            std::cout << ") | lambdas=(";
+            for (int j = 0; j < 2 * nDim; ++j)
             {
                 std::cout << lambda[j];
                 if (j + 1 < 2 * nDim)
                     std::cout << ", ";
             }
+            std::cout << ")\n";
+
+            // ---- Ms ----
+            std::cout << "  Ms =\n";
+            for (int r = 0; r < nDim; ++r)
+            {
+                std::cout << "    [ ";
+                for (int c = 0; c < nDim; ++c)
+                {
+                    std::cout << Ms[i](r, c);
+                    if (c + 1 < nDim)
+                        std::cout << ", ";
+                }
+                std::cout << " ]\n";
+            }
+
+            // ---- Mvecs ----
+            std::cout << "  Mvecs (2*nDim x nDim) =\n";
+            for (int r = 0; r < Mvecs[i].rows(); ++r)
+            {
+                std::cout << "    [ ";
+                for (int c = 0; c < Mvecs[i].cols(); ++c)
+                {
+                    std::cout << Mvecs[i](r, c);
+                    if (c + 1 < Mvecs[i].cols())
+                        std::cout << ", ";
+                }
+                std::cout << " ]";
+                if (r == nDim - 1)
+                    std::cout << "  <-- +Ms^T / -Ms^T split";
+                std::cout << "\n";
+            }
+
             std::cout << "\n";
         }
+
+        std::cout << "==== End Chebyshev Debug ====\n";
     }
 
     void ChebyshevObject::drawSiteWithDirs(Color c, float thickness, float scale) const
@@ -1874,7 +2145,7 @@ namespace infinityVoronoi
             for (int j = 0; j < 2 * nDim; j++)
             {
                 Vec dir = baseDir.row(j).transpose();
-                Vec rotEnd = site + rot.transpose() * dir * scale * lambda[j];
+                Vec rotEnd = site + rot * dir * scale * lambda[j];
                 DrawCylinderEx({site.x(), z, -site.y()}, {rotEnd.x(), z, -rotEnd.y()}, thickness, thickness, 1, c);
             }
         }
@@ -1981,32 +2252,76 @@ namespace infinityVoronoi
         if (di < 0 || di >= cellSectors[sIdx].size())
             return;
 
+        Color textColor;
+        if (di == 0)
+            textColor = RL_DARKGREEN;
+        else if (di == 1)
+            textColor = RL_DARKBLUE;
+        else if (di == 2)
+            textColor = RL_RED;
+        else if (di == 3)
+            textColor = RL_DARKPURPLE;
+
         const auto &sectorPtr = cellSectors[sIdx][di];
         if (!sectorPtr)
             return;
 
         const SectorCutObject &sector = *sectorPtr;
 
-        std::vector<polyloop::Polyloop2> polys;
-        polys.reserve(sector.polys.size());
-
         // ---- collect polys ----
+        std::vector<polyloop::Polyloop2> polys;
+        std::vector<bool> polyIsCell;
+        std::vector<long long> polyKeys;
+        polys.reserve(sector.polys.size());
+        polyIsCell.reserve(sector.polys.size());
+
+        int idx = 0;
+
         for (const auto &[k, _] : sector.polys)
         {
-            polys.emplace_back(sector.buildPolyFromKey(k));
+
+            std::vector<int> vertIdxs;
+            auto poly = sector.buildPolyFromKey(k, &vertIdxs);
+
+            polys.emplace_back(poly);
+
+            bool isCell = std::find(sector.cellPolyIdxs.begin(), sector.cellPolyIdxs.end(), idx) != sector.cellPolyIdxs.end();
+
+            polyIsCell.push_back(isCell);
+
+            // ---- draw vertex indices ----
+            for (int i = 0; i < poly.size(); ++i)
+            {
+                const auto &v = poly[i];
+                int vid = vertIdxs[i];
+                render::DrawText3D(GetFontDefault(), std::to_string(vid).c_str(), {v.x(), 0, -v.y()}, 0.6f, 0.05f, 0.0f, false, textColor);
+            }
+
+            ++idx;
         }
 
-        // ---- draw ----
+        // ---- draw polys ----
         for (int i = 0; i < polys.size(); ++i)
         {
             const auto &cell = polys[i];
+            const Vec2 &centroid = cell.centroid();
+            Color fillColor = polyIsCell[i] ? RL_RED : RL_BLUE;
 
-            // 颜色可以按 poly index，便于区分 split 结果
-            Color c = renderUtil::ColorFromHue(
-                polys.size() > 1 ? float(i) / polys.size() : 0.0f);
+            Color strokeColor = RL_BLACK;
 
-            render::stroke_bold_polygon2(cell, c, 0.f, thickness, c.a);
-            render::fill_polygon2(cell, c, 0.f, 0.13f);
+            render::stroke_bold_polygon2(
+                cell,
+                strokeColor,
+                0,
+                thickness,
+                strokeColor.a);
+
+            render::fill_polygon2(
+                cell,
+                fillColor,
+                0,
+                0.13f);
+            render::DrawText3D(GetFontDefault(), std::to_string(i).c_str(), {centroid.x(), 0, -centroid.y()}, 0.6f, 0.05f, 0.0f, false, textColor);
         }
     }
 
@@ -2022,26 +2337,79 @@ namespace infinityVoronoi
 
     void ChebyshevObject::drawCells() const
     {
-        std::vector<std::vector<Vec2>> verts2d;
+        struct CellDrawData
+        {
+            int siteID;
+            std::vector<Vec2> verts;
+        };
+
+        std::vector<CellDrawData> cells;
+
         for (int sIdx = 0; sIdx < numSites; ++sIdx)
         {
-            for (const auto &polyVerts : cellVertexSets[sIdx])
-            {
-                // verts2d.reserve(polyVerts.size());
-                std::vector<Vec2> verts;
-                for (const Vec &v : polyVerts)
-                {
-                    verts.emplace_back(v.x(), v.y());
-                }
-                verts2d.push_back(std::move(verts));
+            for(int di = 0; di < cellSectors[sIdx].size(); ++di){
+                    const auto &sectorPtr = cellSectors[sIdx][di];
+                    if (!sectorPtr)
+                        continue;
+    
+                    const SectorCutObject &sector = *sectorPtr;
+    
+                 for(const auto &insideVerts: sector.insidePolysVerts)
+                 {
+                    CellDrawData cell;
+                    cell.siteID = sIdx;
+                    cell.verts = insideVerts;
+                    cells.push_back(std::move(cell));
+                 }
             }
         }
-        for (int i = 0; i < verts2d.size(); i++)
+        std::vector<Color> siteColors(numSites);
+        for (int i = 0; i < numSites; ++i)
         {
-            const auto &verts = verts2d[i];
-            Color c = renderUtil::ColorFromHue(float(i) / verts2d.size());
+            siteColors[i] = renderUtil::ColorFromHue(
+                numSites > 1 ? float(i) / numSites : 0.0f);
+        }
+        for (int i = 0; i < cells.size(); ++i)
+        {
+            const auto &cell = cells[i];
+            const auto &verts = cell.verts;
+            int siteID = cell.siteID;
+
+            Color c = siteColors[siteID];
+
             render::fill_polygon2(verts, c, 0.f, 0.3f);
-            render::stroke_bold_polygon2(verts, c, 0.f, 0.03f, 1.f);
+            //render::stroke_bold_polygon2(verts, RL_BLACK, 0.f, 0.01f, 0.5f);
+
+            // 顶点 index（仍然是 cell 内部 index）
+            // for (int j = 0; j < verts.size(); ++j)
+            // {
+            //     const auto &v = verts[j];
+            //     render::DrawText3D(
+            //         GetFontDefault(),
+            //         std::to_string(j).c_str(),
+            //         {v.x(), (siteID + 1) * 5.f, -v.y()},
+            //         0.6f,
+            //         0.05f,
+            //         0.0f,
+            //         false,
+            //         c);
+            // }
         }
     }
+
+    void ChebyshevObject::drawCell(int cellIdx, Color c) const
+    {
+        std::vector<Vec2> verts2d;
+
+        for (const auto &polyVerts : cellVertexSets[cellIdx])
+        {
+            for (const Vec &v : polyVerts)
+            {
+                verts2d.emplace_back(v.x(), v.y());
+            }
+        }
+        render::fill_polygon2(verts2d, c, 0.f, 0.3f);
+        render::stroke_bold_polygon2(verts2d, c, 0.f, 0.03f, 1.f);
+    }
+
 }

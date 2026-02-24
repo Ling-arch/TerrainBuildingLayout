@@ -962,22 +962,7 @@ namespace field
         return poly;
     }
 
-    template <typename Scalar>
-    inline AABB<Scalar> computeAABB(const std::vector<Polyline2_t<Scalar>> &polylines)
-    {
-        AABB<Scalar> box;
-        box.setEmpty(); // 非常重要
-
-        for (const auto &poly : polylines)
-        {
-            for (const auto &p : poly.points)
-            {
-                box.extend(p);
-            }
-        }
-        // std::cout << "AABB min: (" << box.min().x() << "," << box.min().y() << "), max: (" << box.max().x() << "," << box.max().y() << ")" << std::endl;
-        return box;
-    }
+    
 
     
 

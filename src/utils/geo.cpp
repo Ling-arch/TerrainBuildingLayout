@@ -2,8 +2,6 @@
 
 namespace geo
 {
-    
-
 
     PointKey makeKey(const Eigen::Vector3f &p, float eps)
     {
@@ -317,6 +315,35 @@ namespace geo
         upload();
     }
 
+    int largestRectangleInHistogramPoints(
+        const std::vector<int> &h,
+        int &left, int &right)
+    {
+        std::vector<int> st;
+        int maxArea = 0;
+        int n = h.size();
 
-    
+        for (int i = 0; i <= n; ++i)
+        {
+            int cur = (i == n) ? 0 : h[i];
+            while (!st.empty() && cur < h[st.back()])
+            {
+                int height = h[st.back()];
+                st.pop_back();
+                int l = st.empty() ? 0 : st.back() + 1;
+                int r = i - 1;
+
+                int area = height * (r - l + 1);
+                if (area > maxArea)
+                {
+                    maxArea = area;
+                    left = l;
+                    right = r;
+                }
+            }
+            st.push_back(i);
+        }
+        return maxArea;
+    }
+
 }

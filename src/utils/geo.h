@@ -18,6 +18,7 @@
 #include <CGAL/Voronoi_diagram_2.h>
 #include <CGAL/Delaunay_triangulation_adaptation_traits_2.h>
 #include <CGAL/Delaunay_triangulation_adaptation_policies_2.h>
+#include <CGAL/Surface_mesh.h>
 
 namespace geo
 {
@@ -37,6 +38,8 @@ namespace geo
     using AT = CGAL::Delaunay_triangulation_adaptation_traits_2<CDT>;
     using AP = CGAL::Delaunay_triangulation_caching_degeneracy_removal_policy_2<CDT>;
     using VD = CGAL::Voronoi_diagram_2<CDT, AT, AP>;
+    using Point_3 = Kernel::Point_3;
+    using SurfaceMesh = CGAL::Surface_mesh<Point_3>;
 
     template <typename Scalar>
     using Vector2 = Eigen::Matrix<Scalar, 2, 1>;
@@ -109,7 +112,9 @@ namespace geo
     struct Vertex
     {
         Eigen::Vector3f position;
-        Eigen::Vector3f normal;
+        Eigen::Vector3f normal = {0.f, 0.f, 1.f};
+        Vertex() = default;
+        Vertex(const Eigen::Vector3f &pos) : position(pos) {}
     };
 
     struct MeshData
@@ -141,7 +146,58 @@ namespace geo
     };
 
     Mesh buildRaylibMesh(const MeshData &src);
+    
+    inline void computeVertexNormals(MeshData &mesh)
+    {
+        // 1. 清零法线
+        for (auto &v : mesh.vertices)
+        {
+            v.normal.setZero();
+        }
 
+        // 2. 遍历三角形，累加面法线
+        const size_t triCount = mesh.indices.size() / 3;
+
+        for (size_t t = 0; t < triCount; ++t)
+        {
+            uint32_t i0 = mesh.indices[t * 3 + 0];
+            uint32_t i1 = mesh.indices[t * 3 + 1];
+            uint32_t i2 = mesh.indices[t * 3 + 2];
+
+            const Eigen::Vector3f &p0 = mesh.vertices[i0].position;
+            const Eigen::Vector3f &p1 = mesh.vertices[i1].position;
+            const Eigen::Vector3f &p2 = mesh.vertices[i2].position;
+
+            Eigen::Vector3f e1 = p1 - p0;
+            Eigen::Vector3f e2 = p2 - p0;
+
+            Eigen::Vector3f faceNormal = e1.cross(e2);
+
+            float len2 = faceNormal.squaredNorm();
+            if (len2 < 1e-12f)
+                continue; // 退化三角形
+
+            // 面法线按面积权重累加
+            mesh.vertices[i0].normal += faceNormal;
+            mesh.vertices[i1].normal += faceNormal;
+            mesh.vertices[i2].normal += faceNormal;
+        }
+
+        // 3. 归一化顶点法线
+        for (auto &v : mesh.vertices)
+        {
+            float len = v.normal.norm();
+            if (len > 1e-6f)
+            {
+                v.normal /= len;
+            }
+            else
+            {
+                // 兜底法线（例如完全平面或孤立点）
+                v.normal = Eigen::Vector3f(0.f, 0.f, 1.f);
+            }
+        }
+    }
     template <typename Scalar>
     bool pointCompare(const Vector2<Scalar> &a, const Vector2<Scalar> &b)
     {
@@ -710,8 +766,7 @@ namespace geo
         return out;
     }
 
-
-     template <typename Scalar>
+    template <typename Scalar>
     Polyline2_t<Scalar> rebuildPolyline(const Polyline2_t<Scalar> &polyline, Scalar threshold)
     {
         Polyline2_t<Scalar> result;
@@ -772,8 +827,6 @@ namespace geo
         else
             return polyA;
     }
-
-   
 
     template <typename Scalar>
     std::vector<Polyline2_t<Scalar>> subPolygon(const Polyline2_t<Scalar> &polyA, const Polyline2_t<Scalar> &polyB)
@@ -936,6 +989,12 @@ namespace geo
     }
 
     template <typename Scalar>
+    inline Point_3 to_cgal_point(const Vector2<Scalar> &p, Scalar z)
+    {
+        return Point_3(typename Kernel::FT(p.x()), typename Kernel::FT(p.y()), typename Kernel::FT(z));
+    }
+
+    template <typename Scalar>
     Polyline2_t<Scalar> extract_voronoi_cell(const VD::Face_handle &face)
     {
         Polyline2_t<Scalar> poly;
@@ -981,7 +1040,8 @@ namespace geo
             cdt.insert_constraint(to_cgal_point(boundary.points[i]), to_cgal_point(boundary.points[(i + 1) % boundary_pt_num]));
         }
 
-        if(constraints.size() > 0) {
+        if (constraints.size() > 0)
+        {
             for (const auto &pl : constraints)
             {
                 const auto &pts = pl.points;
@@ -993,7 +1053,7 @@ namespace geo
                 }
             }
         }
-       
+
         VD vd(cdt);
         for (auto fit = vd.faces_begin(); fit != vd.faces_end(); ++fit)
         {
@@ -1006,5 +1066,197 @@ namespace geo
                 result.voronoi_cells.push_back(std::move(cell));
         }
         return result;
+    }
+
+    template <typename Scalar>
+    inline Eigen::AlignedBox<Scalar, 2> computeAABB(const std::vector<Polyline2_t<Scalar>> &polylines)
+    {
+        Eigen::AlignedBox<Scalar, 2> box;
+        box.setEmpty();
+
+        for (const auto &poly : polylines)
+        {
+            for (const auto &p : poly.points)
+            {
+                box.extend(p);
+            }
+        }
+        return box;
+    }
+
+    int largestRectangleInHistogramPoints(const std::vector<int> &h, int &left, int &right);
+
+    template <typename Scalar>
+    Polyline2_t<Scalar> getMaxRectInPoly(const Polyline2_t<Scalar> &poly, double gridSize)
+    {
+        // ---- Step 1: AABB ----
+        Eigen::AlignedBox<Scalar, 2> aabb = poly.getAABB2();
+        if (aabb.isEmpty())
+            return Polyline2_t<Scalar>();
+
+        Scalar minx = aabb.min().x();
+        Scalar miny = aabb.min().y();
+        Scalar maxx = aabb.max().x();
+        Scalar maxy = aabb.max().y();
+
+        Scalar width = maxx - minx;
+        Scalar height = maxy - miny;
+
+        int rows = std::max(1, int(std::ceil(width / gridSize)));
+        int cols = std::max(1, int(std::ceil(height / gridSize)));
+
+        Scalar cellX = width / rows;
+        Scalar cellY = height / cols;
+
+        // ---- Step 2: NodeInside (points) ----
+        std::vector<std::vector<int>> nodeInside(
+            rows + 1, std::vector<int>(cols + 1, 0));
+
+        for (int r = 0; r <= rows; ++r)
+        {
+            for (int c = 0; c <= cols; ++c)
+            {
+                Scalar x = minx + r * cellX;
+                Scalar y = miny + c * cellY;
+                nodeInside[r][c] = util::Math2<Scalar>::point_in_poly(poly.points, Vector2<Scalar>(x, y)) ? 1 : 0;
+            }
+        }
+
+        // ---- Step 3: CellInside (FOUR corners) ----
+        std::vector<std::vector<int>> cellInside(
+            rows, std::vector<int>(cols, 0));
+
+        for (int r = 0; r < rows; ++r)
+        {
+            for (int c = 0; c < cols; ++c)
+            {
+                cellInside[r][c] = nodeInside[r][c] & nodeInside[r + 1][c] & nodeInside[r][c + 1] & nodeInside[r + 1][c + 1];
+            }
+        }
+
+        // ---- Step 4: Histogram + stack ----
+        std::vector<int> hist(cols, 0);
+
+        int bestArea = 0;
+        int bestR0 = 0, bestR1 = -1;
+        int bestC0 = 0, bestC1 = -1;
+
+        for (int r = 0; r < rows; ++r)
+        {
+            for (int c = 0; c < cols; ++c)
+                hist[c] = cellInside[r][c] ? hist[c] + 1 : 0;
+
+            std::vector<int> st;
+            int c = 0;
+            while (c < cols)
+            {
+                if (st.empty() || hist[st.back()] <= hist[c])
+                {
+                    st.push_back(c++);
+                }
+                else
+                {
+                    int top = st.back();
+                    st.pop_back();
+                    int width = st.empty() ? c : (c - st.back() - 1);
+                    int height = hist[top];
+                    int area = width * height;
+
+                    if (area > bestArea)
+                    {
+                        bestArea = area;
+                        bestR0 = r - height + 1;
+                        bestR1 = r;
+                        bestC0 = st.empty() ? 0 : (st.back() + 1);
+                        bestC1 = c - 1;
+                    }
+                }
+            }
+
+            while (!st.empty())
+            {
+                int top = st.back();
+                st.pop_back();
+                int width = st.empty() ? c : (c - st.back() - 1);
+                int height = hist[top];
+                int area = width * height;
+
+                if (area > bestArea)
+                {
+                    bestArea = area;
+                    bestR0 = r - height + 1;
+                    bestR1 = r;
+                    bestC0 = st.empty() ? 0 : (st.back() + 1);
+                    bestC1 = c - 1;
+                }
+            }
+        }
+
+        if (bestArea <= 0)
+            return Polyline2_t<Scalar>();
+
+        // ---- Step 5: Cell indices → world coordinates ----
+        Scalar x0 = minx + bestR0 * cellX;
+        Scalar y0 = miny + bestC0 * cellY;
+        Scalar x1 = minx + (bestR1 + 1) * cellX;
+        Scalar y1 = miny + (bestC1 + 1) * cellY;
+
+        std::vector<Vector2<Scalar>> rect = {
+            {x0, y0},
+            {x1, y0},
+            {x1, y1},
+            {x0, y1},
+            {x0, y0}};
+
+        return Polyline2_t<Scalar>(rect, true);
+    }
+
+    template <typename Scalar>
+    inline Eigen::Matrix<Scalar, 2, 2> rotationToXAxis(const Eigen::Vector2<Scalar> &axis)
+    {
+        Eigen::Vector2<Scalar> a = axis.normalized();
+        // a -> (1,0)
+        return (Eigen::Matrix<Scalar, 2, 2>() << a.x(), a.y(), -a.y(), a.x()).finished();
+    }
+
+    template <typename Scalar>
+    Polyline2_t<Scalar> rotatePoly(const Polyline2_t<Scalar> &poly, const Eigen::Matrix<Scalar, 2, 2> &R)
+    {
+        std::vector<Vector2<Scalar>> pts;
+        pts.reserve(poly.points.size());
+
+        for (const auto &p : poly.points)
+            pts.emplace_back(R * p);
+
+        return Polyline2_t<Scalar>(pts, poly.isClosed);
+    }
+
+    template <typename Scalar>
+    inline Eigen::Matrix<Scalar, 2, 2> rotationMatrixFromDegree(double degree)
+    {
+        // degree -> radian
+        Scalar rad = Scalar(degree * util::Litten_PI / Scalar(180));
+
+        Scalar c = std::cos(rad);
+        Scalar s = std::sin(rad);
+
+        Eigen::Matrix<Scalar, 2, 2> R;
+        R << c, -s,
+            s, c;
+        return R;
+    }
+
+    template <typename Scalar>
+    Polyline2_t<Scalar> rotatePolyByDegree(const Polyline2_t<Scalar> &poly, double degree)
+    {
+        Eigen::Matrix<Scalar, 2, 2> R = rotationMatrixFromDegree<Scalar>(degree);
+
+        std::vector<Vector2<Scalar>> pts;
+        pts.reserve(poly.points.size());
+
+        for (const auto &p : poly.points)
+            pts.emplace_back(R * p);
+
+        return Polyline2_t<Scalar>(pts, poly.isClosed);
     }
 }

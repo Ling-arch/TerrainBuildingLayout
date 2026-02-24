@@ -148,8 +148,7 @@ namespace chebyshevUtils
         return paths;
     }
 
-    std::vector<std::vector<Eigen::Vector2i>>
-    findConnectedEdgeSegments(const std::vector<Eigen::Vector2i> &edges)
+    std::vector<std::vector<Eigen::Vector2i>> findConnectedEdgeSegments(const std::vector<Eigen::Vector2i> &edges)
     {
         std::vector<std::vector<Eigen::Vector2i>> segs;
         for (auto &e : edges)
@@ -261,75 +260,7 @@ namespace chebyshevUtils
                    : std::make_pair(centroid, 0.0f);
     }
 
-    std::vector<std::vector<Vec2>> concatPolyParts(const std::vector<std::vector<Vec2>> &polyParts)
-    {
-        // 存储最终拼接后的完整多边形
-        std::vector<std::vector<Vec2>> polys;
-
-        // 遍历每个待拼接的多边形片段
-        for (const auto &part : polyParts)
-        {
-            // 标记当前片段是否已完成拼接
-            bool merged = false;
-
-            // 遍历已有的完整多边形，尝试拼接当前片段
-            for (auto &poly : polys)
-            {
-                // 提取当前片段和已有多边形的首尾顶点（二维向量）
-                const Vec2 &partHead = part.front(); // 片段首顶点
-                const Vec2 &partTail = part.back();  // 片段尾顶点
-                const Vec2 &polyHead = poly.front(); // 已有多边形首顶点
-                const Vec2 &polyTail = poly.back();  // 已有多边形尾顶点
-
-                // 拼接方式1：片段尾 → 多边形首（直接拼接，无需反转）
-                if ((partTail - polyHead).squaredNorm() < 1e-8f)
-                {
-                    std::vector<Vec2> mergedPoly = part;
-                    // 将已有多边形的所有顶点追加到片段末尾
-                    mergedPoly.insert(mergedPoly.end(), poly.begin(), poly.end());
-                    poly = std::move(mergedPoly); // 移动语义避免拷贝
-                    merged = true;
-                    break;
-                }
-
-                // 拼接方式2：片段首 → 多边形首（反转片段后拼接）
-                if ((partHead - polyHead).squaredNorm() < 1e-8f)
-                {
-                    // 反转片段顶点顺序（rbegin/rend是反向迭代器）
-                    std::vector<Vec2> revPart(part.rbegin(), part.rend());
-                    // 追加已有多边形顶点
-                    revPart.insert(revPart.end(), poly.begin(), poly.end());
-                    poly = std::move(revPart);
-                    merged = true;
-                    break;
-                }
-
-                // 拼接方式3：片段首 → 多边形尾（直接追加到多边形末尾）
-                if ((partHead - polyTail).squaredNorm() < 1e-8f)
-                {
-                    poly.insert(poly.end(), part.begin(), part.end());
-                    merged = true;
-                    break;
-                }
-
-                // 拼接方式4：片段尾 → 多边形尾（反转片段后追加）
-                if ((partTail - polyTail).squaredNorm() < 1e-8f)
-                {
-                    std::vector<Vec2> revPart(part.rbegin(), part.rend());
-                    poly.insert(poly.end(), revPart.begin(), revPart.end());
-                    merged = true;
-                    break;
-                }
-            }
-
-            // 若当前片段未拼接成功，作为新多边形加入结果
-            if (!merged)
-                polys.push_back(part);
-        }
-
-        return polys;
-    }
-
+    
     std::vector<std::vector<Vec>> concatPolyParts(const std::vector<std::vector<Vec>> &polyParts)
     {
         std::vector<std::vector<Vec>> polys;

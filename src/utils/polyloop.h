@@ -70,7 +70,8 @@ namespace polyloop
 
         const std::vector<Tri> &triangles() const { return triangles_; }
 
-        const double &get_area() { return double(M2::polygon_area(points_)); }
+        Vector2 centroid() const { return M2::getPolygonCentroid(points_); }
+        const double &get_area() const { return double(M2::polygon_area(points_)); }
 
     private:
         std::vector<Vector2> points_;

@@ -16,11 +16,26 @@ namespace chebyshevUtils
         return (x > 0.f) - (x < 0.f);
     }
 
+    inline int simpleSignInt(int x, float thresh = -1.0f)
+    {
+        if (thresh >= 0.0f && std::abs(x) <= thresh)
+            return 0;
+        return (x > 0.f) - (x < 0.f);
+    }
+
     inline Eigen::VectorXi simpleSign(const Eigen::VectorXf &xs, float thresh = -1.0f)
     {
         Eigen::VectorXi res(xs.size());
         for (int i = 0; i < xs.size(); ++i)
             res[i] = simpleSign(xs[i], thresh);
+        return res;
+    }
+
+    inline Eigen::VectorXi simpleSignI(const Eigen::VectorXi &xs, float thresh = -1.0f)
+    {
+        Eigen::VectorXi res(xs.size());
+        for (int i = 0; i < xs.size(); ++i)
+            res[i] = simpleSignInt(xs[i], thresh);
         return res;
     }
 
@@ -159,7 +174,7 @@ namespace chebyshevUtils
     std::pair<Eigen::Vector2f, float> computePolygonCentroid2D(const std::vector<Eigen::Vector2f> &pts, bool withArea);
 
     std::vector<std::vector<Eigen::VectorXf>> concatPolyParts(const std::vector<std::vector<Eigen::VectorXf>> &polyParts);
-    std::vector<std::vector<Eigen::Vector2f>> concatPolyParts(const std::vector<std::vector<Eigen::Vector2f>> &polyParts);
+   
     std::vector<Eigen::VectorXf> limitedDissolve2D(const std::vector<Eigen::VectorXf> &verts);
     Eigen::MatrixXf randomJitter(int count, int dim, float scale);
     Eigen::MatrixXf generateGridPoints(int n, int d, float e = 1.f);

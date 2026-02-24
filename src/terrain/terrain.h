@@ -210,6 +210,7 @@ namespace terrain
 
         void applyFaceColor();                                                                   // set face colors depend on slope , aspect
         bool sampleTensorAt(field::TerrainTensor<float> &out, const Eigen::Vector2f &pos) const; // sample vertex slope and aspect
+        bool sampleHeightAt(float &outHeight, const Eigen::Vector2f &pos) const;                             // sample height at pos
         std::unordered_map<int, field::TerrainTensor<float>> sampleTensorAtGrids(const std::vector<Eigen::Vector2f> &grids) const;
         bool projectPolylineToTerrain(const std::vector<Eigen::Vector2f> &polyline2D, std::vector<Eigen::Vector3f> &outPolyline3D) const;
         void setViewMode(TerrainViewMode mode); // set viewmode to draw different analysis
@@ -292,7 +293,7 @@ namespace terrain
     private:
         int seed;
         int width;      // grids number of x axis
-        int height;     // grids number of x axis
+        int height;     // grids number of y axis
         float cellSize; // grid edge length
         bool isShowContours = false;
         ContourShowData contourShowData; // contour data to draw

@@ -10,14 +10,11 @@
 #include "render.h"
 #include "renderUtil.h"
 
-
-
 using namespace render;
 using Vec2f = Eigen::Vector2f;
 using Vec2i = Eigen::Vector2i;
 using Vec = Eigen::VectorXf;
 using namespace infinityVoronoi;
-
 
 Eigen::Matrix2f createRotationMatrix2D(float angle_deg)
 {
@@ -52,14 +49,14 @@ int main()
 
     static Vec2f cutPlaneOrigin(0.5, 0);
     static Vec2f cutPlaneNormal(1, 0);
-    bool reCut = false;/*  */
+    bool reCut = false; /*  */
     bool reGenTriCut = false;
     static std::vector<float> scales = {1, 1, 1, 1};
 
     //----------------------------------
     // generate sites
     //----------------------------------
-    Eigen::MatrixXf sites = chebyshevUtils::generateJitteredGridPoints(2, 2, extent);
+    Eigen::MatrixXf sites = chebyshevUtils::generateJitteredGridPoints(9, 2, extent);
     // std::cout << "sites compute finish" << std::endl;
     //----------------------------------
     // orientation function
@@ -85,20 +82,25 @@ int main()
     //----------------------------------
     // anisotropy function
     //----------------------------------
-    infinityVoronoi::ChebyshevObject::ChebyshevObject::AniFun aniFun =
+    infinityVoronoi::ChebyshevObject::AniFun aniFun =
         [](const Eigen::MatrixXf &xys)
     {
         int N = xys.rows();
 
         Eigen::MatrixXf L = Eigen::MatrixXf::Ones(N, 4);
 
-        // example: uniform weights
+        static std::random_device rd;
+        static std::mt19937 gen(rd());
+
+        std::uniform_real_distribution<float> dis(0.5f, 2.0f);
+
+        // 遍历每个点，为每个点的 0-3 列赋值随机数
         for (int i = 0; i < N; ++i)
         {
-            L(i, 0) = 2.f;
-            L(i, 1) = 1.f;
-            L(i, 2) = 2.f;
-            L(i, 3) = 1.f;
+            L(i, 0) = dis(gen);
+            L(i, 1) = dis(gen);
+            L(i, 2) = dis(gen);
+            L(i, 3) = dis(gen);
         }
 
         return L;
@@ -111,10 +113,9 @@ int main()
     //----------------------------------
     // create object
     //----------------------------------
-    MatrixXf testSites(2,2);
-    testSites << 4.0,6.0,-3.0,-4.0;
-    infinityVoronoi::ChebyshevObject2D obj(testSites, nullptr, nullptr, extent);
-    //obj.debugPrintSitesAndLambdas();
+    MatrixXf testSites(2, 2);
+    testSites << 4.0, 6.0, -3.0, -4.0;
+    infinityVoronoi::ChebyshevObject2D obj(sites, nullptr, aniFun, extent);
 
     // std::vector<TriCutObject> triCuts;
     // for (int i = 0; i < 4; i++)
@@ -132,10 +133,11 @@ int main()
     // compute diagram
     //----------------------------------/*  */
     obj.computeDiagram();
-    //obj.computeNeighborsAndPlanes();
-    //obj.cutWithPlanes();
+    obj.debugPrintSitesLambdasMs();
+    // obj.computeNeighborsAndPlanes();
+    // obj.cutWithPlanes();
     // obj.lloydRelax(0.001f);
-    //obj.debugPrintSitesAndLambdas();
+   
     rlImGuiSetup(true);
     render.runMainLoop(render::FrameCallbacks{
         [&]() { // 按键更新，重新绘图等事件，poly修改过需要重新fill
@@ -168,22 +170,28 @@ int main()
             //     render::draw_points(cell.points(), ptData.color, ptData.color.a, ptData.size);
             //     // render::stroke_bold_polygon2(cells[i], RL_BLACK, 0.f, 0.06f);
             // }
-            obj.drawSiteWithDirs(RL_BLACK, lineData.Thickness);
-            obj.drawCutPlanes(RL_RED,0.03f,1.5f);
-            obj.drawCellSector(0,0);
-            //obj.drawCells();
+            obj.drawSiteWithDirs(RL_BLACK, 0.01,0.15f);
+            //obj.drawCutPlanes(RL_RED, 0.03f, 1.5f);
+            obj.drawCellSector(0, 0);
+            obj.drawCellSector(0, 1);
+            obj.drawCellSector(0, 2);
+            obj.drawCellSector(0, 3);
+            // obj.drawCells();
+            // obj.drawCell(0, RL_BLUE);
+            // obj.drawCell(1, RL_GREEN);
             DrawGrid(90, 1.f);
             DrawLine3D({0, 0, 0}, {1000, 0, 0}, RL_RED);
             DrawLine3D({0, 0, 0}, {0, 0, -1000}, RL_GREEN);
-            //DrawLine3D({0, 0, 0}, {0, 1000, 0}, RL_BLUE);
-            //DrawLine3D({src.x(), 0, -src.y()}, {end.x(), 0, -end.y()}, RL_DARKPURPLE);
-            // for (int i = 0; i < cuttedPolys.size(); i++)
-            // {
-            //     const auto &cell = cuttedPolys[i];
-            //     Color c = renderUtil::ColorFromHue(float(i) / cuttedPolys.size());
-            //     render::stroke_bold_polygon2(cell, c, 0.f, lineData.Thickness, c.a);
-            //     render::fill_polygon2(cell, c, 0.f, 0.2f);
-            // }
+            // obj.drawCell(0,RL_BLUE);
+            //  DrawLine3D({0, 0, 0}, {0, 1000, 0}, RL_BLUE);
+            //  DrawLine3D({src.x(), 0, -src.y()}, {end.x(), 0, -end.y()}, RL_DARKPURPLE);
+            //   for (int i = 0; i < cuttedPolys.size(); i++)
+            //   {
+            //       const auto &cell = cuttedPolys[i];
+            //       Color c = renderUtil::ColorFromHue(float(i) / cuttedPolys.size());
+            //       render::stroke_bold_polygon2(cell, c, 0.f, lineData.Thickness, c.a);
+            //       render::fill_polygon2(cell, c, 0.f, 0.2f);
+            //   }
         },
         [&]() { // 二维屏幕空间绘图
             // for (int i = 0; i < cells.size(); i++)

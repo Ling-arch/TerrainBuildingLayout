@@ -16,5 +16,8 @@ target_include_directories(Layout
 
 target_link_libraries(Layout
     PUBLIC
+    Terrain
     Building
-    Terrain)
+    Utils
+    ${THIRD_PARTY_LIBS}
+    )

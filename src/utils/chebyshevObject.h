@@ -58,14 +58,16 @@ namespace infinityVoronoi
     class SectorCutObject
     {
     public:
-        std::vector<int> hullPlaneKeys;
-        std::map<int, std::vector<int>> polys;
-        std::unordered_map<int, Plane2> edgesPlanes;
-
+        std::vector<long long> hullPlaneKeys;
+        std::map<long long, std::vector<int>> polys;
+        std::unordered_map<long long, Plane2> edgesPlanes;
+        std::vector<int> cellPolyIdxs;
+        std::vector<std::vector<Vec2>> insidePolysVerts;
+        std::unordered_set<long long> polyKeysInside;
     public:
         SectorCutObject() = default;
         virtual ~SectorCutObject() = default;
-        virtual void cutWithPlane(const Vec2 &o, const Vec2 &n, int cutPlaneKey) = 0;
+        virtual void cutWithPlane(const Vec2 &o, const Vec2 &n, long long cutPlaneKey) = 0;
         virtual void computePolysCentroidsAndWeights() = 0;
         virtual std::vector<Vec> getPolysCentroids(bool ioClipped = true) = 0;
         virtual std::vector<float> getPolysWeights(bool ioClipped = true) = 0;
@@ -73,7 +75,8 @@ namespace infinityVoronoi
         virtual std::vector<std::vector<Vec>> getHullVerts() = 0;
         virtual std::vector<Vec> getVertices() = 0;
         // virtual std::vector<int> getPolyKeys() const = 0;
-        virtual std::vector<Vec2> buildPolyFromKey(int k) const = 0;
+        virtual std::vector<Vec2> buildPolyFromKey(long long k) const = 0;
+        virtual std::vector<Vec2> buildPolyFromKey(long long k, std::vector<int> *outVertIdxs) const = 0;
     };
 
     struct PyraCutObject : public SectorCutObject
@@ -92,16 +95,16 @@ namespace infinityVoronoi
 
         // ---------- geometry ----------
         std::vector<Vec2> vertices;
-        // std::unordered_map<int, Plane2> edgesPlanes;
-        std::vector<int> edgePlaneKeys;
+        // std::unordered_map<long long, Plane2> edgesPlanes;
+        std::vector<long long> edgePlaneKeys;
 
         // ---------- poly info ----------
         std::vector<Vec2> polysCentroids;
         std::vector<float> polysAreas;
-        std::map<int, bool> polysIoLabel;
-        std::vector<int> cellPolyIdxs;
+        std::map<long long, bool> polysIoLabel;
+
         // ---------- hull ----------
-        // std::vector<int> hullPlaneKeys;
+        // std::vector<long long> hullPlaneKeys;
 
         // ---------- ctor ----------
         TriCutObject(
@@ -111,14 +114,15 @@ namespace infinityVoronoi
             const Eigen::Matrix2f &M);
 
         // ---------- core ops ----------
-        void clipWithPlane(const Vec2 &o, const Vec2 &n, int cutPlaneKey);
-        void cutWithPlane(const Vec2 &o, const Vec2 &n, int cutPlaneKey) override;
+        void clipWithPlane(const Vec2 &o, const Vec2 &n, long long cutPlaneKey);
+        void cutWithPlane(const Vec2 &o, const Vec2 &n, long long cutPlaneKey) override;
 
         // ---------- poly queries ----------
         void computePolysCentroidsAndWeights() override;
         std::vector<Vec> getPolysCentroids(bool ioClipped = true) override;
         std::vector<float> getPolysWeights(bool ioClipped = true) override;
-        std::vector<Vec2> buildPolyFromKey(int key) const;
+        std::vector<Vec2> buildPolyFromKey(long long key) const;
+        std::vector<Vec2> buildPolyFromKey(long long key, std::vector<int> *outVertIdxs) const;
         // ---------- hull ----------
         std::vector<std::vector<Vec>> getHullVerts() override;
         std::vector<Vec> getVertices() override;
@@ -177,7 +181,8 @@ namespace infinityVoronoi
             float thickness = 0.02f) const;
         void drawAdjacencyEdges(Color edgeColor, float lineWidth) const;
         void drawCells() const;
-        void debugPrintSitesAndLambdas() const;
+        void drawCell(int cellIdx, Color c) const;
+        void debugPrintSitesLambdasMs() const;
 
     public:
         /* ---------- abstract parts ---------- */

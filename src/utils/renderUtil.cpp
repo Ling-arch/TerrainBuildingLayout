@@ -12,7 +12,7 @@ namespace renderUtil{
         float v = 0.9f;
 
         float c = v * s;
-        float x = c * (1 - std::fabsf(std::fmod(h / 60.0f, 2) - 1));
+        float x = static_cast<float>(c * (1 - std::fabsf(std::fmod(h / 60.0f, 2) - 1)));
         float m = v - c;
 
         float r = 0, g = 0, b = 0;
@@ -110,4 +110,6 @@ namespace renderUtil{
             (unsigned char)(b * 255),
             255};
     }
+
+    
 }

@@ -318,6 +318,41 @@ namespace terrain
         return true;
     }
 
+
+    bool Terrain::sampleHeightAt(float &outHeight, const Eigen::Vector2f &pos) const
+    {
+        if (!aabb2.contains(pos))
+            return false;
+        float fx = (pos.x() + width * cellSize / 2.f) / cellSize;
+        float fy = (pos.y() + height * cellSize / 2.f) / cellSize;
+        int gx = std::clamp(static_cast<int>(std::floor(fx)), 0, width - 1);
+        int gy = std::clamp(static_cast<int>(std::floor(fy)), 0, height - 1);
+    
+        int gridIdx = gridIndex(gx, gy);
+       
+        int v2idx = gridIdx + gy;          //bottom-left
+        int v3idx = v2idx + 1;             //bottom-right
+        int v0idx = v2idx + width + 1;     // top-left
+        int v1idx = v0idx + 1;             // top-right
+
+        const TerrainVertex &v00 = mesh.vertices[v0idx];
+        const TerrainVertex &v10 = mesh.vertices[v1idx];
+        const TerrainVertex &v01 = mesh.vertices[v2idx];
+        const TerrainVertex &v11 = mesh.vertices[v3idx];
+
+        float tx = fx - gx;
+        float ty = 1 - fy + gy;
+        // ---------- 4. 双线性插值权重 ----------
+        float w00 = (1 - tx) * (1 - ty);
+        float w10 = tx * (1 - ty);
+        float w01 = (1 - tx) * ty;
+        float w11 = tx * ty;
+
+        // ---------- 5. 插值 position ----------
+        outHeight = v00.position.z() * w00 + v10.position.z() * w10 + v01.position.z() * w01 + v11.position.z() * w11;
+        return true;
+    }
+
     std::unordered_map<int, field::TerrainTensor<float>> Terrain::sampleTensorAtGrids(const std::vector<Eigen::Vector2f> &grids) const
     {
         std::unordered_map<int, field::TerrainTensor<float>> result;
