@@ -607,6 +607,169 @@ namespace util
             return PoissonResult{samples, seed_indices};
         }
 
+        static PoissonResult gen_poisson_sites_in_poly_with_seeds(
+            const std::vector<Vector2> &poly,
+            const std::vector<Vector2> &seed_points,
+            Scalar r,
+            int target_count, // 精确目标数量
+            int k = 30,
+            unsigned seed = 0)
+        {
+            // ---------- trivial cases ----------
+            if (target_count <= 0)
+                return PoissonResult{{}, {}};
+
+            if (seed_points.size() >= (size_t)target_count)
+            {
+                std::vector<Vector2> clipped(
+                    seed_points.begin(),
+                    seed_points.begin() + target_count);
+                return PoissonResult{clipped, {}};
+            }
+
+            std::mt19937_64 rng(seed);
+
+            // ---------- bounding box ----------
+            Scalar minx = poly[0].x(), maxx = poly[0].x();
+            Scalar miny = poly[0].y(), maxy = poly[0].y();
+            for (auto &v : poly)
+            {
+                minx = std::min(minx, v.x());
+                maxx = std::max(maxx, v.x());
+                miny = std::min(miny, v.y());
+                maxy = std::max(maxy, v.y());
+            }
+
+            std::uniform_real_distribution<Scalar> dang(0, Scalar(2 * Litten_PI));
+            std::uniform_real_distribution<Scalar> dr(r, Scalar(2 * r));
+
+            // ---------- grid ----------
+            const Scalar cell_size = r / std::sqrt(2);
+            const int grid_w = int((maxx - minx) / cell_size) + 1;
+            const int grid_h = int((maxy - miny) / cell_size) + 1;
+
+            std::vector<int> grid(grid_w * grid_h, -1);
+
+            auto grid_index = [&](const Vector2 &p)
+            {
+                int gx = int((p.x() - minx) / cell_size);
+                int gy = int((p.y() - miny) / cell_size);
+                return std::make_pair(gx, gy);
+            };
+
+            auto is_far_enough = [&](const Vector2 &p,
+                                     const std::vector<Vector2> &samples)
+            {
+                auto [gx, gy] = grid_index(p);
+                for (int j = -2; j <= 2; ++j)
+                {
+                    for (int i = -2; i <= 2; ++i)
+                    {
+                        int nx = gx + i;
+                        int ny = gy + j;
+                        if (nx < 0 || ny < 0 || nx >= grid_w || ny >= grid_h)
+                            continue;
+                        int idx = grid[ny * grid_w + nx];
+                        if (idx >= 0)
+                        {
+                            if ((samples[idx] - p).norm() < r)
+                                return false;
+                        }
+                    }
+                }
+                return true;
+            };
+
+            // ---------- init with seeds ----------
+            std::vector<Vector2> samples;
+            std::vector<int> active;
+            std::vector<size_t> seed_indices;
+
+            for (const auto &p : seed_points)
+            {
+                if (!point_in_poly(poly, p))
+                    continue;
+
+                auto [gx, gy] = grid_index(p);
+                if (gx < 0 || gy < 0 || gx >= grid_w || gy >= grid_h)
+                    continue;
+
+                bool ok = true;
+                for (const auto &q : samples)
+                {
+                    if ((q - p).norm() < r)
+                    {
+                        ok = false;
+                        break;
+                    }
+                }
+                if (!ok)
+                    continue;
+
+                int idx = (int)samples.size();
+                samples.push_back(p);
+                active.push_back(idx);
+                grid[gy * grid_w + gx] = idx;
+                seed_indices.push_back(idx);
+
+                if ((int)samples.size() >= target_count)
+                    break;
+            }
+
+            if (samples.empty())
+            {
+                // fallback：直接普通 poisson，但限制数量
+                auto fallback = gen_poisson_sites_in_poly(poly, r, k, seed);
+                if ((int)fallback.size() > target_count)
+                    fallback.resize(target_count);
+                return PoissonResult{fallback, {}};
+            }
+
+            // ---------- Bridson loop ----------
+            while (!active.empty() && (int)samples.size() < target_count)
+            {
+                int idx = active.back();
+                active.pop_back();
+
+                const Vector2 &base = samples[idx];
+                bool found = false;
+
+                for (int i = 0; i < k; ++i)
+                {
+                    if ((int)samples.size() >= target_count)
+                        break;
+
+                    Scalar ang = dang(rng);
+                    Scalar rad = dr(rng);
+                    Vector2 p = base + Vector2(std::cos(ang), std::sin(ang)) * rad;
+
+                    if (p.x() < minx || p.x() > maxx ||
+                        p.y() < miny || p.y() > maxy)
+                        continue;
+
+                    if (!point_in_poly(poly, p))
+                        continue;
+
+                    if (!is_far_enough(p, samples))
+                        continue;
+
+                    int new_idx = (int)samples.size();
+                    samples.push_back(p);
+                    active.push_back(new_idx);
+
+                    auto [gx, gy] = grid_index(p);
+                    grid[gy * grid_w + gx] = new_idx;
+
+                    found = true;
+                }
+
+                if (found && (int)samples.size() < target_count)
+                    active.push_back(idx);
+            }
+
+            return PoissonResult{samples, seed_indices};
+        }
+
         // 计算三角形面积
         static Scalar triangle_area(const Vector2 &a, const Vector2 &b, const Vector2 &c)
         {
@@ -813,10 +976,11 @@ namespace util
                 return Vector2::Zero();
             }
             Vector2 centroid = Vector2::Zero();
-            for (const auto &pt : points){
+            for (const auto &pt : points)
+            {
                 centroid += pt;
             }
-                
+
             return centroid / static_cast<Scalar>(points.size());
         }
 
@@ -851,11 +1015,11 @@ namespace util
                 {
                     continue;
                 }
-               
+
                 Vector2 a = poly_temp[tri.at(0)];
                 Vector2 b = poly_temp[tri.at(1)];
                 Vector2 c = poly_temp[tri.at(2)];
-                
+
                 if (polygon_area({a, b, c}) > Scalar(1e-6))
                 {
                     return getPolygonCentroid({a, b, c});

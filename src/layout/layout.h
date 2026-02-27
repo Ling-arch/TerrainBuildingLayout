@@ -268,7 +268,7 @@ namespace layout
         Scalar hh = newH * Scalar(0.5);
         Scalar minW = std::min(newW, newH);
         Scalar maxW = std::max(newW, newH);
-        divGap = std::max(Scalar(0.5 * minW), Scalar(0.333 * maxW));
+        divGap = std::min(Scalar(0.3 * minW), Scalar(0.2 * maxW));
         Vector2<Scalar> newP0 = center - dirW * hw - dirH * hh;
         Vector2<Scalar> newP1 = center + dirW * hw - dirH * hh;
         Vector2<Scalar> newP2 = center + dirW * hw + dirH * hh;
@@ -332,6 +332,7 @@ namespace layout
 
                 bool success = terrain.sampleHeightAt(height, center);
                 heightMap.push_back(height);
+                // std::cout<<"height is :"<< height <<std::endl;
 
                 // rotedGrids.push_back({rotedCenter.x(),rotedCenter.y(), height});
                 uint32_t i0 = i * (ny + 1) + j;
@@ -405,7 +406,7 @@ namespace layout
 
             // ===== Soft Voronoi =====
             weights = torch::softmax(-beta * dist, /*dim=*/1); // [G, N]
-           
+
             // auto w_cpu = weights.detach().to(torch::kCPU);
 
             // for (int g = 0; g < grid_xy.size(0); ++g)
@@ -476,28 +477,81 @@ namespace layout
         }
     };
 
-    class SoftRVDModel : torch::nn::Module
+    struct SoftRVDShowData
+    {
+        torch::Tensor grid_xy; // [G,2]
+        torch::Tensor weights; // [G,N]
+        torch::Tensor floors;  // [N]
+        torch::Tensor dh;      // [N]
+        torch::Tensor base_h;  // scalar
+
+        int G = 0;
+        int N = 0;
+
+        // =========================
+        // DRAW BUILDING MASS
+        // =========================
+        void draw(
+            float floor_height = 4.f,
+            float grid_size = 1.f,
+            Eigen::Vector2f offset = Eigen::Vector2f(0.f, 0.f)) const;
+    };
+
+    class SoftRVDModel : public torch::nn::Module
     {
     public:
-        // ===== Fixed =====
+        // ===================== Fixed inputs =====================
         torch::Tensor grid_xy;   // [G,2]
         torch::Tensor terrain_h; // [G]
         torch::Tensor site_xy;   // [N,2]
-        int G, N;
 
-        float k;    // sharpness
-        float tau;  // topology sharpness
-        // ===== Trainable =====
-        torch::Tensor h_cell;  // [N]
-        torch::Tensor weights; // [G, N]
+        int G = 0;
+        int N = 0;
+
+        float k;
+        float tau;
+        float far;
+
+        std::vector<int> courtyard_ids;
+
+        // ===================== Soft RVD =====================
+        torch::Tensor weights; // [G,N] 固定 soft-RVD 权重
+
+        // ===================== Trainable =====================
+        torch::Tensor floor_logits; // [N,5] -> floors ∈ {0..4}
+        torch::Tensor delta_logits; // [N,5] -> Δh ∈ {0,2,4,6,8}
+
+        // ===================== Derived =====================
+        torch::Tensor base_height; // scalar (最低地基)
+
+        // ===================== Hyper =====================
+        float lambda_far = 1.0f;
+        float lambda_terrain = 0.5f;
+        float lambda_entropy = 0.01f;
+std::unique_ptr<torch::optim::Adam> lloyd_optimizer;
     public:
-        SoftRVDModel(const torch::Tensor &grid_xy_, const torch::Tensor &terrain_h_, const torch::Tensor &site_xy_, float k_ = 20.0f, float tau_ = 10.f);
-
-        // -------------------------------
+        SoftRVDModel(
+            const torch::Tensor &grid_xy_,
+            const torch::Tensor &terrain_h_,
+            const torch::Tensor &site_xy_,
+            float far_,
+            const std::vector<int> &courtyard_ids_,
+            float k_,
+            float tau_);
+        void computeWeights();
         torch::Tensor forward();
-
-    public:
-        void drawGrids(float z = 0.f, float size = 1.f, Eigen::Vector2f offset = Eigen::Vector2f(0.f, 0.f)) const;
+        torch::Tensor energyLloyd();
+        void optimize(SoftRVDShowData &showData,
+                      int iters = 300,
+                      float lr = 0.05f,
+                      int verbose_every = 50);
+        void optimizeLloyd(int iters = 250,
+                           float lr = 0.05f,
+                           int verbose_every = 50);
+        void stepOptimizeLloyd(int& curIter,const int maxIter);
+        void stepOptimize(int& curIter, const int maxIter);
+        void drawGrids(float z = 0.f, float size = 1.f, const Eigen::Vector2f &offset = Eigen::Vector2f(0.f, 0.f)) const;
+        void drawTerrain(const std::vector<float> &heights, float z = 0.f, float size = 1.f, const Eigen::Vector2f &offset = Eigen::Vector2f(0.f, 0.f)) const;
     };
 
 }

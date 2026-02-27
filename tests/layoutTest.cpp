@@ -65,7 +65,11 @@ int main()
     }
     RectVoronoi2D<float> rvd(roomPoints, layout.rotedBound);
 
+    Polyline2_t<float> boundOffset = geo::offsetPolygon(layout.rotedRect, -2.f)[0];
+    std::vector<Vector2f> yardSeeds = geo::samplePointsOnPolygonWithSpacing(boundOffset, 2, (unsigned)time(nullptr));
+    M2::PoissonResult totalSeedResult = M2::gen_poisson_sites_in_poly_with_seeds(layout.rotedRect.points, yardSeeds, layout.divGap, 7, 30, (unsigned)time(nullptr));
     //-------------------------------diff rvd test-------------------------------
+
     torch::manual_seed(0);
 
     // ===== Example grid =====
@@ -74,33 +78,21 @@ int main()
     static float beta = 20.f;
     static float tau = 10.f;
     torch::Tensor grid_xy = diffVoronoi::vec2_to_tensor(layout.rotedCenters);
-    torch::Tensor terrain_h = torch::from_blob(layout.heightMap.data(), {static_cast<int64_t>(layout.heightMap.size())}).clone();
+    torch::Tensor terrain_h = torch::from_blob(layout.heightMap.data(), {static_cast<int64_t>(layout.heightMap.size())},
+                                               torch::kFloat32) // 显式指定类型（和 heightMap 一致）
+                                  .clone()                      // 深拷贝，避免原数据释放后失效
+                                  .to(torch::kCPU);             // 转到 CPU（可视化必须在 CPU 读取）).clone();
     // ===== Fixed sites =====
-    torch::Tensor site_xy = diffVoronoi::vec2_to_tensor(samplePoints2);
-    // ===== Model =====
-    RVDModel model(grid_xy, terrain_h, site_xy, beta, tau);
-    // std::cout << "h_cell before optimization:\n"
-    //           << model.h_cell << std::endl;
-    // torch::optim::Adam optimizer(model.parameters(), 0.05);
+    torch::Tensor site_xy = diffVoronoi::vec2_to_tensor(totalSeedResult.samples);
 
-    // ===== Train =====
-    // for (int iter = 0; iter < 200; ++iter)
-    // {
-    //     optimizer.zero_grad();
-    //     auto loss = model.forward();
-    //     loss.backward();
-    //     optimizer.step();
 
-    //     if (iter % 50 == 0)
-    //     {
-    //         std::cout << "Iter " << iter
-    //                   << " | Loss = " << loss.item<float>()
-    //                   << std::endl;
-    //     }
-    // }
-
-    SoftRVDModel softModel(grid_xy, terrain_h, site_xy, beta,tau);
-
+    SoftRVDModel softModel(grid_xy, terrain_h, site_xy, 1, {0, 1}, beta, tau);
+    SoftRVDShowData showData;
+    std::cout << "softmodel built" << std::endl;
+    // softModel.optimizeLloyd();
+    bool isOptimizing = false;
+    static int maxIter = 300;
+    int curIter = 0;
     rlImGuiSetup(true);
     render.runMainLoop(render::FrameCallbacks{
         [&]() { // 按键更新，重新绘图等事件，poly修改过需要重新fill
@@ -122,7 +114,7 @@ int main()
                 site_xy = diffVoronoi::vec2_to_tensor(samplePoints2);
                 terrain_h = torch::from_blob(layout.heightMap.data(), {static_cast<int64_t>(layout.heightMap.size())}).clone();
                 rvd = RectVoronoi2D<float>(roomPoints, layout.rotedBound);
-                softModel = SoftRVDModel(grid_xy, terrain_h, site_xy, beta, tau);
+                softModel = SoftRVDModel(grid_xy, terrain_h, site_xy, 1, {0, 1}, beta, tau);
                 genPlot = false;
             }
 
@@ -148,7 +140,7 @@ int main()
                 grid_xy = diffVoronoi::vec2_to_tensor(layout.rotedCenters);
                 site_xy = diffVoronoi::vec2_to_tensor(samplePoints2);
                 terrain_h = torch::from_blob(layout.heightMap.data(), {static_cast<int64_t>(layout.heightMap.size())}).clone();
-                softModel = SoftRVDModel(grid_xy, terrain_h, site_xy, beta, tau);
+                softModel = SoftRVDModel(grid_xy, terrain_h, site_xy, 1, {0, 1}, beta, tau);
                 needGenTerrain = false;
             }
 
@@ -161,15 +153,32 @@ int main()
 
             if (genDiffGrid)
             {
-                model = RVDModel(grid_xy, terrain_h, site_xy, beta);
-                softModel = SoftRVDModel(grid_xy, terrain_h, site_xy, beta, tau);
+                // model = RVDModel(grid_xy, terrain_h, site_xy, beta);
+                softModel = SoftRVDModel(grid_xy, terrain_h, site_xy, 1, {0, 1}, beta, tau);
                 genDiffGrid = false;
+            }
+
+            if (IsKeyPressed(KEY_A))
+            {
+                // softModel.optimize(showData);
+                curIter = 0;
+                isOptimizing = true;
+            }
+            if (isOptimizing)
+            {
+                softModel.stepOptimizeLloyd(curIter, maxIter);
+            }
+            if (curIter >= maxIter)
+            {
+                isOptimizing = false;
+                curIter = 0;
             }
         },
         [&]() { // 3维空间绘图内容部分
             //  terrain.draw();
             //  layout.drawTerrain(RL_GRAY, 0.8f, true, 0.5f);
             terrain.drawContours(layers);
+            showData.draw();
             // DrawLine3D({0, 0, 0}, {10000, 0, 0}, RL_RED);
             // DrawLine3D({0, 0, 0}, {0, 10000, 0}, RL_BLUE);
             // DrawLine3D({0, 0, 0}, {0, 0, -10000}, RL_GREEN);
@@ -191,22 +200,25 @@ int main()
                 }
             }
 
-            for (int i = 0; i < rvd.getCells().size(); ++i)
-            {
-                // const geo::Polyline2_t<float> &cellPoly = geo::rotatePoly(rvd.getCellPolys()[i], layout.Rinv);
-                Color c = renderUtil::ColorFromHue((float)i / rvd.getCellPolys().size());
-                // render::fill_polygon2(cellPoly.points, c, 0.f, 0.3f);
-                render::fill_polygon2(rvd.getCellPolys()[i].points, c, 0.f, 0.3f, {terrain_width / 2.f, 0});
-                render::stroke_bold_polygon2(rvd.getCellPolys()[i].points, RL_BLACK, 0.f, 0.07f, 1.f, {terrain_width / 2.f, 0});
-            }
+            // for (int i = 0; i < rvd.getCells().size(); ++i)
+            // {
+            //     // const geo::Polyline2_t<float> &cellPoly = geo::rotatePoly(rvd.getCellPolys()[i], layout.Rinv);
+            //     Color c = renderUtil::ColorFromHue((float)i / rvd.getCellPolys().size());
+            //     // render::fill_polygon2(cellPoly.points, c, 0.f, 0.3f);
+            //     render::fill_polygon2(rvd.getCellPolys()[i].points, c, 0.f, 0.3f, {terrain_width / 2.f, 0});
+            //     render::stroke_bold_polygon2(rvd.getCellPolys()[i].points, RL_BLACK, 0.f, 0.07f, 1.f, {terrain_width / 2.f, 0});
+            // }
             // render::draw_points(layout.rotedCenters, render.ptData.color, 1.f, render.ptData.size / 2.f);
-            // render::draw_points(samplePoints2, render.ptData.color, 1.f, render.ptData.size * 1.5f, 0, {terrain_width / 2.f, 0.f});
-            model.drawGrids();
-            softModel.drawGrids(0.f, 1.f, {terrain_width, 0.f});
+            render::stroke_bold_polygon2(boundOffset.points, RL_BLACK, 0.f, 0.07f, 1.f, {terrain_width / 2.f, 0});
+            render::draw_points(totalSeedResult.samples, render.ptData.color, 1.f, render.ptData.size * 1.5f, 0, {terrain_width / 2.f, 0.f});
+
+            // model.drawGrids();
+            softModel.drawGrids(0.f, 1.f, {terrain_width / 2.f, 0.f});
+            softModel.drawTerrain(layout.heightMap);
         },
         [&]() { // 二维屏幕空间绘图
-            // render.draw_index_fonts(layout.rotedCenters, render.ptData.size, render.ptData.color, 0,  {terrain_width, 0.f});
-            // render.draw_index_fonts(samplePoints2, render.ptData.size*2, RL_RED, 0,{terrain_width / 2.f, 0.f});
+            // render.draw_index_fonts(layout.rotedCenters, render.ptData.size, render.ptData.color, 0, {terrain_width / 2.f, 0.f});
+            render.draw_index_fonts(totalSeedResult.samples, render.fontData.size * 2, RL_RED, 0, {terrain_width / 2.f, 0.f});
             // render.draw_index_fonts(layout.rotedGrids, render.ptData.size, render.ptData.color);
             rlImGuiBegin();
 

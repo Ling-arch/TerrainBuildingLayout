@@ -146,7 +146,7 @@ namespace geo
     };
 
     Mesh buildRaylibMesh(const MeshData &src);
-    
+
     inline void computeVertexNormals(MeshData &mesh)
     {
         // 1. 清零法线
@@ -866,7 +866,7 @@ namespace geo
     }
 
     /*
-     *offset polygon,
+     *offset polygon,negative distance for inward, positive for outward, return multiple offset polygons because of possible self-intersection
      */
     template <typename Scalar>
     std::vector<Polyline2_t<Scalar>> offsetPolygon(const Polyline2_t<Scalar> &poly, Scalar dist)
@@ -1258,5 +1258,74 @@ namespace geo
             pts.emplace_back(R * p);
 
         return Polyline2_t<Scalar>(pts, poly.isClosed);
+    }
+
+    template <typename Scalar>
+    std::vector<Vector2<Scalar>>
+    samplePointsOnPolygonWithSpacing(const Polyline2_t<Scalar> &poly,int n,unsigned seed = 0){
+        std::vector<Vector2<Scalar>> result;
+        if (poly.points.size() < 2 || n <= 0)
+            return result;
+
+        // ---------- total length ----------
+        Scalar total_length = 0;
+        std::vector<Scalar> seg_lengths;
+        seg_lengths.reserve(poly.points.size() - 1);
+
+        for (size_t i = 0; i + 1 < poly.points.size(); ++i)
+        {
+            Scalar len = (poly.points[i + 1] - poly.points[i]).norm();
+            seg_lengths.push_back(len);
+            total_length += len;
+        }
+
+        if (total_length <= Scalar(1e-8))
+            return result;
+
+        // ---------- spacing control ----------
+        Scalar target = total_length / Scalar(n);
+        Scalar range = total_length / (Scalar(3) * Scalar(n)); // ★ 改这里
+
+        std::mt19937_64 rng(seed);
+        std::uniform_real_distribution<Scalar> jitter(-range, range);
+
+        // ---------- arc-length positions ----------
+        std::vector<Scalar> arc_pos;
+        arc_pos.reserve(n);
+
+        Scalar s = 0;
+        for (int i = 0; i < n; ++i)
+        {
+            Scalar step = std::max(Scalar(0), target + jitter(rng));
+            s += step;
+
+            // wrap
+            if (s >= total_length)
+                s = std::fmod(s, total_length);
+
+            arc_pos.push_back(s);
+        }
+
+        std::sort(arc_pos.begin(), arc_pos.end());
+
+        // ---------- arc-length → point ----------
+        for (Scalar a : arc_pos)
+        {
+            Scalar acc = 0;
+            for (size_t i = 0; i < seg_lengths.size(); ++i)
+            {
+                if (acc + seg_lengths[i] >= a)
+                {
+                    Scalar t = (a - acc) / seg_lengths[i];
+                    result.push_back(
+                        poly.points[i] * (Scalar(1) - t) +
+                        poly.points[i + 1] * t);
+                    break;
+                }
+                acc += seg_lengths[i];
+            }
+        }
+
+        return result;
     }
 }
