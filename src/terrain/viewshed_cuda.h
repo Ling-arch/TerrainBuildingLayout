@@ -1,7 +1,11 @@
 #pragma once
 
 #include <vector>
-
+#ifdef __CUDACC__
+#define CUDA_CALLABLE __host__ __device__
+#else
+#define CUDA_CALLABLE
+#endif
 void compute_viewshed_cuda(
     const float *face_xyz,
     const float *vertex_h,
@@ -23,3 +27,12 @@ void point_viewshed_cuda(
     float obs_y,
     float obs_z,
     int *out_visible);
+
+void computeFlowAccumulationMFD_CUDA(
+    const int *order,
+    const int *neighborCounts,
+    const int *neighborFaces,
+    const float *weights,
+    int N,
+    int maxNeighbors,
+    float *flowHost);

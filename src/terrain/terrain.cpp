@@ -145,6 +145,8 @@ namespace terrain
         std::vector<float> viewScores;
         std::vector<float> localScores;
         std::vector<int> pointView;
+        std::vector<float>flowScores;
+        float maxLogFlow = 0.f;
         if (viewMode == TerrainViewMode::View)
         {
             viewScores = computeViewShedCUDA();
@@ -157,6 +159,34 @@ namespace terrain
         if (viewMode == TerrainViewMode::PointView)
         {
             pointView = computePointViewCUDA(observeHeight);
+        }
+        if(viewMode == TerrainViewMode::Flow){
+            flowScores = computeFlowAccumulationCUDA();
+            maxLogFlow = 0.0f;
+            float minFlow = std::numeric_limits<float>::max();
+            float maxFlow = -std::numeric_limits<float>::max();
+
+            for (size_t i = 0; i < flowScores.size(); ++i)
+            {
+                float f = flowScores[i];
+
+                minFlow = std::min(minFlow, f);
+                maxFlow = std::max(maxFlow, f);
+
+                // if (i < 20) 
+                    std::cout << "flow[" << i << "] = " << f << std::endl;
+            }
+
+            std::cout << "Flow range: " << minFlow << " -> " << maxFlow << std::endl;
+            for (float f : flowScores)
+            {
+                float lf = std::log(1.0f + f);
+                if (lf > maxLogFlow)
+                    maxLogFlow = lf;
+            }
+
+            if (maxLogFlow < 1e-6f)
+                maxLogFlow = 1.0f;
         }
 
         // ===== region id =====
@@ -261,6 +291,28 @@ namespace terrain
                     else
                     {
                         c = {255, 0, 0, 255}; // 不可见 红色
+                    }
+                }
+                else if (viewMode == TerrainViewMode::Flow)
+                {
+                    float t = flowScores[gf];
+
+                    t = std::log(1 + t);
+                    t /= maxLogFlow;
+
+                    if (t < 0.8)
+                    {
+                        c = {200, 200, 200, 255}; // ridge
+                    }
+                    else
+                    {
+                        float k = (t - 0.3f) / 0.7f;
+
+                        c = {
+                            (unsigned char)(50 * (1 - k)),
+                            (unsigned char)(120 * (1 - k)),
+                            (unsigned char)(255),
+                            255};
                     }
                 }
 
@@ -708,7 +760,8 @@ namespace terrain
 
         float ground = 0.f;
         bool isInside = sampleHeightAt(ground, testViewPt);
-        if(!isInside) return visible;
+        if (!isInside)
+            return visible;
         float obs_z = ground + observerH;
 
         point_viewshed_cuda(
@@ -724,6 +777,72 @@ namespace terrain
             visible.data());
 
         return visible;
+    }
+
+    std::vector<float> Terrain::computeFlowAccumulationCUDA()
+    {
+        int N = faceInfos.size();
+
+        std::vector<float> faceZ(N);
+        for (int i = 0; i < N; ++i)
+            faceZ[i] = faceCenter3D(i).z();
+
+        // ---------- 最大邻居 ----------
+        int maxNeighbors = 0;
+        std::vector<int> neighborCounts(N);
+
+        for (int i = 0; i < N; ++i)
+        {
+            neighborCounts[i] = faceAdj[i].size();
+            maxNeighbors = std::max(maxNeighbors, neighborCounts[i]);
+        }
+
+        // ---------- 展平GPU数组 ----------
+        std::vector<int> neighborFaces(N * maxNeighbors, -1);
+        std::vector<float> weights(N * maxNeighbors, 0);
+
+        for (int i = 0; i < N; ++i)
+        {
+            float sum = 0;
+
+            for (int n : faceAdj[i])
+            {
+                float dz = std::max(0.f, faceZ[i] - faceZ[n]);
+                sum += dz;
+            }
+
+            for (int k = 0; k < faceAdj[i].size(); ++k)
+            {
+                int n = faceAdj[i][k];
+                int idx = i * maxNeighbors + k;
+
+                neighborFaces[idx] = n;
+
+                float dz = std::max(0.f, faceZ[i] - faceZ[n]);
+                weights[idx] = dz / std::max(sum, 1e-6f);
+            }
+        }
+
+        // ---------- 高度排序 ----------
+        std::vector<int> order(N);
+        std::iota(order.begin(), order.end(), 0);
+
+        std::sort(order.begin(), order.end(),
+                  [&](int a, int b)
+                  { return faceZ[a] > faceZ[b]; });
+
+        std::vector<float> flow(N, 0);
+
+        computeFlowAccumulationMFD_CUDA(
+            order.data(),
+            neighborCounts.data(),
+            neighborFaces.data(),
+            weights.data(),
+            N,
+            maxNeighbors,
+            flow.data());
+
+        return flow;
     }
 
     const std::vector<Vector3> Terrain::getMeshVertices()
@@ -846,8 +965,11 @@ namespace terrain
     {
         scores = evaluateFaceScore();
         vertexScores = evaluateVertexScore(scores);
+        faceAdj.clear();
+        faceAdj = buildFaceAdjacency();
         regions = floodFillFaces(scores, score_threshold);
         regionInfos.clear();
+
         for (const auto &region : regions)
         {
             if (region.size() > minRegionFaceSize)
@@ -2002,8 +2124,6 @@ namespace terrain
     std::vector<std::vector<int>> Terrain::floodFillFaces(const std::vector<float> &scores, float threshold) const
     {
 
-        auto adj = buildFaceAdjacency();
-
         size_t n = faceInfos.size();
         std::vector<bool> visited(n, false);
 
@@ -2029,7 +2149,7 @@ namespace terrain
                 q.pop();
                 region.push_back(cur);
 
-                for (int nb : adj[cur])
+                for (int nb : faceAdj[cur])
                 {
                     if (visited[nb])
                         continue;
@@ -2050,7 +2170,6 @@ namespace terrain
     std::vector<std::vector<int>> Terrain::floodFillFacesSoft(std::vector<float> &scores, float threshold) const
     {
         scores = evaluateFaceScore();
-        auto adj = buildFaceAdjacency();
 
         const int n = faceInfos.size();
         std::vector<bool> visited(n, false);
@@ -2087,7 +2206,7 @@ namespace terrain
                 if ((float)badCount / region.size() > regionConfig.badRatioLimit)
                     break;
 
-                for (int nb : adj[cur])
+                for (int nb : faceAdj[cur])
                 {
                     if (visited[nb])
                         continue;

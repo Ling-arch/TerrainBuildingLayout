@@ -281,7 +281,8 @@ int main()
                     viewPtChanged |= ImGui::SliderFloat("ViewPtY", &terrain.testViewPt.y(), -terrain_width / 2.f, terrain_width / 2.f, "%.1f");
                     viewPtChanged |= ImGui::SliderFloat("ObserveH", &terrain.observeHeight, 0.f, 30.f, "%.1f");
                     ImGui::Unindent();
-                    ImGui::RadioButton("Score", &mode, 6);
+                    ImGui::RadioButton("Flow", &mode, 6);
+                    ImGui::RadioButton("Score", &mode, 7);
 
                     TerrainViewMode newMode = static_cast<TerrainViewMode>(mode);
                     if (newMode != viewMode)

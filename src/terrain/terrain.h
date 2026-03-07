@@ -61,6 +61,7 @@ namespace terrain
         Slope,
         View,
         PointView,
+        Flow,
         Score
     };
 
@@ -183,13 +184,14 @@ namespace terrain
         float wv_aspect = 5.f;
         float score_threshold = 0.62f;
         int minRegionFaceSize = 200;
-        Eigen::Vector2f testViewPt = {0,0};
+        Eigen::Vector2f testViewPt = {0, 0};
         float observeHeight = 1.7f;
         bool showTestViewPt = false;
         RegionGrowConfig regionConfig;
         std::vector<RegionInfo> regionInfos;
         bool additionalShowWire = false;
-        std::vector<float> viewShedScore;
+        std::vector<float> viewShedScore;      // face viewshed
+        std::vector<std::vector<int>> faceAdj; // face adjacency
         Terrain(int width, int height, float cellSize);
         Terrain(int seed_, int width, int height, float cellSize, float frequency, float amplitude);
         void regenerate(int w, int h, float freq, float amp);
@@ -232,7 +234,8 @@ namespace terrain
         std::vector<float> computeTerrainViewShedRadial(float observeH = 1.7f, int numSectors = 360) const;
         std::vector<float> computeViewShedCUDA(float observerH = 1.7f);
         std::vector<int> computePointViewCUDA(float observerH = 1.7f);
-         void setContoursShow(bool contourShow);
+        std::vector<float> computeFlowAccumulationCUDA();
+        void setContoursShow(bool contourShow);
         std::vector<geo::Segment> extractContourAtHeight(float isoHeight) const;                              // extract contours at specific height
         std::vector<ContourLayer> extractContours(float gap) const;                                           // extract contours at each gap
         void drawContours(const std::vector<ContourLayer> &layers) const;                                     // draw contour infos
