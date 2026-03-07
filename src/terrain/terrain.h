@@ -9,6 +9,7 @@
 #include <queue>
 #include "OpenSimplexNoise.h"
 #include "tensorField.h"
+#include "viewshed_cuda.h"
 
 namespace terrain
 {
@@ -58,6 +59,8 @@ namespace terrain
         Wire,
         Aspect,
         Slope,
+        View,
+        PointView,
         Score
     };
 
@@ -146,11 +149,18 @@ namespace terrain
         ParcelFaceNode() = default;
     };
 
-
-    struct FacesParcel{
+    struct FacesParcel
+    {
         int parcelID = -1;
         std::vector<int> faces;
         FacesParcel() = default;
+    };
+
+    struct TerrainViewResult
+    {
+        std::vector<int16_t> views;
+        int ViewNum;
+        TerrainViewResult() = default;
     };
 
     class Terrain
@@ -173,10 +183,13 @@ namespace terrain
         float wv_aspect = 5.f;
         float score_threshold = 0.62f;
         int minRegionFaceSize = 200;
+        Eigen::Vector2f testViewPt = {0,0};
+        float observeHeight = 1.7f;
+        bool showTestViewPt = false;
         RegionGrowConfig regionConfig;
         std::vector<RegionInfo> regionInfos;
         bool additionalShowWire = false;
-
+        std::vector<float> viewShedScore;
         Terrain(int width, int height, float cellSize);
         Terrain(int seed_, int width, int height, float cellSize, float frequency, float amplitude);
         void regenerate(int w, int h, float freq, float amp);
@@ -210,12 +223,16 @@ namespace terrain
 
         void applyFaceColor();                                                                   // set face colors depend on slope , aspect
         bool sampleTensorAt(field::TerrainTensor<float> &out, const Eigen::Vector2f &pos) const; // sample vertex slope and aspect
-        bool sampleHeightAt(float &outHeight, const Eigen::Vector2f &pos) const;                             // sample height at pos
+        bool sampleHeightAt(float &outHeight, const Eigen::Vector2f &pos) const;                 // sample height at pos
         std::unordered_map<int, field::TerrainTensor<float>> sampleTensorAtGrids(const std::vector<Eigen::Vector2f> &grids) const;
         bool projectPolylineToTerrain(const std::vector<Eigen::Vector2f> &polyline2D, std::vector<Eigen::Vector3f> &outPolyline3D) const;
         void setViewMode(TerrainViewMode mode); // set viewmode to draw different analysis
-
-        void setContoursShow(bool contourShow);
+        int computeViewNums(Eigen::Vector3f o, float targetH = 0.f) const;
+        std::vector<float> computeTerrainViewShed(float observeH = 0.f) const;
+        std::vector<float> computeTerrainViewShedRadial(float observeH = 1.7f, int numSectors = 360) const;
+        std::vector<float> computeViewShedCUDA(float observerH = 1.7f);
+        std::vector<int> computePointViewCUDA(float observerH = 1.7f);
+         void setContoursShow(bool contourShow);
         std::vector<geo::Segment> extractContourAtHeight(float isoHeight) const;                              // extract contours at specific height
         std::vector<ContourLayer> extractContours(float gap) const;                                           // extract contours at each gap
         void drawContours(const std::vector<ContourLayer> &layers) const;                                     // draw contour infos
@@ -250,7 +267,7 @@ namespace terrain
         bool isRegionCompact(const std::vector<int> &region, const Eigen::Vector2f &center) const;
 
         //---------------------- tensorfield utils --------------------------------
-        std::vector<FacesParcel> generateParcelsWithRoads(const field::TensorField2D<float>& field,const std::vector<Road> &roads,float parcelWidth,float parcelDepth) const;
+        std::vector<FacesParcel> generateParcelsWithRoads(const field::TensorField2D<float> &field, const std::vector<Road> &roads, float parcelWidth, float parcelDepth) const;
 
         inline Eigen::Vector2f faceCenter(int f) const
         {

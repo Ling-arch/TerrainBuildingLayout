@@ -3,13 +3,13 @@ project(TerrainBuildingLayout
     VERSION 0.0.1
     DESCRIPTION "Generate building layout automatically matched with terrain"
     HOMEPAGE_URL "https://github.com/Ling-arch/TerrainBuildingLayout"
-    LANGUAGES CXX
+    LANGUAGES CXX CUDA
 )
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 enable_testing()
-
+enable_language(CUDA)
 #set lib output for windows dll
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 

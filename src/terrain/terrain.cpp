@@ -136,13 +136,30 @@ namespace terrain
         }
     }
 
-
-
     void Terrain::applyFaceColor()
     {
         std::vector<int> faceRegionId(faceInfos.size(), -1);
         std::vector<Color> regionColors;
 
+        // ===== 按需计算 =====
+        std::vector<float> viewScores;
+        std::vector<float> localScores;
+        std::vector<int> pointView;
+        if (viewMode == TerrainViewMode::View)
+        {
+            viewScores = computeViewShedCUDA();
+        }
+
+        if (viewMode == TerrainViewMode::Score)
+        {
+            localScores = scores; // 使用已有score
+        }
+        if (viewMode == TerrainViewMode::PointView)
+        {
+            pointView = computePointViewCUDA(observeHeight);
+        }
+
+        // ===== region id =====
         int rid = 0;
         for (auto &r : regions)
         {
@@ -154,32 +171,32 @@ namespace terrain
 
             for (int f : r)
                 faceRegionId[f] = rid;
+
             regionColors.push_back(c);
             rid++;
         }
 
-        // std::cout <<"apply begin" <<std::endl;
-        //  ==== 遍历每个 chunk ====
+        // ===== 遍历 chunk =====
         for (auto &chunk : chunkMeshes)
         {
             Mesh &m = chunk.mesh;
 
-            // 1. 先清底色
+            // 1. 底色
             for (int i = 0; i < m.vertexCount; ++i)
             {
-                m.colors[i * 4 + 0] = 200;
-                m.colors[i * 4 + 1] = 200;
-                m.colors[i * 4 + 2] = 200;
+                m.colors[i * 4 + 0] = 255;
+                m.colors[i * 4 + 1] = 255;
+                m.colors[i * 4 + 2] = 255;
                 m.colors[i * 4 + 3] = 255;
             }
 
-            // 2. 按 local face 着色
+            // 2. face color
             for (int lf = 0; lf < (int)chunk.localToGlobalFace.size(); ++lf)
             {
                 int gf = chunk.localToGlobalFace[lf];
                 const auto &face = faceInfos[gf];
 
-                Color c{180, 180, 180, 255};
+                Color c{255, 255, 255, 255};
                 int rid = faceRegionId[gf];
 
                 if (viewMode == TerrainViewMode::Aspect)
@@ -190,6 +207,7 @@ namespace terrain
                 {
                     float t = face.slope / (PI * 0.5f);
                     t = std::clamp(t, 0.f, 1.f);
+
                     c = {
                         (unsigned char)(255 * t),
                         0,
@@ -199,38 +217,53 @@ namespace terrain
                 else if (viewMode == TerrainViewMode::Score)
                 {
                     if (rid >= 0)
+                    {
                         c = regionColors[rid];
+                    }
                     else
                     {
-                        //==== 2. fallback：原 score 渐变 ====
-                        const float &score = scores[gf];
+                        const float &score = localScores[gf];
 
                         if (score >= 0)
                         {
                             float gamma = 1.0f / 1.5f;
                             float s = std::pow(score, gamma);
+
                             c = {
                                 (unsigned char)(255 * s),
                                 (unsigned char)(255 * s),
                                 (unsigned char)(255 * (1.0f - s)),
                                 255};
-
-                            // float hue = (1.0f - score) * 220.0f + score * 60.0f;
-                            // c = ColorFromHSV(
-                            //     hue,
-                            //     0.85f, // saturation
-                            //     0.95f  // value
-                            // );
                         }
                         else
                         {
-                            // 错误 / 不可用区域
                             c = {255, 0, 0, 255};
                         }
                     }
                 }
+                else if (viewMode == TerrainViewMode::View)
+                {
+                    // c = ColorFromHSV(viewScores[gf]*360.f,0.85f,0.9f);
+                    float t = viewScores[gf];
 
-                // local face -> local indices
+                    unsigned char r = (unsigned char)(255 * t);
+                    unsigned char g = (unsigned char)(255 * (1.0f - fabs(t - 0.5f) * 2.0f));
+                    unsigned char b = (unsigned char)(255 * (1.0f - t));
+
+                    c = {r, g, b, 255};
+                }
+                else if (viewMode == TerrainViewMode::PointView)
+                {
+                    if (pointView[gf])
+                    {
+                        c = {0, 0, 255, 255}; // 可见 蓝色
+                    }
+                    else
+                    {
+                        c = {255, 0, 0, 255}; // 不可见 红色
+                    }
+                }
+
                 int li0 = m.indices[lf * 3 + 0];
                 int li1 = m.indices[lf * 3 + 1];
                 int li2 = m.indices[lf * 3 + 2];
@@ -247,7 +280,6 @@ namespace terrain
                 setColor(li1);
                 setColor(li2);
             }
-            std::cout << std::endl;
 
             UpdateMeshBuffer(m, 3, m.colors, m.vertexCount * 4, 0);
         }
@@ -261,13 +293,13 @@ namespace terrain
         float fy = (pos.y() + height * cellSize / 2.f) / cellSize;
         int gx = std::clamp(static_cast<int>(std::floor(fx)), 0, width - 1);
         int gy = std::clamp(static_cast<int>(std::floor(fy)), 0, height - 1);
-    
+
         int gridIdx = gridIndex(gx, gy);
-       
-        int v2idx = gridIdx + gy;          //bottom-left
-        int v3idx = v2idx + 1;             //bottom-right
-        int v0idx = v2idx + width + 1;     // top-left
-        int v1idx = v0idx + 1;             // top-right
+
+        int v2idx = gridIdx + gy;      // bottom-left
+        int v3idx = v2idx + 1;         // bottom-right
+        int v0idx = v2idx + width + 1; // top-left
+        int v1idx = v0idx + 1;         // top-right
 
         const TerrainVertex &v00 = mesh.vertices[v0idx];
         const TerrainVertex &v10 = mesh.vertices[v1idx];
@@ -318,7 +350,6 @@ namespace terrain
         return true;
     }
 
-
     bool Terrain::sampleHeightAt(float &outHeight, const Eigen::Vector2f &pos) const
     {
         if (!aabb2.contains(pos))
@@ -327,13 +358,13 @@ namespace terrain
         float fy = (pos.y() + height * cellSize / 2.f) / cellSize;
         int gx = std::clamp(static_cast<int>(std::floor(fx)), 0, width - 1);
         int gy = std::clamp(static_cast<int>(std::floor(fy)), 0, height - 1);
-    
+
         int gridIdx = gridIndex(gx, gy);
-       
-        int v2idx = gridIdx + gy;          //bottom-left
-        int v3idx = v2idx + 1;             //bottom-right
-        int v0idx = v2idx + width + 1;     // top-left
-        int v1idx = v0idx + 1;             // top-right
+
+        int v2idx = gridIdx + gy;      // bottom-left
+        int v3idx = v2idx + 1;         // bottom-right
+        int v0idx = v2idx + width + 1; // top-left
+        int v1idx = v0idx + 1;         // top-right
 
         const TerrainVertex &v00 = mesh.vertices[v0idx];
         const TerrainVertex &v10 = mesh.vertices[v1idx];
@@ -364,16 +395,16 @@ namespace terrain
             {
                 tensor.init = 1;
                 result[i] = tensor;
-            }else
+            }
+            else
             {
                 result[i] = field::TerrainTensor<float>();
             }
-            
         }
         return result;
     }
 
-    bool Terrain::projectPolylineToTerrain(const std::vector<Eigen::Vector2f> &polyline2D,std::vector<Eigen::Vector3f> &outPolyline3D) const
+    bool Terrain::projectPolylineToTerrain(const std::vector<Eigen::Vector2f> &polyline2D, std::vector<Eigen::Vector3f> &outPolyline3D) const
     {
         outPolyline3D.clear();
         outPolyline3D.reserve(polyline2D.size());
@@ -391,15 +422,15 @@ namespace terrain
             int gx = std::clamp(static_cast<int>(std::floor(fx)), 0, width - 1);
             int gy = std::clamp(static_cast<int>(std::floor(fy)), 0, height - 1);
 
-            int gridIdx = gridIndex(gx,gy);
+            int gridIdx = gridIndex(gx, gy);
             float tx = fx - gx;
             float ty = fy - gy;
 
             // ---------- 3. 顶点索引 ----------
-            int v00 = gridIdx + gy;                // bottom-left
-            int v10 = v00 + 1;                     // bottom-right
-            int v01 = v00 + width + 1;             // top-left
-            int v11 = v01 + 1;                     // top-right
+            int v00 = gridIdx + gy;    // bottom-left
+            int v10 = v00 + 1;         // bottom-right
+            int v01 = v00 + width + 1; // top-left
+            int v11 = v01 + 1;         // top-right
 
             const auto &p00 = mesh.vertices[v00].position;
             const auto &p10 = mesh.vertices[v10].position;
@@ -428,6 +459,273 @@ namespace terrain
         }
     }
 
+    int Terrain::computeViewNums(Eigen::Vector3f o, float targetH) const
+    {
+
+        int viewNum = 0;
+        float gap = cellSize;
+        for (int f = 0; f < faceInfos.size(); ++f)
+        {
+            Eigen::Vector3f target = faceCenter3D(f);
+            target.z() += targetH;
+
+            Eigen::Vector2f dir = (target.head<2>() - o.head<2>());
+            float dist = dir.norm();
+            if (dist < 1e-5f)
+            {
+                viewNum++;
+                continue;
+            }
+            dir.normalize();
+            float slopeTarget = (target.z() - o.z()) / dist;
+            bool visible = true;
+
+            for (float d = gap; d < dist; d += gap)
+            {
+                Eigen::Vector2f p = o.head<2>() + dir * d;
+
+                float terrainH = 0.f;
+                if (!sampleHeightAt(terrainH, p))
+                    continue;
+
+                float slopeSample = (terrainH - o.z()) / d;
+
+                if (slopeSample > slopeTarget)
+                {
+                    visible = false;
+                    break;
+                }
+            }
+            if (visible)
+                viewNum++;
+        }
+
+        return viewNum;
+    }
+
+    std::vector<float> Terrain::computeTerrainViewShed(float observeH) const
+    {
+
+        std::vector<int> viewNums(faceInfos.size(), 0);
+        int minV = std::numeric_limits<int>::max();
+        int maxV = std::numeric_limits<int>::lowest();
+        for (int i = 0; i < faceInfos.size(); i++)
+        {
+            Eigen::Vector3f o = faceCenter3D(i);
+            float observerZ = o.z() + observeH;
+            Eigen::Vector3f observer(o.x(), o.y(), observerZ);
+            int viewNum = computeViewNums(observer);
+            viewNums[i] = viewNum;
+            minV = std::min(minV, viewNum);
+            maxV = std::max(maxV, viewNum);
+        }
+        std::vector<float> viewShedScore(faceInfos.size(), 0.f);
+        float denom = std::max(1, maxV - minV);
+
+        for (int i = 0; i < faceInfos.size(); i++)
+        {
+            viewShedScore[i] = (viewNums[i] - minV) / denom;
+        }
+        return viewShedScore;
+    }
+
+    std::vector<float> Terrain::computeTerrainViewShedRadial(float observeH, int numSectors) const
+    {
+        struct FaceSample
+        {
+            int faceId;
+            float dist;
+            float slope;
+        };
+        const int nFaces = (int)faceInfos.size();
+
+        std::vector<int> viewNums(nFaces, 0);
+
+        float sectorAngle = 2.0f * PI / numSectors;
+        float invSectorAngle = 1.0f / sectorAngle;
+
+        // ====== 主循环：每个面作为 observer ======
+
+#pragma omp parallel for schedule(dynamic)
+        for (int iObs = 0; iObs < nFaces; ++iObs)
+        {
+            Eigen::Vector3f obs = faceCenter3D(iObs);
+            obs.z() += observeH;
+
+            // 每个扇形一个 bucket
+            std::vector<std::vector<FaceSample>> buckets(numSectors);
+
+            // ====== 1. 分类到扇形 ======
+            for (int iTarget = 0; iTarget < nFaces; ++iTarget)
+            {
+                if (iTarget == iObs)
+                    continue;
+
+                Eigen::Vector3f target = faceCenter3D(iTarget);
+
+                Eigen::Vector2f d =
+                    target.head<2>() - obs.head<2>();
+
+                float dist = d.norm();
+
+                if (dist < 1e-6f)
+                    continue;
+
+                float angle = atan2(d.y(), d.x());
+                if (angle < 0)
+                    angle += 2 * PI;
+
+                int sector = (int)(angle * invSectorAngle);
+
+                if (sector >= numSectors)
+                    sector = numSectors - 1;
+
+                float slope = (target.z() - obs.z()) / dist;
+
+                buckets[sector].push_back(
+                    {iTarget, dist, slope});
+            }
+
+            int visibleCount = 0;
+
+            // ====== 2. 每个扇形径向扫描 ======
+
+            for (int s = 0; s < numSectors; ++s)
+            {
+                auto &bucket = buckets[s];
+
+                if (bucket.empty())
+                    continue;
+
+                // 按距离排序
+                std::sort(
+                    bucket.begin(),
+                    bucket.end(),
+                    [](const FaceSample &a,
+                       const FaceSample &b)
+                    { return a.dist < b.dist; });
+
+                float maxSlope =
+                    std::numeric_limits<float>::lowest();
+
+                // 径向扫描
+                for (auto &sample : bucket)
+                {
+                    if (sample.slope > maxSlope)
+                    {
+                        visibleCount++;
+                        maxSlope = sample.slope;
+                    }
+                }
+            }
+
+            viewNums[iObs] = visibleCount;
+        }
+
+        // ====== 归一化 ======
+
+        int minV =
+            *std::min_element(viewNums.begin(), viewNums.end());
+
+        int maxV =
+            *std::max_element(viewNums.begin(), viewNums.end());
+
+        float denom = std::max(1, maxV - minV);
+
+        std::vector<float> scores(nFaces);
+
+        for (int i = 0; i < nFaces; ++i)
+        {
+            scores[i] =
+                (viewNums[i] - minV) / denom;
+        }
+
+        return scores;
+    }
+
+    std::vector<float> Terrain::computeViewShedCUDA(float observerH)
+    {
+        int N = faceInfos.size();
+
+        std::vector<float> face_xyz(N * 3);
+
+        int vertN = heightmap.size();
+        std::vector<float> terrain_h(mesh.vertices.size());
+        for (int i = 0; i < N; i++)
+        {
+            Eigen::Vector3f p = faceCenter3D(i);
+
+            face_xyz[i * 3 + 0] = p.x();
+            face_xyz[i * 3 + 1] = p.y();
+            face_xyz[i * 3 + 2] = p.z();
+        }
+        for (int i = 0; i < vertN; i++)
+        {
+            terrain_h[i] = mesh.vertices[i].position.z();
+        }
+
+        std::vector<int> view_nums(N);
+        std::vector<float> scores(N);
+        compute_viewshed_cuda(
+            face_xyz.data(),
+            terrain_h.data(), // 你的terrain height grid
+            N,
+            width,
+            height,
+            cellSize,
+            observerH,
+            view_nums.data());
+        int minV = *std::min_element(view_nums.begin(), view_nums.end());
+
+        int maxV = *std::max_element(view_nums.begin(), view_nums.end());
+
+        float denom = std::max(1, maxV - minV);
+
+        for (int i = 0; i < N; ++i)
+        {
+            scores[i] = (view_nums[i] - minV) / denom;
+        }
+
+        return scores;
+    }
+
+    std::vector<int> Terrain::computePointViewCUDA(float observerH)
+    {
+        int N = faceInfos.size();
+        std::vector<int> visible(N);
+        std::vector<float> face_xyz(N * 3);
+        for (int i = 0; i < N; ++i)
+        {
+            auto c = faceCenter3D(i);
+            face_xyz[i * 3 + 0] = c.x();
+            face_xyz[i * 3 + 1] = c.y();
+            face_xyz[i * 3 + 2] = c.z();
+        }
+
+        std::vector<float> terrain_h(mesh.vertices.size());
+        for (int i = 0; i < mesh.vertices.size(); ++i)
+            terrain_h[i] = mesh.vertices[i].position.z();
+
+        float ground = 0.f;
+        bool isInside = sampleHeightAt(ground, testViewPt);
+        if(!isInside) return visible;
+        float obs_z = ground + observerH;
+
+        point_viewshed_cuda(
+            face_xyz.data(),
+            N,
+            terrain_h.data(),
+            width,
+            height,
+            cellSize,
+            testViewPt.x(),
+            testViewPt.y(),
+            obs_z,
+            visible.data());
+
+        return visible;
+    }
+
     const std::vector<Vector3> Terrain::getMeshVertices()
     {
         std::vector<Vector3> vertices;
@@ -450,7 +748,7 @@ namespace terrain
         mesh.gridWidth = width;
         mesh.gridHeight = height;
 
-        aabb2 = Eigen::AlignedBox2f(Eigen::Vector2f(-width * cellSize / 2.f, -height * cellSize / 2.f), Eigen::Vector2f(width * cellSize/ 2.f, height * cellSize/ 2.f));
+        aabb2 = Eigen::AlignedBox2f(Eigen::Vector2f(-width * cellSize / 2.f, -height * cellSize / 2.f), Eigen::Vector2f(width * cellSize / 2.f, height * cellSize / 2.f));
         minHeight = std::numeric_limits<float>::max();
         maxHeight = std::numeric_limits<float>::lowest();
         // 顶点
@@ -498,7 +796,7 @@ namespace terrain
             n.normalize();
 
             // 坡向（使用下坡方向）
-            //Eigen::Vector3f down = -n;
+            // Eigen::Vector3f down = -n;
             Eigen::Vector2f h(n.x(), n.y());
 
             float aspect = 0.f;
@@ -1399,14 +1697,14 @@ namespace terrain
         return (a + b).normalized();
     }
 
-    std::vector<int> Terrain::sampleVerticesByDistance(const std::vector<int> &path,float interval) const
+    std::vector<int> Terrain::sampleVerticesByDistance(const std::vector<int> &path, float interval) const
     {
         std::vector<int> result;
         float acc = 0.0f;
 
         for (size_t i = 1; i < path.size(); ++i)
         {
-            float d =(mesh.vertices[path[i]].position -mesh.vertices[path[i - 1]].position).norm();
+            float d = (mesh.vertices[path[i]].position - mesh.vertices[path[i - 1]].position).norm();
             acc += d;
             if (acc >= interval)
             {
@@ -1556,13 +1854,16 @@ namespace terrain
         return roads;
     }
 
-    std::vector<field::Polyline2_t<float>> Terrain::convertRoadToFieldLine(const std::vector<Road> roads) const{
+    std::vector<field::Polyline2_t<float>> Terrain::convertRoadToFieldLine(const std::vector<Road> roads) const
+    {
         using Polyline2_t = field::Polyline2_t<float>;
         std::vector<Polyline2_t> polylines;
-        for(const Road& road: roads){
+        for (const Road &road : roads)
+        {
             std::vector<Eigen::Vector2f> pts;
             pts.reserve(road.path.size());
-            for(const int& idx:road.path){
+            for (const int &idx : road.path)
+            {
                 Eigen::Vector3f pos = mesh.vertices[idx].position;
                 pts.emplace_back(pos.x(), pos.y());
             }
@@ -1843,8 +2144,6 @@ namespace terrain
         using std::vector;
         const vector<Polyline2_t> &planarRoads = field.getPolylines();
         const vector<Polyline2_t> rebuildRoads;
-        
-
     }
 
     std::vector<int> Terrain::computeSeedRegion(int seedFace, const std::vector<float> &scores) const

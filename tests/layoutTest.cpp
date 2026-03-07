@@ -35,9 +35,12 @@ int main()
     static float threshold = 0.5f;
     static bool genPlot = false;
     static int minGridNum = 20;
-    static bool showFieldLine = true;
+    static bool showFieldLine = false;
     static float terrainWeight = 2.f;
     bool terrainfieldWeightChanged = false;
+   
+    bool viewPtChanged = false;
+    bool showViewPt = false;
     field::Polyline2_t<float> poly = field::createRandomPolygon(ptNum, scale, threshold, Vector2f(0.f, 0.f));
     BuildingLayout<float> layout(poly, terrain);
     field::Polyline2_t<float> rect = layout.oriRect;
@@ -122,6 +125,7 @@ int main()
             {
                 terrain.regenerate(1 << terrainPow, 1 << terrainPow, frequency, amplitude);
                 terrain.applyFaceColor();
+                terrain_width = float(terrain.getCellSize() * terrain.getWidth());
                 layers = terrain.extractContours(1.f);
                 tensorField = field::TensorField2D(terrain.getAABB2(), minGridNum);
                 terrainTensors = terrain.sampleTensorAtGrids(tensorField.getGridPoints());
@@ -173,12 +177,24 @@ int main()
                 isOptimizing = false;
                 curIter = 0;
             }
+
+            if (viewPtChanged)
+            {
+                terrain.applyFaceColor();
+            }
+           
         },
         [&]() { // 3维空间绘图内容部分
-            //  terrain.draw();
+             terrain.draw();
             //  layout.drawTerrain(RL_GRAY, 0.8f, true, 0.5f);
             terrain.drawContours(layers);
-            showData.draw();
+            if (showViewPt)
+            {
+                DrawSphere({terrain.testViewPt.x(), terrain.observeHeight, -terrain.testViewPt.y()}, 1.f, RL_GRAY);
+            }
+            
+            
+            // showData.draw();
             // DrawLine3D({0, 0, 0}, {10000, 0, 0}, RL_RED);
             // DrawLine3D({0, 0, 0}, {0, 10000, 0}, RL_BLUE);
             // DrawLine3D({0, 0, 0}, {0, 0, -10000}, RL_GREEN);
@@ -209,16 +225,16 @@ int main()
             //     render::stroke_bold_polygon2(rvd.getCellPolys()[i].points, RL_BLACK, 0.f, 0.07f, 1.f, {terrain_width / 2.f, 0});
             // }
             // render::draw_points(layout.rotedCenters, render.ptData.color, 1.f, render.ptData.size / 2.f);
-            render::stroke_bold_polygon2(boundOffset.points, RL_BLACK, 0.f, 0.07f, 1.f, {terrain_width / 2.f, 0});
-            render::draw_points(totalSeedResult.samples, render.ptData.color, 1.f, render.ptData.size * 1.5f, 0, {terrain_width / 2.f, 0.f});
+            // render::stroke_bold_polygon2(boundOffset.points, RL_BLACK, 0.f, 0.07f, 1.f, {terrain_width / 2.f, 0});
+            // render::draw_points(totalSeedResult.samples, render.ptData.color, 1.f, render.ptData.size * 1.5f, 0, {terrain_width / 2.f, 0.f});
 
             // model.drawGrids();
-            softModel.drawGrids(0.f, 1.f, {terrain_width / 2.f, 0.f});
-            softModel.drawTerrain(layout.heightMap);
+            // softModel.drawGrids(0.f, 1.f, {terrain_width / 2.f, 0.f});
+            // softModel.drawTerrain(layout.heightMap);
         },
         [&]() { // 二维屏幕空间绘图
             // render.draw_index_fonts(layout.rotedCenters, render.ptData.size, render.ptData.color, 0, {terrain_width / 2.f, 0.f});
-            render.draw_index_fonts(totalSeedResult.samples, render.fontData.size * 2, RL_RED, 0, {terrain_width / 2.f, 0.f});
+            // render.draw_index_fonts(totalSeedResult.samples, render.fontData.size * 2, RL_RED, 0, {terrain_width / 2.f, 0.f});
             // render.draw_index_fonts(layout.rotedGrids, render.ptData.size, render.ptData.color);
             rlImGuiBegin();
 
@@ -257,7 +273,15 @@ int main()
                     ImGui::RadioButton("Wire", &mode, 1);
                     ImGui::RadioButton("Aspect", &mode, 2);
                     ImGui::RadioButton("Slope", &mode, 3);
-                    ImGui::RadioButton("Score", &mode, 4);
+                    ImGui::RadioButton("ViewShed", &mode, 4);
+                    ImGui::RadioButton("PointViewShed", &mode, 5);
+                    ImGui::Indent();
+                    ImGui::Checkbox("ShowViewPt", &terrain.showTestViewPt);
+                    viewPtChanged |= ImGui::SliderFloat("ViewPtX", &terrain.testViewPt.x(), -terrain_width / 2.f, terrain_width / 2.f, "%.1f");
+                    viewPtChanged |= ImGui::SliderFloat("ViewPtY", &terrain.testViewPt.y(), -terrain_width / 2.f, terrain_width / 2.f, "%.1f");
+                    viewPtChanged |= ImGui::SliderFloat("ObserveH", &terrain.observeHeight, 0.f, 30.f, "%.1f");
+                    ImGui::Unindent();
+                    ImGui::RadioButton("Score", &mode, 6);
 
                     TerrainViewMode newMode = static_cast<TerrainViewMode>(mode);
                     if (newMode != viewMode)
@@ -265,6 +289,7 @@ int main()
                         viewMode = newMode;
                         terrain.setViewMode(viewMode);
                     }
+
                     ImGui::Unindent();
                 }
 
