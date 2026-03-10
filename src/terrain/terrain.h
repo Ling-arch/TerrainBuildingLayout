@@ -11,6 +11,7 @@
 #include "tensorField.h"
 #include "viewshed_cuda.h"
 
+
 namespace terrain
 {
 
@@ -164,6 +165,41 @@ namespace terrain
         TerrainViewResult() = default;
     };
 
+    struct RoadNode
+    {
+        Eigen::Vector2f pos; // 节点位置
+        int parent;          // 父节点
+    };
+
+    struct RoadSegment
+    {
+        int a;
+        int b;
+    };
+
+    struct Attractor
+    {
+        Eigen::Vector2f pos;
+        float radius;
+    };
+
+    struct RoadNetwork
+    {
+        std::vector<RoadNode> nodes;
+        std::vector<RoadSegment> segments;
+    };
+
+    struct TerrainPoint
+    {
+        Eigen::Vector2f position;
+        float slope;
+        float aspect;
+        int16_t init = -1;
+        TerrainPoint() = default;
+        TerrainPoint(const Eigen::Vector2f &pos, float s, float a)
+            : position(pos), slope(s), aspect(a) {}
+    };
+
     class Terrain
     {
     public:
@@ -224,7 +260,8 @@ namespace terrain
         inline int gridIndex(int gx, int gy) const { return gy * width + gx; }
 
         void applyFaceColor();                                                                   // set face colors depend on slope , aspect
-        bool sampleTensorAt(field::TerrainTensor<float> &out, const Eigen::Vector2f &pos) const; // sample vertex slope and aspect
+        bool sampleTensorAt(field::TerrainTensor<float> &out, const Eigen::Vector2f &pos) const; // sample vertex slope and aspect in [0,pi/2);
+        bool sampleTerrainPtAt(TerrainPoint &out, const Eigen::Vector2f &pos) const; // sample vertex slope and aspect in [0,2pi);
         bool sampleHeightAt(float &outHeight, const Eigen::Vector2f &pos) const;                 // sample height at pos
         std::unordered_map<int, field::TerrainTensor<float>> sampleTensorAtGrids(const std::vector<Eigen::Vector2f> &grids) const;
         bool projectPolylineToTerrain(const std::vector<Eigen::Vector2f> &polyline2D, std::vector<Eigen::Vector3f> &outPolyline3D) const;
@@ -254,6 +291,16 @@ namespace terrain
         void computeRegionCenter(RegionInfo &region) const;
         Eigen::Vector3f computeForwardDirection(const std::vector<int> &path, int i) const;
         std::vector<std::vector<int>> buildMainRoads(std::vector<RegionInfo> &regions, int mainRegionCount, const std::vector<std::vector<geo::GraphEdge>> &adj) const;
+        std::vector<Attractor> generateAttractors(
+            int count,
+            float maxSlope,
+            float radius) const;
+        Eigen::Vector2f computeSteering(
+            const Eigen::Vector2f &pos,
+            const Eigen::Vector2f &curDir,
+            const std::vector<Attractor> &attractors,
+            const field::TensorField2D<float> &field,
+            float influenceRadius) const;
         std::vector<int> sampleVerticesByDistance(const std::vector<int> &path, float interval) const;
         float pathLength(const std::vector<int> &path) const;
 

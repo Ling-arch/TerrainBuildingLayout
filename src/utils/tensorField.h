@@ -86,6 +86,22 @@ namespace field
     }
 
     /*
+     * Wrap angle theta to [0, 2*pi)
+     */
+    template <typename Scalar>
+    inline Scalar wrapTheta2Pi(Scalar theta)
+    {
+        const Scalar two_pi = Scalar(Litten_M_PI * 2.0);
+
+        theta = std::fmod(theta, two_pi);
+
+        if (theta < Scalar(0))
+            theta += two_pi;
+
+        return theta;
+    }
+
+    /*
      * Convert a 2D direction vector to an angle in [0, pi/2)
      */
     template <typename Scalar>

@@ -1,6 +1,7 @@
 #include "terrain.h"
 #include <cmath>
 
+
 namespace terrain
 {
     // 一个简单的 2D 噪声（你可以以后换 Perlin / Simplex）
@@ -145,7 +146,7 @@ namespace terrain
         std::vector<float> viewScores;
         std::vector<float> localScores;
         std::vector<int> pointView;
-        std::vector<float>flowScores;
+        std::vector<float> flowScores;
         float maxLogFlow = 0.f;
         if (viewMode == TerrainViewMode::View)
         {
@@ -160,7 +161,8 @@ namespace terrain
         {
             pointView = computePointViewCUDA(observeHeight);
         }
-        if(viewMode == TerrainViewMode::Flow){
+        if (viewMode == TerrainViewMode::Flow)
+        {
             flowScores = computeFlowAccumulationCUDA();
             maxLogFlow = 0.0f;
             float minFlow = std::numeric_limits<float>::max();
@@ -173,8 +175,8 @@ namespace terrain
                 minFlow = std::min(minFlow, f);
                 maxFlow = std::max(maxFlow, f);
 
-                // if (i < 20) 
-                    std::cout << "flow[" << i << "] = " << f << std::endl;
+                // if (i < 20)
+                std::cout << "flow[" << i << "] = " << f << std::endl;
             }
 
             std::cout << "Flow range: " << minFlow << " -> " << maxFlow << std::endl;
@@ -369,14 +371,6 @@ namespace terrain
         // ---------- 5. 插值 position ----------
         out.position = pos;
 
-        // // ---------- 6. 插值 normal ----------
-        // out.normal = v00.normal * w00 + v10.normal * w10 + v01.normal * w01 + v11.normal * w11;
-
-        // if (out.normal.norm() > 1e-6f)
-        //     out.normal.normalize();
-        // else
-        //     out.normal = Eigen::Vector3f(0, 0, 1);
-
         // ---------- 7. slope 直接插值 ----------
         out.slope = v00.slope * w00 + v10.slope * w10 + v01.slope * w01 + v11.slope * w11;
 
@@ -393,6 +387,63 @@ namespace terrain
             avec.normalize();
             out.aspect = std::atan2(avec.y(), avec.x());
             out.aspect = field::wrapTheta(out.aspect);
+        }
+        else
+        {
+            out.aspect = 0.f;
+        }
+
+        return true;
+    }
+
+    bool Terrain::sampleTerrainPtAt(TerrainPoint &out, const Eigen::Vector2f &pos) const
+    {
+        if (!aabb2.contains(pos))
+            return false;
+        float fx = (pos.x() + width * cellSize / 2.f) / cellSize;
+        float fy = (pos.y() + height * cellSize / 2.f) / cellSize;
+        int gx = std::clamp(static_cast<int>(std::floor(fx)), 0, width - 1);
+        int gy = std::clamp(static_cast<int>(std::floor(fy)), 0, height - 1);
+
+        int gridIdx = gridIndex(gx, gy);
+
+        int v2idx = gridIdx + gy;      // bottom-left
+        int v3idx = v2idx + 1;         // bottom-right
+        int v0idx = v2idx + width + 1; // top-left
+        int v1idx = v0idx + 1;         // top-right
+
+        const TerrainVertex &v00 = mesh.vertices[v0idx];
+        const TerrainVertex &v10 = mesh.vertices[v1idx];
+        const TerrainVertex &v01 = mesh.vertices[v2idx];
+        const TerrainVertex &v11 = mesh.vertices[v3idx];
+
+        float tx = fx - gx;
+        float ty = 1 - fy + gy;
+        // ---------- 4. 双线性插值权重 ----------
+        float w00 = (1 - tx) * (1 - ty);
+        float w10 = tx * (1 - ty);
+        float w01 = (1 - tx) * ty;
+        float w11 = tx * ty;
+
+        // ---------- 5. 插值 position ----------
+        out.position = pos;
+
+        // ---------- 7. slope 直接插值 ----------
+        out.slope = v00.slope * w00 + v10.slope * w10 + v01.slope * w01 + v11.slope * w11;
+
+        // ---------- 8. aspect（向量化插值） ----------
+        Eigen::Vector2f a00(std::cos(v00.aspect), std::sin(v00.aspect));
+        Eigen::Vector2f a10(std::cos(v10.aspect), std::sin(v10.aspect));
+        Eigen::Vector2f a01(std::cos(v01.aspect), std::sin(v01.aspect));
+        Eigen::Vector2f a11(std::cos(v11.aspect), std::sin(v11.aspect));
+
+        Eigen::Vector2f avec = a00 * w00 + a10 * w10 + a01 * w01 + a11 * w11;
+
+        if (avec.norm() > 1e-6f)
+        {
+            avec.normalize();
+            out.aspect = std::atan2(avec.y(), avec.x());
+            out.aspect = field::wrapTheta2Pi(out.aspect);
         }
         else
         {
@@ -1974,6 +2025,107 @@ namespace terrain
         }
 
         return roads;
+    }
+
+    std::vector<Attractor> Terrain::generateAttractors(
+        int count,
+        float maxSlope,
+        float radius) const
+    {
+        std::vector<Attractor> attractors;
+        attractors.reserve(count);
+
+        std::mt19937 rng(1234);
+        std::uniform_real_distribution<float> dx(aabb2.min().x(), aabb2.max().x());
+        std::uniform_real_distribution<float> dy(aabb2.min().y(), aabb2.max().y());
+
+        int tries = 0;
+
+        while (attractors.size() < count && tries < count * 10)
+        {
+            tries++;
+
+            Eigen::Vector2f p(dx(rng), dy(rng));
+
+            TerrainPoint t;
+
+            if (!sampleTerrainPtAt(t, p))
+                continue;
+
+            // 只在坡度较小地方生成居民区
+            if ((t.slope > maxSlope && t.aspect > 0.9375f * field::Litten_M_PI) || (t.slope > maxSlope && t.aspect < 0.0625f * field::Litten_M_PI))
+                continue;
+
+            Attractor a;
+            a.pos = p;
+            a.radius = radius;
+
+            attractors.push_back(a);
+        }
+
+        return attractors;
+    }
+
+    Eigen::Vector2f Terrain::computeSteering(
+        const Eigen::Vector2f &pos,
+        const Eigen::Vector2f &curDir,
+        const std::vector<Attractor> &attractors,
+        const field::TensorField2D<float> &field,
+         float influenceRadius) const
+    {
+        Eigen::Vector2f tensorDir(0, 0);
+
+        // ===== 1 Tensor field direction =====
+
+        auto dirs = field.getTensorAt(pos);
+
+        float bestDot = -1;
+
+        for (auto &d : dirs)
+        {
+            float dot = d.dot(curDir);
+
+            if (dot > bestDot)
+            {
+                bestDot = dot;
+                tensorDir = d;
+            }
+        }
+
+        // ===== 2 Attractor influence =====
+
+        Eigen::Vector2f attractDir(0, 0);
+        float weight = 0;
+
+        for (const auto &a : attractors)
+        {
+            float dist = (a.pos - pos).norm();
+
+            if (dist > influenceRadius)
+                continue;
+
+            Eigen::Vector2f dir = (a.pos - pos).normalized();
+
+            float w = 1 - dist / influenceRadius;
+
+            attractDir += dir * w;
+            weight += w;
+        }
+
+        if (weight > 0)
+            attractDir.normalize();
+
+        // ===== 3 combine =====
+
+        Eigen::Vector2f target =
+            0.6f * tensorDir + 0.3f * attractDir + 0.1f * curDir;
+
+        if (target.norm() < 1e-6f)
+            return curDir;
+
+        target.normalize();
+
+        return target;
     }
 
     std::vector<field::Polyline2_t<float>> Terrain::convertRoadToFieldLine(const std::vector<Road> roads) const
