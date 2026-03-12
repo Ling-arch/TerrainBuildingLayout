@@ -11,7 +11,6 @@
 #include "tensorField.h"
 #include "viewshed_cuda.h"
 
-
 namespace terrain
 {
 
@@ -261,7 +260,7 @@ namespace terrain
 
         void applyFaceColor();                                                                   // set face colors depend on slope , aspect
         bool sampleTensorAt(field::TerrainTensor<float> &out, const Eigen::Vector2f &pos) const; // sample vertex slope and aspect in [0,pi/2);
-        bool sampleTerrainPtAt(TerrainPoint &out, const Eigen::Vector2f &pos) const; // sample vertex slope and aspect in [0,2pi);
+        bool sampleTerrainPtAt(TerrainPoint &out, const Eigen::Vector2f &pos) const;             // sample vertex slope and aspect in [0,2pi);
         bool sampleHeightAt(float &outHeight, const Eigen::Vector2f &pos) const;                 // sample height at pos
         std::unordered_map<int, field::TerrainTensor<float>> sampleTensorAtGrids(const std::vector<Eigen::Vector2f> &grids) const;
         bool projectPolylineToTerrain(const std::vector<Eigen::Vector2f> &polyline2D, std::vector<Eigen::Vector3f> &outPolyline3D) const;
@@ -301,7 +300,24 @@ namespace terrain
             const std::vector<Attractor> &attractors,
             const field::TensorField2D<float> &field,
             float influenceRadius) const;
+        std::vector<std::vector<Eigen::Vector2f>> generateSecondaryRoads(
+            const field::TensorField2D<float> &field,
+            const std::vector<int> &seeds,
+            std::vector<Attractor> &attractors,
+            float stepSize,
+            float influenceRadius,
+            float killRadius,
+            int maxSteps) const;
+        RoadNetwork generateRoadNetwork(const field::TensorField2D<float> &field, const std::vector<int> &path,
+                                             float minInterval,
+                                             float maxInterval,
+                                             int seed)const;
         std::vector<int> sampleVerticesByDistance(const std::vector<int> &path, float interval) const;
+        std::vector<int> sampleVerticesByDistance(
+            const std::vector<int> &path,
+            float minInterval,
+            float maxInterval,
+            int seed) const;
         float pathLength(const std::vector<int> &path) const;
 
         std::vector<Road> buildRoads(std::vector<Eigen::Vector3f> &seedPoints, std::vector<Eigen::Vector3f> &controlPts, std::vector<RegionInfo> &regions, int mainRegionCount, const std::vector<std::vector<geo::GraphEdge>> &adj);

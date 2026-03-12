@@ -1888,6 +1888,50 @@ namespace terrain
         return result;
     }
 
+    std::vector<int> Terrain::sampleVerticesByDistance(
+    const std::vector<int> &path,
+    float minInterval,
+    float maxInterval,
+    int seed) const
+{
+    std::vector<int> result;
+
+    if (path.size() < 2)
+        return result;
+
+    std::mt19937 rng(seed);
+
+    std::uniform_real_distribution<float> dist(minInterval, maxInterval);
+
+    // 当前目标距离
+    float target = dist(rng);
+
+    float acc = 0.0f;
+
+    for (size_t i = 1; i < path.size(); ++i)
+    {
+        const Eigen::Vector3f &p0 = mesh.vertices[path[i - 1]].position;
+        const Eigen::Vector3f &p1 = mesh.vertices[path[i]].position;
+
+        float d = (p1 - p0).norm();
+
+        acc += d;
+
+        if (acc >= target)
+        {
+            result.push_back(path[i]);
+
+            // 重置累计距离
+            acc = 0.0f;
+
+            // 生成下一段随机距离
+            target = dist(rng);
+        }
+    }
+
+    return result;
+}
+
     float Terrain::pathLength(const std::vector<int> &path) const
     {
         float len = 0.0f;
@@ -2126,6 +2170,84 @@ namespace terrain
         target.normalize();
 
         return target;
+    }
+
+    std::vector<std::vector<Eigen::Vector2f>>Terrain::generateSecondaryRoads(
+        const field::TensorField2D<float> &field,
+        const std::vector<int> &seeds,
+        std::vector<Attractor> &attractors,
+        float stepSize,
+        float influenceRadius,
+        float killRadius,
+        int maxSteps) const
+    {
+        std::vector<std::vector<Eigen::Vector2f>> roads;
+
+        for (int seedIdx : seeds)
+        {
+            Eigen::Vector2f pos = mesh.vertices[seedIdx].position.head<2>();
+
+            Eigen::Vector2f dir(1, 0);
+
+            std::vector<Eigen::Vector2f> road;
+            road.push_back(pos);
+
+            for (int step = 0; step < maxSteps; step++)
+            {
+                Eigen::Vector2f newDir = computeSteering(pos, dir, attractors, field, influenceRadius);
+
+                Eigen::Vector2f newPos = pos + newDir * stepSize;
+
+                if (!aabb2.contains(newPos))
+                    break;
+
+                road.push_back(newPos);
+
+                pos = newPos;
+                dir = newDir;
+
+                // 删除被覆盖的 attractor
+                attractors.erase(
+                    std::remove_if(
+                        attractors.begin(),
+                        attractors.end(),
+                        [&](const Attractor &a)
+                        {
+                            return (a.pos - pos).norm() < killRadius;
+                        }),
+                    attractors.end());
+            }
+
+            if (road.size() > 2)
+                roads.push_back(road);
+        }
+
+        return roads;
+    }
+
+    RoadNetwork Terrain::generateRoadNetwork(const field::TensorField2D<float> &field, const std::vector<int> &mainRoads,
+                                             float minInterval,
+                                             float maxInterval,
+                                             int seed)const
+    {
+        RoadNetwork net;
+
+        // STEP1 attractors
+        auto attractors = generateAttractors(
+            2000,
+            25,
+            20.f);
+
+        // STEP2 branch seeds
+        auto seeds = sampleVerticesByDistance(mainRoads, 8);
+
+        // STEP3 secondary roads
+        auto secondary = generateSecondaryRoads(field,seeds,attractors,10.f,80.f,15.f,200);
+
+        // STEP4 tertiary roads
+       
+
+        return net;
     }
 
     std::vector<field::Polyline2_t<float>> Terrain::convertRoadToFieldLine(const std::vector<Road> roads) const
