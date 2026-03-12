@@ -1887,45 +1887,73 @@ namespace terrain
         return result;
     }
 
-    std::vector<int> Terrain::sampleVerticesByDistance(
+    std::vector<Eigen::Vector2f> Terrain::sampleVerticesByDistance(
         const std::vector<int> &path,
-        float minInterval,
-        float maxInterval,
-        int seed) const
+        float baseInterval, // 用于重采样整条 path 的间隔
+        int minInterval,    // 随机采样最小间隔（数量单位）
+        int maxInterval,    // 随机采样最大间隔（数量单位）
+        int seed,
+        std::vector<Eigen::Vector2f> &resampledCoords) const
     {
-        std::vector<int> result;
+        std::vector<Eigen::Vector2f> result;
+        resampledCoords.clear();
 
         if (path.size() < 2)
             return result;
 
-        std::mt19937 rng(seed);
-
-        std::uniform_real_distribution<float> dist(minInterval, maxInterval);
-
-        // 当前目标距离
-        float target = dist(rng);
-
-        float acc = 0.0f;
-
+        // ================================
+        // 1. 重采样 path，保证等距（按 baseInterval）
+        // ================================
         for (size_t i = 1; i < path.size(); ++i)
         {
-            const Eigen::Vector3f &p0 = mesh.vertices[path[i - 1]].position;
-            const Eigen::Vector3f &p1 = mesh.vertices[path[i]].position;
+            Eigen::Vector2f p0 = mesh.vertices[path[i - 1]].position.head<2>();
+            Eigen::Vector2f p1 = mesh.vertices[path[i]].position.head<2>();
+            float segLen = (p1 - p0).norm();
 
-            float d = (p1 - p0).norm();
+            int nDiv = std::max(1, static_cast<int>(std::floor(segLen / baseInterval)));
 
-            acc += d;
-
-            if (acc >= target)
+            for (int d = 0; d < nDiv; ++d)
             {
-                result.push_back(path[i]);
-
-                // 重置累计距离
-                acc = 0.0f;
-
-                // 生成下一段随机距离
-                target = dist(rng);
+                float t = static_cast<float>(d) / nDiv;
+                resampledCoords.push_back(p0 * (1 - t) + p1 * t);
             }
+        }
+        // 添加最后一个点
+        resampledCoords.push_back(mesh.vertices[path.back()].position.head<2>());
+
+        // ================================
+        // 2. 随机间隔采样
+        // ================================
+        std::mt19937 rng(seed);
+        std::uniform_int_distribution<int> intervalDist(minInterval, maxInterval);
+
+        int idx = 0;
+        int nextGap = intervalDist(rng);
+        int count = 0; // 记录当前段的累积点数
+
+        while (idx < resampledCoords.size())
+        {
+            count++;
+            if (count >= nextGap)
+            {
+                result.push_back(resampledCoords[idx]);
+                count = 0;
+                nextGap = intervalDist(rng);
+            }
+            idx++;
+        }
+
+        // ================================
+        // 3. 处理最后一段不足 minInterval 的情况
+        // ================================
+        if (!result.empty() && (resampledCoords.size() - (idx - 1) < minInterval))
+        {
+            // 合并最后一段和倒数第二段重新均分
+            Eigen::Vector2f lastPt = result.back();
+            Eigen::Vector2f secondLastPt = result.size() >= 2 ? result[result.size() - 2] : result.back();
+            Eigen::Vector2f midPt = 0.5f * (lastPt + secondLastPt);
+            result.back() = midPt;
+            result.push_back(lastPt);
         }
 
         return result;
@@ -2073,7 +2101,8 @@ namespace terrain
     std::vector<Attractor> Terrain::generateAttractors(
         const std::vector<Eigen::Vector2f> &mainRoadsPts,
         float maxSlope,
-        float radiusParam) const
+        float possionRadius,
+    float searchInterval) const
     {
         using Vector2f = Eigen::Vector2f;
         std::vector<Attractor> attractors;
@@ -2090,7 +2119,7 @@ namespace terrain
         // 2. Poisson 分布采样
         std::vector<Vector2f> samplePoints = util::Math2<float>::gen_poisson_sites_in_poly(
             terrainBounding2,
-            radiusParam, // 半径
+            possionRadius, // 半径
             30,
             static_cast<unsigned>(time(nullptr)));
 
@@ -2111,8 +2140,8 @@ namespace terrain
         KDTree tree(2, cloud, nanoflann::KDTreeSingleIndexAdaptorParams(10));
         tree.buildIndex();
 
-        const float searchRadius = radiusParam;
-        const float radius2 = searchRadius * searchRadius;
+       
+        const float radius2 = searchInterval * searchInterval;
 
         nanoflann::SearchParameters params;
         std::vector<nanoflann::ResultItem<uint32_t, float>> matches;
@@ -2157,7 +2186,7 @@ namespace terrain
 
             Attractor a;
             a.pos = p;
-            a.radius = radiusParam;
+            a.radius = possionRadius;
             attractors.push_back(a);
         }
 
@@ -2228,7 +2257,7 @@ namespace terrain
 
     std::vector<std::vector<Eigen::Vector2f>> Terrain::generateSecondaryRoads(
         const field::TensorField2D<float> &field,
-        const std::vector<int> &seeds,
+        const std::vector<Eigen::Vector2f> &seeds, // 每个 seed 是坐标，不是索引
         std::vector<Attractor> &attractors,
         float stepSize,
         float influenceRadius,
@@ -2237,30 +2266,35 @@ namespace terrain
     {
         std::vector<std::vector<Eigen::Vector2f>> roads;
 
-        for (int seedIdx : seeds)
+        // 遍历每一个 seed 点
+        for (Eigen::Vector2f seedPos : seeds) // 注意这里是值传递，可修改
         {
-            Eigen::Vector2f pos = mesh.vertices[seedIdx].position.head<2>();
-
-            Eigen::Vector2f dir(1, 0);
+            Eigen::Vector2f pos = seedPos; // 当前迭代位置
+            Eigen::Vector2f dir(1, 0);     // 初始方向，可根据需要调整
 
             std::vector<Eigen::Vector2f> road;
-            road.push_back(pos);
+            road.push_back(pos); // 将起点加入道路
 
-            for (int step = 0; step < maxSteps; step++)
+            // 道路迭代生长
+            for (int step = 0; step < maxSteps; ++step)
             {
+                // 根据张量场 + 吸引点计算当前方向
                 Eigen::Vector2f newDir = computeSteering(pos, dir, attractors, field, influenceRadius);
 
+                // 沿 newDir 前进一步
                 Eigen::Vector2f newPos = pos + newDir * stepSize;
 
+                // 检查是否在地形范围内
                 if (!aabb2.contains(newPos))
                     break;
 
                 road.push_back(newPos);
 
+                // 更新当前位置与方向
                 pos = newPos;
                 dir = newDir;
 
-                // 删除被覆盖的 attractor
+                // 删除被覆盖的吸引点
                 attractors.erase(
                     std::remove_if(
                         attractors.begin(),
@@ -2272,6 +2306,7 @@ namespace terrain
                     attractors.end());
             }
 
+            // 道路至少包含 2 个点才加入结果
             if (road.size() > 2)
                 roads.push_back(road);
         }
@@ -2279,23 +2314,31 @@ namespace terrain
         return roads;
     }
 
-    RoadNetwork Terrain::generateRoadNetwork(const field::TensorField2D<float> &field, const std::vector<int> &mainRoads,
-                                             float minInterval,
-                                             float maxInterval,
+    RoadNetwork Terrain::generateRoadNetwork(const field::TensorField2D<float> &field, const std::vector<std::vector<int>> &mainRoads,
+                                             int minInterval,
+                                             int maxInterval,
+                                             
                                              int seed) const
     {
         RoadNetwork net;
 
-        // STEP1 attractors
-        auto attractors = generateAttractors(35, 60.f);
+        // STEP1 branch seeds
+        std::vector<Eigen::Vector2f> totalSeeds;
+        std::vector<Eigen::Vector2f> sampledRoadsPts;
+        for (const auto &roadPath : mainRoads)
+        {
+            std::vector<Eigen::Vector2f> resampled;
+            auto seeds = sampleVerticesByDistance(roadPath, 1.5, minInterval, maxInterval, seed, resampled);
+            totalSeeds.insert(totalSeeds.end(), seeds.begin(), seeds.end());
+            sampledRoadsPts.insert(sampledRoadsPts.end(), resampled.begin(),resampled.end());
+        }
 
-        // STEP2 branch seeds
-        auto seeds = sampleVerticesByDistance(mainRoads, 8);
+        // STEP2 attractors
+        auto attractors = generateAttractors(sampledRoadsPts, 35, 60.f, (minInterval + maxInterval)/3.f);
 
         // STEP3 secondary roads
-        auto secondary = generateSecondaryRoads(field, seeds, attractors, 10.f, 80.f, 15.f, 200);
+        auto secondary = generateSecondaryRoads(field, totalSeeds, attractors, 3.f, 80.f, 15.f, 600);
 
-        // STEP4 tertiary roads
 
         return net;
     }

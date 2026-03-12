@@ -290,10 +290,7 @@ namespace terrain
         void computeRegionCenter(RegionInfo &region) const;
         Eigen::Vector3f computeForwardDirection(const std::vector<int> &path, int i) const;
         std::vector<std::vector<int>> buildMainRoads(std::vector<RegionInfo> &regions, int mainRegionCount, const std::vector<std::vector<geo::GraphEdge>> &adj) const;
-        std::vector<Attractor> generateAttractors(
-            int count,
-            float maxSlope,
-            float radius) const;
+        std::vector<Attractor> generateAttractors(const std::vector<Eigen::Vector2f> &mainRoadsPts, float maxSlope, float possionRadius, float searchInterval) const;
         Eigen::Vector2f computeSteering(
             const Eigen::Vector2f &pos,
             const Eigen::Vector2f &curDir,
@@ -302,22 +299,24 @@ namespace terrain
             float influenceRadius) const;
         std::vector<std::vector<Eigen::Vector2f>> generateSecondaryRoads(
             const field::TensorField2D<float> &field,
-            const std::vector<int> &seeds,
+            const std::vector<Eigen::Vector2f> &seeds,
             std::vector<Attractor> &attractors,
             float stepSize,
             float influenceRadius,
             float killRadius,
             int maxSteps) const;
-        RoadNetwork generateRoadNetwork(const field::TensorField2D<float> &field, const std::vector<int> &path,
-                                             float minInterval,
-                                             float maxInterval,
-                                             int seed)const;
+        RoadNetwork generateRoadNetwork(const field::TensorField2D<float> &field, const std::vector<std::vector<int>> &path,
+                                        int minInterval,
+                                        int maxInterval,
+                                        int seed) const;
         std::vector<int> sampleVerticesByDistance(const std::vector<int> &path, float interval) const;
-        std::vector<int> sampleVerticesByDistance(
+        std::vector<Eigen::Vector2f> sampleVerticesByDistance(
             const std::vector<int> &path,
-            float minInterval,
-            float maxInterval,
-            int seed) const;
+            float baseInterval, // 用于重采样整条 path 的间隔
+            int minInterval,    // 随机采样最小间隔（数量单位）
+            int maxInterval,    // 随机采样最大间隔（数量单位）
+            int seed,
+            std::vector<Eigen::Vector2f> &resampledCoords) const;
         float pathLength(const std::vector<int> &path) const;
 
         std::vector<Road> buildRoads(std::vector<Eigen::Vector3f> &seedPoints, std::vector<Eigen::Vector3f> &controlPts, std::vector<RegionInfo> &regions, int mainRegionCount, const std::vector<std::vector<geo::GraphEdge>> &adj);
