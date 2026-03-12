@@ -1,7 +1,6 @@
 #include "terrain.h"
 #include <cmath>
 
-
 namespace terrain
 {
     // 一个简单的 2D 噪声（你可以以后换 Perlin / Simplex）
@@ -1889,48 +1888,48 @@ namespace terrain
     }
 
     std::vector<int> Terrain::sampleVerticesByDistance(
-    const std::vector<int> &path,
-    float minInterval,
-    float maxInterval,
-    int seed) const
-{
-    std::vector<int> result;
-
-    if (path.size() < 2)
-        return result;
-
-    std::mt19937 rng(seed);
-
-    std::uniform_real_distribution<float> dist(minInterval, maxInterval);
-
-    // 当前目标距离
-    float target = dist(rng);
-
-    float acc = 0.0f;
-
-    for (size_t i = 1; i < path.size(); ++i)
+        const std::vector<int> &path,
+        float minInterval,
+        float maxInterval,
+        int seed) const
     {
-        const Eigen::Vector3f &p0 = mesh.vertices[path[i - 1]].position;
-        const Eigen::Vector3f &p1 = mesh.vertices[path[i]].position;
+        std::vector<int> result;
 
-        float d = (p1 - p0).norm();
+        if (path.size() < 2)
+            return result;
 
-        acc += d;
+        std::mt19937 rng(seed);
 
-        if (acc >= target)
+        std::uniform_real_distribution<float> dist(minInterval, maxInterval);
+
+        // 当前目标距离
+        float target = dist(rng);
+
+        float acc = 0.0f;
+
+        for (size_t i = 1; i < path.size(); ++i)
         {
-            result.push_back(path[i]);
+            const Eigen::Vector3f &p0 = mesh.vertices[path[i - 1]].position;
+            const Eigen::Vector3f &p1 = mesh.vertices[path[i]].position;
 
-            // 重置累计距离
-            acc = 0.0f;
+            float d = (p1 - p0).norm();
 
-            // 生成下一段随机距离
-            target = dist(rng);
+            acc += d;
+
+            if (acc >= target)
+            {
+                result.push_back(path[i]);
+
+                // 重置累计距离
+                acc = 0.0f;
+
+                // 生成下一段随机距离
+                target = dist(rng);
+            }
         }
-    }
 
-    return result;
-}
+        return result;
+    }
 
     float Terrain::pathLength(const std::vector<int> &path) const
     {
@@ -2072,38 +2071,93 @@ namespace terrain
     }
 
     std::vector<Attractor> Terrain::generateAttractors(
-        int count,
+        const std::vector<Eigen::Vector2f> &mainRoadsPts,
         float maxSlope,
-        float radius) const
+        float radiusParam) const
     {
+        using Vector2f = Eigen::Vector2f;
         std::vector<Attractor> attractors;
-        attractors.reserve(count);
 
-        std::mt19937 rng(1234);
-        std::uniform_real_distribution<float> dx(aabb2.min().x(), aabb2.max().x());
-        std::uniform_real_distribution<float> dy(aabb2.min().y(), aabb2.max().y());
+        float terrain_width = width * cellSize;
 
-        int tries = 0;
+        // 1. 地形边界矩形
+        std::vector<Vector2f> terrainBounding2 = {
+            {-terrain_width / 2.f, -terrain_width / 2.f},
+            {terrain_width / 2.f, -terrain_width / 2.f},
+            {terrain_width / 2.f, terrain_width / 2.f},
+            {-terrain_width / 2.f, terrain_width / 2.f}};
 
-        while (attractors.size() < count && tries < count * 10)
+        // 2. Poisson 分布采样
+        std::vector<Vector2f> samplePoints = util::Math2<float>::gen_poisson_sites_in_poly(
+            terrainBounding2,
+            radiusParam, // 半径
+            30,
+            static_cast<unsigned>(time(nullptr)));
+
+        // 3. 合并 mainRoadsPts 和 samplePoints
+        std::vector<Vector2f> allPoints;
+        allPoints.reserve(mainRoadsPts.size() + samplePoints.size());
+        allPoints.insert(allPoints.end(), mainRoadsPts.begin(), mainRoadsPts.end());
+        allPoints.insert(allPoints.end(), samplePoints.begin(), samplePoints.end());
+
+        field::PointCloud2D<float> cloud(allPoints);
+
+        // 4. KDTree 构建
+        using KDTree = nanoflann::KDTreeSingleIndexAdaptor<
+            nanoflann::L2_Simple_Adaptor<float, field::PointCloud2D<float>>,
+            field::PointCloud2D<float>,
+            2>;
+
+        KDTree tree(2, cloud, nanoflann::KDTreeSingleIndexAdaptorParams(10));
+        tree.buildIndex();
+
+        const float searchRadius = radiusParam;
+        const float radius2 = searchRadius * searchRadius;
+
+        nanoflann::SearchParameters params;
+        std::vector<nanoflann::ResultItem<uint32_t, float>> matches;
+
+        std::unordered_set<int> needRemoveIndices;
+
+        for (size_t i = 0; i < allPoints.size(); ++i)
         {
-            tries++;
+            matches.clear();
+            const float query_pt[2] = {allPoints[i].x(), allPoints[i].y()};
 
-            Eigen::Vector2f p(dx(rng), dy(rng));
+            tree.radiusSearch(query_pt, radius2, matches, params);
 
+            for (auto &m : matches)
+            {
+                size_t j = m.first;
+                if (j == i)
+                    continue;
+
+                // 如果 j 是 mainRoadPts 索引，则标记需要移除
+                if (j < mainRoadsPts.size())
+                    needRemoveIndices.insert(j);
+            }
+        }
+
+        // 5. 遍历 samplePoints 生成吸引点
+        for (size_t i = 0; i < samplePoints.size(); ++i)
+        {
+            const auto &p = samplePoints[i];
             TerrainPoint t;
 
             if (!sampleTerrainPtAt(t, p))
                 continue;
 
-            // 只在坡度较小地方生成居民区
-            if ((t.slope > maxSlope && t.aspect > 0.9375f * field::Litten_M_PI) || (t.slope > maxSlope && t.aspect < 0.0625f * field::Litten_M_PI))
+            // 如果离 mainRoad 太近
+            if (needRemoveIndices.find(i) != needRemoveIndices.end())
+                continue;
+
+            // 坡度条件：坡度 < maxSlope，并且坡向不完全朝北
+            if ((t.slope > maxSlope && (t.aspect > 0.9375f * field::Litten_M_PI || t.aspect < 0.0625f * field::Litten_M_PI)))
                 continue;
 
             Attractor a;
             a.pos = p;
-            a.radius = radius;
-
+            a.radius = radiusParam;
             attractors.push_back(a);
         }
 
@@ -2115,7 +2169,7 @@ namespace terrain
         const Eigen::Vector2f &curDir,
         const std::vector<Attractor> &attractors,
         const field::TensorField2D<float> &field,
-         float influenceRadius) const
+        float influenceRadius) const
     {
         Eigen::Vector2f tensorDir(0, 0);
 
@@ -2172,7 +2226,7 @@ namespace terrain
         return target;
     }
 
-    std::vector<std::vector<Eigen::Vector2f>>Terrain::generateSecondaryRoads(
+    std::vector<std::vector<Eigen::Vector2f>> Terrain::generateSecondaryRoads(
         const field::TensorField2D<float> &field,
         const std::vector<int> &seeds,
         std::vector<Attractor> &attractors,
@@ -2228,24 +2282,20 @@ namespace terrain
     RoadNetwork Terrain::generateRoadNetwork(const field::TensorField2D<float> &field, const std::vector<int> &mainRoads,
                                              float minInterval,
                                              float maxInterval,
-                                             int seed)const
+                                             int seed) const
     {
         RoadNetwork net;
 
         // STEP1 attractors
-        auto attractors = generateAttractors(
-            2000,
-            25,
-            20.f);
+        auto attractors = generateAttractors(35, 60.f);
 
         // STEP2 branch seeds
         auto seeds = sampleVerticesByDistance(mainRoads, 8);
 
         // STEP3 secondary roads
-        auto secondary = generateSecondaryRoads(field,seeds,attractors,10.f,80.f,15.f,200);
+        auto secondary = generateSecondaryRoads(field, seeds, attractors, 10.f, 80.f, 15.f, 200);
 
         // STEP4 tertiary roads
-       
 
         return net;
     }
