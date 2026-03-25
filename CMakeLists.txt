@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.12.0)
+cmake_minimum_required(VERSION 4.1.0)
 project(TerrainBuildingLayout
     VERSION 0.0.1
     DESCRIPTION "Generate building layout automatically matched with terrain"
@@ -10,6 +10,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 enable_testing()
 enable_language(CUDA)
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=/Zc:preprocessor")
 #set lib output for windows dll
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 

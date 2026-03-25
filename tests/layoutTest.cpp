@@ -6,12 +6,14 @@
 #include "tensorField.h"
 #include "renderUtil.h"
 #include "diffVoronoi.h"
+#include "SCARoadGenerator.h"
 
 using namespace geo;
 using namespace render;
 using namespace terrain;
 using namespace Eigen;
 using namespace layout;
+using namespace SCARoad;
 
 int main()
 {
@@ -38,7 +40,7 @@ int main()
     static bool showFieldLine = false;
     static float terrainWeight = 2.f;
     bool terrainfieldWeightChanged = false;
-   
+
     bool viewPtChanged = false;
     bool showViewPt = false;
     field::Polyline2_t<float> poly = field::createRandomPolygon(ptNum, scale, threshold, Vector2f(0.f, 0.f));
@@ -88,7 +90,6 @@ int main()
     // ===== Fixed sites =====
     torch::Tensor site_xy = diffVoronoi::vec2_to_tensor(totalSeedResult.samples);
 
-
     SoftRVDModel softModel(grid_xy, terrain_h, site_xy, 1, {0, 1}, beta, tau);
     SoftRVDShowData showData;
     std::cout << "softmodel built" << std::endl;
@@ -96,6 +97,37 @@ int main()
     bool isOptimizing = false;
     static int maxIter = 300;
     int curIter = 0;
+
+    srand((unsigned)time(nullptr));
+
+    SCANetwork net;
+
+    // ============================
+    // 1. 初始化 seeds
+    // ============================
+    SCANode root;
+    root.position = Eigen::Vector2f(0, 0);
+    net.nodes.push_back(root);
+
+    // ============================
+    // 2. 初始化 attractors
+    // ============================
+    std::vector<Eigen::Vector2f> attractPos;
+    net.attractors = getRandomAttractors(700, 512, 512, attractPos);
+    net.buildKDTree();
+
+    std::cout << "Init nodes: " << net.nodes.size() << "\n";
+    std::cout << "Init attractors: " << net.attractors.size() << "\n";
+
+    // ============================
+    // 3. 迭代
+    // ============================
+    int maxSCAIter = 800;
+    auto roads = net.extractRoads();
+    int scaIter = 0;
+    bool scaUpdated = false;
+
+    bool growthStopped = false;
     rlImGuiSetup(true);
     render.runMainLoop(render::FrameCallbacks{
         [&]() { // 按键更新，重新绘图等事件，poly修改过需要重新fill
@@ -182,18 +214,67 @@ int main()
             {
                 terrain.applyFaceColor();
             }
-           
+
+            if (IsKeyPressed(KEY_R))
+            {
+
+                scaUpdated = true;
+                scaIter = 0;
+
+                net.nodes.clear();
+                net.attractors.clear();
+
+                // 重新初始化
+                SCANode root;
+                root.position = Eigen::Vector2f(0, 0);
+                net.nodes.push_back(root);
+
+                net.attractors = getRandomAttractors(700, 512, 512, attractPos);
+
+                net.buildKDTree();
+                roads.clear();
+            }
+
+            if (scaUpdated)
+            {
+                if (scaIter < maxSCAIter)
+                {
+                    scaIter++;
+                    net.update(growthStopped);
+                    roads = net.extractRoads();
+                    std::cout << "[Iter " << scaIter << "] "
+                              << "nodes=" << net.nodes.size()
+                              << " attractors=" << net.attractors.size()
+                              << "\n";
+                    if (growthStopped)
+                        scaUpdated = false;
+                    if (net.attractors.empty())
+                    {
+                        scaUpdated = false;
+                        std::cout << "All attractors consumed.\n";
+                    }
+                }
+                else
+                    scaUpdated = false;
+            }
+
         },
         [&]() { // 3维空间绘图内容部分
-             terrain.draw();
+            // terrain.draw();
             //  layout.drawTerrain(RL_GRAY, 0.8f, true, 0.5f);
             terrain.drawContours(layers);
             if (showViewPt)
             {
                 DrawSphere({terrain.testViewPt.x(), terrain.observeHeight, -terrain.testViewPt.y()}, 1.f, RL_GRAY);
             }
-            
-            
+
+            for (const auto &road : roads)
+            {
+                render::draw_bold_polyline2(road, render.lineData.color, 0.f, render.lineData.Thickness, render.lineData.color.a);
+                render::draw_points(road, RL_GREEN, 1.f, render.ptData.size / 2.f);
+            }
+            render::draw_points(attractPos, render.ptData.color, 1.f, render.ptData.size);
+
             // showData.draw();
             // DrawLine3D({0, 0, 0}, {10000, 0, 0}, RL_RED);
             // DrawLine3D({0, 0, 0}, {0, 10000, 0}, RL_BLUE);
@@ -224,7 +305,10 @@ int main()
             //     render::fill_polygon2(rvd.getCellPolys()[i].points, c, 0.f, 0.3f, {terrain_width / 2.f, 0});
             //     render::stroke_bold_polygon2(rvd.getCellPolys()[i].points, RL_BLACK, 0.f, 0.07f, 1.f, {terrain_width / 2.f, 0});
             // }
+            //  render::draw_points(samplePoints2, render.ptData.color, 1.f, render.ptData.size / 2.f,0.f,{terrain_width / 2.f, 0});
             // render::draw_points(layout.rotedCenters, render.ptData.color, 1.f, render.ptData.size / 2.f);
+            // render::draw_points(layout.sampleCenters, RL_RED, 1.f, render.ptData.size);
+            // render::draw_points(layout.grids, render.ptData.color, 1.f, render.ptData.size / 1.5f);
             // render::stroke_bold_polygon2(boundOffset.points, RL_BLACK, 0.f, 0.07f, 1.f, {terrain_width / 2.f, 0});
             // render::draw_points(totalSeedResult.samples, render.ptData.color, 1.f, render.ptData.size * 1.5f, 0, {terrain_width / 2.f, 0.f});
 

@@ -97,8 +97,7 @@ namespace layout
     }
 
     template <typename Scalar>
-    RectCell<Scalar>
-    RectVoronoi2D<Scalar>::computeCell(int idx, const SeparateRegion &region) const
+    RectCell<Scalar> RectVoronoi2D<Scalar>::computeCell(int idx, const SeparateRegion &region) const
     {
         const auto &p = pts[idx].pos;
 
@@ -197,6 +196,7 @@ namespace layout
         using SurfaceMesh = geo::SurfaceMesh;
         template <typename Scalar>
         using Vector2 = Eigen::Matrix<Scalar, 2, 1>;
+        using Vector3 = Eigen::Matrix<Scalar, 3, 1>;
 
     public:
         BuildingLayout() = default;
@@ -219,9 +219,10 @@ namespace layout
         Eigen::Matrix<Scalar, 2, 2> Rinv;
         std::vector<Scalar> heightMap;
         std::vector<Vector2<Scalar>> rotedCenters;
+        std::vector<Eigen::Vector3<Scalar>> sampleCenters;
         Scalar divGap;
         // std::vector<Vector2<Scalar>> rotedVertices;
-        // std::vector<Eigen::Vector3<Scalar>> rotedGrids;
+        std::vector<Eigen::Vector3<Scalar>> grids;
         SurfaceMesh heMesh;
     };
 
@@ -298,11 +299,12 @@ namespace layout
             for (int j = 0; j <= ny; ++j)
             {
                 Vector2<Scalar> v = newP0 + dirW * i + dirH * j;
-                // rotedVertices.push_back(R * v);
+
                 vtx[i][j] = heMesh.add_vertex(geo::to_cgal_point(v, Scalar(0)));
                 Scalar height = Scalar(0);
                 bool success = terrain.sampleHeightAt(height, v);
                 // heightMap.push_back(height);
+                grids.push_back({v.x(), v.y(), height});
                 geo::Vertex mv({(float)v.x(), (float)v.y(), (float)height});
                 meshData.vertices.push_back(mv);
             }
@@ -333,6 +335,7 @@ namespace layout
                 bool success = terrain.sampleHeightAt(height, center);
                 heightMap.push_back(height);
                 // std::cout<<"height is :"<< height <<std::endl;
+                sampleCenters.push_back({Scalar(c3.x()), Scalar(c3.y()), height});
 
                 // rotedGrids.push_back({rotedCenter.x(),rotedCenter.y(), height});
                 uint32_t i0 = i * (ny + 1) + j;
@@ -528,7 +531,8 @@ namespace layout
         float lambda_far = 1.0f;
         float lambda_terrain = 0.5f;
         float lambda_entropy = 0.01f;
-std::unique_ptr<torch::optim::Adam> lloyd_optimizer;
+        std::unique_ptr<torch::optim::Adam> lloyd_optimizer;
+
     public:
         SoftRVDModel(
             const torch::Tensor &grid_xy_,
@@ -548,8 +552,8 @@ std::unique_ptr<torch::optim::Adam> lloyd_optimizer;
         void optimizeLloyd(int iters = 250,
                            float lr = 0.05f,
                            int verbose_every = 50);
-        void stepOptimizeLloyd(int& curIter,const int maxIter);
-        void stepOptimize(int& curIter, const int maxIter);
+        void stepOptimizeLloyd(int &curIter, const int maxIter);
+        void stepOptimize(int &curIter, const int maxIter);
         void drawGrids(float z = 0.f, float size = 1.f, const Eigen::Vector2f &offset = Eigen::Vector2f(0.f, 0.f)) const;
         void drawTerrain(const std::vector<float> &heights, float z = 0.f, float size = 1.f, const Eigen::Vector2f &offset = Eigen::Vector2f(0.f, 0.f)) const;
     };

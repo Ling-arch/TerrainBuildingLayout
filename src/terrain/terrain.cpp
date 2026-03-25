@@ -2098,11 +2098,85 @@ namespace terrain
         return roads;
     }
 
+    float Terrain::computeAttractorRadius(
+        const Eigen::Vector2f &pos,             // 吸引点坐标
+        const std::vector<float> &radiusLevels, // 半径档位数组
+        float threshold,                        // 分数阈值
+        float thresholdPercent) const           // 高分占比阈值
+    {
+        // 最大半径
+        float rMax = radiusLevels.front(); // 假设 radiusLevels 从大到小排序
+
+        // 1. 将 pos 映射到网格坐标
+        float halfWidth = width * cellSize / 2.f;
+        float halfHeight = height * cellSize / 2.f;
+
+        int cx = static_cast<int>(std::round((pos.x() + halfWidth) / cellSize));
+        int cy = static_cast<int>(std::round((pos.y() + halfHeight) / cellSize));
+
+        // 2. 最大半径对应索引范围
+        int dr = static_cast<int>(std::ceil(rMax / cellSize));
+
+        int x0 = std::max(cx - dr, 0);
+        int x1 = std::min(cx + dr, width);
+        int y0 = std::max(cy - dr, 0);
+        int y1 = std::min(cy + dr, height);
+
+        // 3. 遍历最大半径范围的顶点，先存到临时数组
+        struct VertexInfo
+        {
+            int idx;
+            float score;
+            Eigen::Vector2f pos;
+        };
+        std::vector<VertexInfo> localVerts;
+
+        for (int y = y0; y <= y1; ++y)
+        {
+            for (int x = x0; x <= x1; ++x)
+            {
+                int idx = vertexIndex(x, y);
+                const auto &v = mesh.vertices[idx];
+                float s = vertexScores[idx];
+                localVerts.push_back({idx, s, v.position.head<2>()});
+            }
+        }
+
+        // 4. 按 radiusLevels 检查每个档位
+        for (float r : radiusLevels)
+        {
+            int insideCount = 0;
+            int highScoreCount = 0;
+
+            float rSq = r * r;
+
+            for (auto &v : localVerts)
+            {
+                float dx = std::abs(v.pos.x() - pos.x());
+                float dy = std::abs(v.pos.y() - pos.y());
+
+                if (dx <= r && dy <= r) // 正方形范围
+                {
+                    insideCount++;
+                    if (v.score > threshold)
+                        highScoreCount++;
+                }
+            }
+
+            if (insideCount > 0 && static_cast<float>(highScoreCount) / insideCount >= thresholdPercent)
+                return r;
+        }
+
+        return radiusLevels.back(); // 最小半径
+    }
+
     std::vector<Attractor> Terrain::generateAttractors(
         const std::vector<Eigen::Vector2f> &mainRoadsPts,
         float maxSlope,
         float possionRadius,
-    float searchInterval) const
+        const std::vector<float> &radiusLevels, // 半径档位数组
+        float threshold,                        // 分数阈值
+        float thresholdPercent) const
     {
         using Vector2f = Eigen::Vector2f;
         std::vector<Attractor> attractors;
@@ -2124,48 +2198,47 @@ namespace terrain
             static_cast<unsigned>(time(nullptr)));
 
         // 3. 合并 mainRoadsPts 和 samplePoints
-        std::vector<Vector2f> allPoints;
-        allPoints.reserve(mainRoadsPts.size() + samplePoints.size());
-        allPoints.insert(allPoints.end(), mainRoadsPts.begin(), mainRoadsPts.end());
-        allPoints.insert(allPoints.end(), samplePoints.begin(), samplePoints.end());
+        // std::vector<Vector2f> allPoints;
+        // allPoints.reserve(mainRoadsPts.size() + samplePoints.size());
+        // allPoints.insert(allPoints.end(), mainRoadsPts.begin(), mainRoadsPts.end());
+        // allPoints.insert(allPoints.end(), samplePoints.begin(), samplePoints.end());
 
-        field::PointCloud2D<float> cloud(allPoints);
+        // field::PointCloud2D<float> cloud(allPoints);
 
-        // 4. KDTree 构建
-        using KDTree = nanoflann::KDTreeSingleIndexAdaptor<
-            nanoflann::L2_Simple_Adaptor<float, field::PointCloud2D<float>>,
-            field::PointCloud2D<float>,
-            2>;
+        // // 4. KDTree 构建
+        // using KDTree = nanoflann::KDTreeSingleIndexAdaptor<
+        //     nanoflann::L2_Simple_Adaptor<float, field::PointCloud2D<float>>,
+        //     field::PointCloud2D<float>,
+        //     2>;
 
-        KDTree tree(2, cloud, nanoflann::KDTreeSingleIndexAdaptorParams(10));
-        tree.buildIndex();
+        // KDTree tree(2, cloud, nanoflann::KDTreeSingleIndexAdaptorParams(10));
+        // tree.buildIndex();
 
-       
-        const float radius2 = searchInterval * searchInterval;
+        // const float radius2 = searchInterval * searchInterval;
 
-        nanoflann::SearchParameters params;
-        std::vector<nanoflann::ResultItem<uint32_t, float>> matches;
+        // nanoflann::SearchParameters params;
+        // std::vector<nanoflann::ResultItem<uint32_t, float>> matches;
 
-        std::unordered_set<int> needRemoveIndices;
+        // std::unordered_set<int> needRemoveIndices;
 
-        for (size_t i = 0; i < allPoints.size(); ++i)
-        {
-            matches.clear();
-            const float query_pt[2] = {allPoints[i].x(), allPoints[i].y()};
+        // for (size_t i = 0; i < allPoints.size(); ++i)
+        // {
+        //     matches.clear();
+        //     const float query_pt[2] = {allPoints[i].x(), allPoints[i].y()};
 
-            tree.radiusSearch(query_pt, radius2, matches, params);
+        //     tree.radiusSearch(query_pt, radius2, matches, params);
 
-            for (auto &m : matches)
-            {
-                size_t j = m.first;
-                if (j == i)
-                    continue;
+        //     for (auto &m : matches)
+        //     {
+        //         size_t j = m.first;
+        //         if (j == i)
+        //             continue;
 
-                // 如果 j 是 mainRoadPts 索引，则标记需要移除
-                if (j < mainRoadsPts.size())
-                    needRemoveIndices.insert(j);
-            }
-        }
+        //         // 如果 j 是 mainRoadPts 索引，则标记需要移除
+        //         if (j < mainRoadsPts.size())
+        //             needRemoveIndices.insert(j);
+        //     }
+        // }
 
         // 5. 遍历 samplePoints 生成吸引点
         for (size_t i = 0; i < samplePoints.size(); ++i)
@@ -2176,9 +2249,9 @@ namespace terrain
             if (!sampleTerrainPtAt(t, p))
                 continue;
 
-            // 如果离 mainRoad 太近
-            if (needRemoveIndices.find(i) != needRemoveIndices.end())
-                continue;
+            // // 如果离 mainRoad 太近
+            // if (needRemoveIndices.find(i) != needRemoveIndices.end())
+            //     continue;
 
             // 坡度条件：坡度 < maxSlope，并且坡向不完全朝北
             if ((t.slope > maxSlope && (t.aspect > 0.9375f * field::Litten_M_PI || t.aspect < 0.0625f * field::Litten_M_PI)))
@@ -2186,7 +2259,8 @@ namespace terrain
 
             Attractor a;
             a.pos = p;
-            a.radius = possionRadius;
+            float radius = computeAttractorRadius(p, radiusLevels, threshold, thresholdPercent);
+            a.radius = radius;
             attractors.push_back(a);
         }
 
@@ -2255,92 +2329,267 @@ namespace terrain
         return target;
     }
 
-    std::vector<std::vector<Eigen::Vector2f>> Terrain::generateSecondaryRoads(
-        const field::TensorField2D<float> &field,
-        const std::vector<Eigen::Vector2f> &seeds, // 每个 seed 是坐标，不是索引
-        std::vector<Attractor> &attractors,
-        float stepSize,
-        float influenceRadius,
-        float killRadius,
-        int maxSteps) const
+   std::vector<std::vector<Eigen::Vector2f>> Terrain::generateSecondaryRoads(
+    const field::TensorField2D<float> &field,
+    const std::vector<Eigen::Vector2f> &seeds,
+    std::vector<Attractor> &attractors,
+    float stepSize,
+    float influenceRadius,
+    float killRadius,
+    int maxSteps) const
+{
+    std::vector<std::vector<Eigen::Vector2f>> roads;
+
+    if (attractors.empty() || seeds.empty())
     {
-        std::vector<std::vector<Eigen::Vector2f>> roads;
-
-        // 遍历每一个 seed 点
-        for (Eigen::Vector2f seedPos : seeds) // 注意这里是值传递，可修改
-        {
-            Eigen::Vector2f pos = seedPos; // 当前迭代位置
-            Eigen::Vector2f dir(1, 0);     // 初始方向，可根据需要调整
-
-            std::vector<Eigen::Vector2f> road;
-            road.push_back(pos); // 将起点加入道路
-
-            // 道路迭代生长
-            for (int step = 0; step < maxSteps; ++step)
-            {
-                // 根据张量场 + 吸引点计算当前方向
-                Eigen::Vector2f newDir = computeSteering(pos, dir, attractors, field, influenceRadius);
-
-                // 沿 newDir 前进一步
-                Eigen::Vector2f newPos = pos + newDir * stepSize;
-
-                // 检查是否在地形范围内
-                if (!aabb2.contains(newPos))
-                    break;
-
-                road.push_back(newPos);
-
-                // 更新当前位置与方向
-                pos = newPos;
-                dir = newDir;
-
-                // 删除被覆盖的吸引点
-                attractors.erase(
-                    std::remove_if(
-                        attractors.begin(),
-                        attractors.end(),
-                        [&](const Attractor &a)
-                        {
-                            return (a.pos - pos).norm() < killRadius;
-                        }),
-                    attractors.end());
-            }
-
-            // 道路至少包含 2 个点才加入结果
-            if (road.size() > 2)
-                roads.push_back(road);
-        }
-
+        std::cout << "[SecondaryRoad] Empty seeds or attractors\n";
         return roads;
     }
 
-    RoadNetwork Terrain::generateRoadNetwork(const field::TensorField2D<float> &field, const std::vector<std::vector<int>> &mainRoads,
-                                             int minInterval,
-                                             int maxInterval,
-                                             
-                                             int seed) const
-    {
-        RoadNetwork net;
+    // ================================
+    // 1. 初始化
+    // ================================
+    std::vector<Eigen::Vector2f> growthNodes = seeds;
+    std::vector<Eigen::Vector2f> growthDirs(seeds.size(), Eigen::Vector2f(1, 0));
+    std::vector<int> parentIndices(seeds.size(), -1);
 
+    std::cout << "[SecondaryRoad] Init seeds: " << seeds.size() << "\n";
+    std::cout << "[SecondaryRoad] Init attractors: " << attractors.size() << "\n";
+
+    // ================================
+    // 2. 迭代
+    // ================================
+    int iteration = 0;
+
+    while (iteration < maxSteps && !attractors.empty())
+    {
+        size_t nodeCount = growthNodes.size();
+
+        // 🚨 防止爆炸
+        if (nodeCount > 100000)
+        {
+            std::cout << "[STOP] Node overflow\n";
+            break;
+        }
+
+        // ============================
+        // Step1: attractor → 最近 node
+        // ============================
+        std::vector<Eigen::Vector2f> nodeAccumDir(nodeCount, Eigen::Vector2f(0, 0));
+        std::vector<int> nodeInfluenceCount(nodeCount, 0);
+
+        for (const auto &a : attractors)
+        {
+            int closest = -1;
+            float minDist = FLT_MAX;
+
+            for (int i = 0; i < nodeCount; ++i)
+            {
+                float d = (a.pos - growthNodes[i]).squaredNorm();
+                if (d < minDist)
+                {
+                    minDist = d;
+                    closest = i;
+                }
+            }
+
+            if (closest >= 0 && sqrt(minDist) < influenceRadius)
+            {
+                nodeAccumDir[closest] += (a.pos - growthNodes[closest]).normalized();
+                nodeInfluenceCount[closest]++;
+            }
+        }
+
+        // ============================
+        // Step2: 生成新节点
+        // ============================
+        std::vector<Eigen::Vector2f> newNodes;
+        std::vector<Eigen::Vector2f> newDirs;
+        std::vector<int> newParents;
+
+        for (int i = 0; i < nodeCount; ++i)
+        {
+            if (nodeInfluenceCount[i] == 0)
+                continue;
+
+            Eigen::Vector2f attractDir = nodeAccumDir[i].normalized();
+            Eigen::Vector2f nodeDir = growthDirs[i];
+
+            // ===== Tensor direction =====
+            Eigen::Vector2f tensorDir(0, 0);
+            auto dirs = field.getTensorAt(growthNodes[i]);
+
+            float bestDot = -1;
+            for (auto &d : dirs)
+            {
+                float dot = d.dot(nodeDir);
+                if (dot > bestDot)
+                {
+                    bestDot = dot;
+                    tensorDir = d;
+                }
+            }
+
+            // ===== 融合方向 =====
+            Eigen::Vector2f growDir;
+            if (tensorDir.norm() > 1e-6f)
+                growDir = 0.7f * tensorDir + 0.3f * attractDir;
+            else
+                growDir = attractDir;
+
+            if (growDir.norm() < 1e-6f)
+                continue;
+
+            growDir.normalize();
+
+            Eigen::Vector2f newPos = growthNodes[i] + growDir * stepSize;
+
+            // 越界检测
+            if (!aabb2.contains(newPos))
+                continue;
+
+            // 🚨 去重（防爆）
+            bool tooClose = false;
+            for (const auto &n : growthNodes)
+            {
+                if ((n - newPos).squaredNorm() < (stepSize * 0.5f) * (stepSize * 0.5f))
+                {
+                    tooClose = true;
+                    break;
+                }
+            }
+            if (tooClose)
+                continue;
+
+            newNodes.push_back(newPos);
+            newDirs.push_back(growDir);
+            newParents.push_back(i);
+        }
+
+        if (newNodes.empty())
+        {
+            std::cout << "[STOP] No new nodes\n";
+            break;
+        }
+
+        // ============================
+        // Step3: 添加节点
+        // ============================
+        size_t prevNodeCount = growthNodes.size();
+
+        growthNodes.insert(growthNodes.end(), newNodes.begin(), newNodes.end());
+        growthDirs.insert(growthDirs.end(), newDirs.begin(), newDirs.end());
+        parentIndices.insert(parentIndices.end(), newParents.begin(), newParents.end());
+
+        // ============================
+        // Step4: 删除 attractors
+        // ============================
+        size_t before = attractors.size();
+
+        attractors.erase(
+            std::remove_if(
+                attractors.begin(),
+                attractors.end(),
+                [&](const Attractor &a)
+                {
+                    for (const auto &n : newNodes)
+                    {
+                        if ((a.pos - n).squaredNorm() < killRadius * killRadius)
+                            return true;
+                    }
+                    return false;
+                }),
+            attractors.end());
+
+        size_t removed = before - attractors.size();
+
+        // ============================
+        // Debug
+        // ============================
+        std::cout << "[Iter " << iteration << "] "
+                  << "nodes=" << growthNodes.size()
+                  << " new=" << newNodes.size()
+                  << " removedAttr=" << removed
+                  << " remainAttr=" << attractors.size()
+                  << "\n";
+
+        iteration++;
+    }
+
+    // ================================
+    // 3. 构建 children
+    // ================================
+    std::vector<std::vector<int>> children(growthNodes.size());
+
+    for (int i = 0; i < parentIndices.size(); ++i)
+    {
+        int p = parentIndices[i];
+        if (p >= 0)
+            children[p].push_back(i);
+    }
+
+    // ================================
+    // 4. DFS 提取 roads
+    // ================================
+    std::function<void(int, std::vector<Eigen::Vector2f>&)> dfs;
+
+    dfs = [&](int node, std::vector<Eigen::Vector2f> &path)
+    {
+        path.push_back(growthNodes[node]);
+
+        if (children[node].empty())
+        {
+            if (path.size() > 2)
+                roads.push_back(path);
+            return;
+        }
+
+        for (int c : children[node])
+        {
+            std::vector<Eigen::Vector2f> newPath = path;
+            dfs(c, newPath);
+        }
+    };
+
+    for (int i = 0; i < seeds.size(); ++i)
+    {
+        std::vector<Eigen::Vector2f> path;
+        dfs(i, path);
+    }
+
+    std::cout << "[SecondaryRoad] Generated roads: " << roads.size() << "\n";
+
+    return roads;
+}
+
+    std::vector<std::vector<Eigen::Vector2f>> Terrain::generateRoadNetwork(const field::TensorField2D<float> &field, const std::vector<std::vector<int>> &path,
+                                        int minInterval,
+                                        int maxInterval,
+                                        int seed,
+                                        const std::vector<float> &radiusLevels,
+                                        float threshold,              
+                                        float thresholdPercent,
+                                        int maxSteps) const
+    {
+  
         // STEP1 branch seeds
         std::vector<Eigen::Vector2f> totalSeeds;
         std::vector<Eigen::Vector2f> sampledRoadsPts;
-        for (const auto &roadPath : mainRoads)
+        for (const auto &roadPath : path)
         {
             std::vector<Eigen::Vector2f> resampled;
             auto seeds = sampleVerticesByDistance(roadPath, 1.5, minInterval, maxInterval, seed, resampled);
             totalSeeds.insert(totalSeeds.end(), seeds.begin(), seeds.end());
-            sampledRoadsPts.insert(sampledRoadsPts.end(), resampled.begin(),resampled.end());
+            sampledRoadsPts.insert(sampledRoadsPts.end(), resampled.begin(), resampled.end());
         }
 
         // STEP2 attractors
-        auto attractors = generateAttractors(sampledRoadsPts, 35, 60.f, (minInterval + maxInterval)/3.f);
+        auto attractors = generateAttractors(sampledRoadsPts, 0.62f, 20.f, radiusLevels, threshold, thresholdPercent);
 
         // STEP3 secondary roads
-        auto secondary = generateSecondaryRoads(field, totalSeeds, attractors, 3.f, 80.f, 15.f, 600);
+        auto secondary = generateSecondaryRoads(field, totalSeeds, attractors, 3.f, 80.f, 15.f, maxSteps);
 
-
-        return net;
+        return secondary;
     }
 
     std::vector<field::Polyline2_t<float>> Terrain::convertRoadToFieldLine(const std::vector<Road> roads) const

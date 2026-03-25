@@ -50,3 +50,13 @@
 
 #thirdparty
 /thirdparty
+/SCA
+
+#doc
+*.docx
+*.pdf
+*.doc
+
+
+#config
+*.ini

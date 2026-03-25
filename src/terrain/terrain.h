@@ -290,7 +290,14 @@ namespace terrain
         void computeRegionCenter(RegionInfo &region) const;
         Eigen::Vector3f computeForwardDirection(const std::vector<int> &path, int i) const;
         std::vector<std::vector<int>> buildMainRoads(std::vector<RegionInfo> &regions, int mainRegionCount, const std::vector<std::vector<geo::GraphEdge>> &adj) const;
-        std::vector<Attractor> generateAttractors(const std::vector<Eigen::Vector2f> &mainRoadsPts, float maxSlope, float possionRadius, float searchInterval) const;
+        float computeAttractorRadius(
+            const Eigen::Vector2f &pos,             // 吸引点位置
+            const std::vector<float> &radiusLevels, // 半径档位数组，例如 {35, 25, 15}
+            float threshold,
+            float thresholdPercent) const;                                                                                                                                                             
+        std::vector<Attractor> generateAttractors(const std::vector<Eigen::Vector2f> &mainRoadsPts, float maxSlope, float possionRadius,const std::vector<float> &radiusLevels, 
+                                                  float threshold,                                                                                                                                   
+                                                  float thresholdPercent) const;
         Eigen::Vector2f computeSteering(
             const Eigen::Vector2f &pos,
             const Eigen::Vector2f &curDir,
@@ -305,10 +312,14 @@ namespace terrain
             float influenceRadius,
             float killRadius,
             int maxSteps) const;
-        RoadNetwork generateRoadNetwork(const field::TensorField2D<float> &field, const std::vector<std::vector<int>> &path,
+        std::vector<std::vector<Eigen::Vector2f>> generateRoadNetwork(const field::TensorField2D<float> &field, const std::vector<std::vector<int>> &path,
                                         int minInterval,
                                         int maxInterval,
-                                        int seed) const;
+                                        int seed,
+                                        const std::vector<float> &radiusLevels,
+                                        float threshold,              
+                                        float thresholdPercent,
+                                        int maxSteps) const;
         std::vector<int> sampleVerticesByDistance(const std::vector<int> &path, float interval) const;
         std::vector<Eigen::Vector2f> sampleVerticesByDistance(
             const std::vector<int> &path,
