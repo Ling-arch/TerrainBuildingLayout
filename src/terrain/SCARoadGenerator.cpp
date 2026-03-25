@@ -1,4 +1,4 @@
-// d:\Thesis\TerrainBuildingLayout\src\terrain\secondaryRoadGenerator.cpp
+
 #include "SCARoadGenerator.h"
 #include <algorithm>
 #include <cmath>
@@ -138,7 +138,7 @@ namespace SCARoad
         // 参数
         // ============================
         const int MAX_NODES = 200000;
-        const float STEP_SIZE = 2.0f;
+        const float STEP_SIZE = 5.0f;
         const float MIN_DIST2 = 4.0f;
         const float CONNECT_DIST = 6.0f;
         const float CONNECT_DIST2 = CONNECT_DIST * CONNECT_DIST;
