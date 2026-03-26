@@ -131,7 +131,7 @@ namespace SCARoad
         return dir;
     }
 
-    void SCANetwork::update(bool& growthStopped)
+    void SCANetwork::update(bool &growthStopped)
     {
         growthStopped = false;
         // ============================
@@ -140,7 +140,7 @@ namespace SCARoad
         const int MAX_NODES = 200000;
         const float STEP_SIZE = 5.0f;
         const float MIN_DIST2 = 4.0f;
-        const float CONNECT_DIST = 6.0f;
+        const float CONNECT_DIST = 8.0f;
         const float CONNECT_DIST2 = CONNECT_DIST * CONNECT_DIST;
 
         if (nodes.size() > MAX_NODES)
@@ -223,31 +223,31 @@ namespace SCARoad
             // ============================
             // 3.1 去重
             // ============================
-            bool tooClose = false;
+            // bool tooClose = false;
 
-            for (const auto &n : nodes)
-            {
-                if ((n.position - newPos).squaredNorm() < MIN_DIST2)
-                {
-                    tooClose = true;
-                    break;
-                }
-            }
+            // for (const auto &n : nodes)
+            // {
+            //     if ((n.position - newPos).squaredNorm() < MIN_DIST2)
+            //     {
+            //         tooClose = true;
+            //         break;
+            //     }
+            // }
 
-            if (!tooClose)
-            {
-                for (const auto &n : newNodes)
-                {
-                    if ((n.position - newPos).squaredNorm() < MIN_DIST2)
-                    {
-                        tooClose = true;
-                        break;
-                    }
-                }
-            }
+            // if (!tooClose)
+            // {
+            //     for (const auto &n : newNodes)
+            //     {
+            //         if ((n.position - newPos).squaredNorm() < MIN_DIST2)
+            //         {
+            //             tooClose = true;
+            //             break;
+            //         }
+            //     }
+            // }
 
-            if (tooClose)
-                continue;
+            // if (tooClose)
+            //     continue;
 
             // ============================
             // 3.2 创建新节点
@@ -278,6 +278,8 @@ namespace SCARoad
         // ============================
         // ⭐ 5. 关键：闭环连接（真正生效版）
         // ============================
+        buildKDTree();
+
         for (int i = 0; i < newNodes.size(); ++i)
         {
             int newID = oldSize + i;
@@ -285,22 +287,76 @@ namespace SCARoad
 
             auto nearby = getNodesInRadius(newNode.position, CONNECT_DIST);
 
+            int bestOld = -1;
+            float bestOldScore = -1;
+
+            int bestNew = -1;
+            float bestNewScore = -1;
+
             for (int nid : nearby)
             {
-                // ❗不能连回自己父节点
                 if (nid == newNode.parent)
                     continue;
 
                 float d2 = (nodes[nid].position - newNode.position).squaredNorm();
+                if (d2 > CONNECT_DIST2)
+                    continue;
 
-                if (d2 < CONNECT_DIST2)
+                // ============================
+                // ⭐ 角度评估（关键）
+                // ============================
+
+                Eigen::Vector2f dirNew =
+                    (newNode.position - nodes[newNode.parent].position).normalized();
+
+                Eigen::Vector2f dirCandidate =
+                    (nodes[nid].position - newNode.position).normalized();
+
+                float dot = fabs(dirNew.dot(dirCandidate));
+
+                // 👉 理想：接近垂直（论文思想）
+                float angleScore = 1.0f - dot;
+
+                float score = angleScore / (1.0f + d2 * 0.1f);
+
+                // ============================
+                // ⭐ 分类：老节点 vs 新节点
+                // ============================
+
+                if (nid < oldSize)
                 {
-                    // 🔥 关键：直接改 parent（真正连接）
-                    newNode.parent = nid;
-
-                    // 👉 可选：避免多次连接
-                    break;
+                    if (score > bestOldScore)
+                    {
+                        bestOldScore = score;
+                        bestOld = nid;
+                    }
                 }
+                else
+                {
+                    if (score > bestNewScore)
+                    {
+                        bestNewScore = score;
+                        bestNew = nid;
+                    }
+                }
+            }
+
+            // ============================
+            // ⭐ 优先连接老节点（形成 loop）
+            // ============================
+
+            if (bestOld >= 0 && bestOldScore > 0.2f)
+            {
+                nodes[newID].extraLinks.push_back(bestOld);
+                nodes[bestOld].extraLinks.push_back(newID);
+            }
+            // ============================
+            // ⭐ 次选：新节点（防止断裂）
+            // ============================
+            else if (bestNew >= 0 && bestNewScore > 0.3f)
+            {
+                nodes[newID].extraLinks.push_back(bestNew);
+                nodes[bestNew].extraLinks.push_back(newID);
             }
         }
 
@@ -339,65 +395,226 @@ namespace SCARoad
         // ============================
         // 7. rebuild KDTree
         // ============================
-        buildKDTree();
+        //  buildKDTree();
     }
 
     std::vector<std::vector<Eigen::Vector2f>> SCANetwork::extractRoads() const
     {
-        if (nodes.empty())
-            return {};
         std::vector<std::vector<Eigen::Vector2f>> roads;
 
-        // ============================
-        // 1. build children
-        // ============================
-        std::vector<std::vector<int>> children(nodes.size());
+        if (nodes.empty())
+            return roads;
 
-        for (int i = 0; i < nodes.size(); ++i)
+        // ⭐ 防止重复边（无向图）
+        std::unordered_set<long long> visited;
+
+        auto edgeKey = [](int a, int b)
         {
-            int p = nodes[i].parent;
-            if (p >= 0)
-                children[p].push_back(i);
-        }
-
-        // ============================
-        // 2. DFS
-        // ============================
-        std::function<void(int, std::vector<Eigen::Vector2f> &)> dfs;
-
-        dfs = [&](int node, std::vector<Eigen::Vector2f> &path)
-        {
-            path.push_back(nodes[node].position);
-
-            // ===== 叶子节点 =====
-            if (children[node].empty())
-            {
-                if (path.size() > 1)
-                    roads.push_back(path);
-                return;
-            }
-
-            // ===== 分叉 =====
-            for (int c : children[node])
-            {
-                std::vector<Eigen::Vector2f> newPath = path;
-                dfs(c, newPath);
-            }
+            if (a > b)
+                std::swap(a, b);
+            return (static_cast<long long>(a) << 32) | b;
         };
 
         // ============================
-        // 3. 从 root 开始
+        // 1. parent edges（树边）
         // ============================
         for (int i = 0; i < nodes.size(); ++i)
         {
-            if (nodes[i].parent == -1) // root
+            int p = nodes[i].parent;
+
+            if (p >= 0)
             {
-                std::vector<Eigen::Vector2f> path;
-                dfs(i, path);
+                long long key = edgeKey(i, p);
+
+                if (visited.count(key) == 0)
+                {
+                    visited.insert(key);
+
+                    roads.push_back({nodes[i].position,
+                                     nodes[p].position});
+                }
+            }
+        }
+
+        // ============================
+        // 2. extra links（闭环边）
+        // ============================
+        for (int i = 0; i < nodes.size(); ++i)
+        {
+            for (int j : nodes[i].extraLinks)
+            {
+                long long key = edgeKey(i, j);
+
+                if (visited.count(key) == 0)
+                {
+                    visited.insert(key);
+
+                    roads.push_back({nodes[i].position,
+                                     nodes[j].position});
+                }
             }
         }
 
         return roads;
+    }
+
+    Eigen::Vector2f SCANetwork::clampDirection(
+        const Eigen::Vector2f &parentDir,
+        const Eigen::Vector2f &newDir) const
+    {
+        float dot = std::clamp(parentDir.dot(newDir), -1.f, 1.f);
+        float angle = std::acos(dot);
+
+        float minA = minBranchAngle * Litten_M_PI / 180.f;
+        float maxA = maxBranchAngle * Litten_M_PI / 180.f;
+
+        if (angle < minA || angle > maxA)
+        {
+            float target = (angle < minA) ? minA : maxA;
+
+            float sign = (parentDir.x() * newDir.y() - parentDir.y() * newDir.x()) > 0 ? 1.f : -1.f;
+
+            float c = std::cos(target);
+            float s = std::sin(target);
+
+            Eigen::Vector2f rotated(
+                parentDir.x() * c - sign * parentDir.y() * s,
+                parentDir.x() * sign * s + parentDir.y() * c);
+
+            return rotated.normalized();
+        }
+
+        return newDir;
+    }
+
+    float SCANetwork::computeIdealAngleScore(int nodeID, int candidateID) const
+    {
+        const auto &node = nodes[nodeID];
+        const auto &cand = nodes[candidateID];
+
+        Eigen::Vector2f dir = (cand.position - node.position).normalized();
+
+        std::vector<Eigen::Vector2f> existingDirs;
+
+        // parent
+        if (node.parent >= 0)
+        {
+            existingDirs.push_back(
+                (nodes[node.parent].position - node.position).normalized());
+        }
+
+        // children
+        for (int i = 0; i < nodes.size(); ++i)
+        {
+            if (nodes[i].parent == nodeID)
+            {
+                existingDirs.push_back(
+                    (nodes[i].position - node.position).normalized());
+            }
+        }
+
+        // extra links
+        for (int j : node.extraLinks)
+        {
+            existingDirs.push_back(
+                (nodes[j].position - node.position).normalized());
+        }
+
+        if (existingDirs.empty())
+            return 1.0f;
+
+        float minDot = 1.0f;
+
+        for (auto &d : existingDirs)
+        {
+            float dot = std::abs(d.dot(dir));
+            minDot = std::min(minDot, dot);
+        }
+
+        // 越小越好 → 转为分数
+        return 1.0f - minDot;
+    }
+
+    bool SCANetwork::formsTriangle(int a, int b) const
+    {
+        std::unordered_set<int> na;
+
+        // a 的邻居
+        if (nodes[a].parent >= 0)
+            na.insert(nodes[a].parent);
+
+        for (int i = 0; i < nodes.size(); ++i)
+            if (nodes[i].parent == a)
+                na.insert(i);
+
+        for (int j : nodes[a].extraLinks)
+            na.insert(j);
+
+        // b 的邻居
+        std::unordered_set<int> nb;
+
+        if (nodes[b].parent >= 0)
+            nb.insert(nodes[b].parent);
+
+        for (int i = 0; i < nodes.size(); ++i)
+            if (nodes[i].parent == b)
+                nb.insert(i);
+
+        for (int j : nodes[b].extraLinks)
+            nb.insert(j);
+
+        // 是否有公共邻居 → 三角形
+        for (int x : na)
+            if (nb.count(x))
+                return true;
+
+        return false;
+    }
+
+    void SCANetwork::buildConnections()
+    {
+        buildKDTree();
+
+        for (int i = 0; i < nodes.size(); ++i)
+        {
+            auto nearby = getNodesInRadius(nodes[i].position, connectDist);
+
+            std::vector<std::pair<float, int>> candidates;
+
+            for (int j : nearby)
+            {
+                if (j == i || j == nodes[i].parent)
+                    continue;
+
+                float dist = (nodes[j].position - nodes[i].position).norm();
+
+                float angleScore = computeIdealAngleScore(i, j);
+
+                float score = angleScore * idealAngleWeight + (1.0f / (dist + 1e-4f));
+
+                candidates.emplace_back(score, j);
+            }
+
+            std::sort(candidates.begin(), candidates.end(),
+                      [](auto &a, auto &b)
+                      { return a.first > b.first; });
+
+            int added = 0;
+
+            for (auto &c : candidates)
+            {
+                int j = c.second;
+
+                if (formsTriangle(i, j))
+                    continue;
+
+                nodes[i].extraLinks.push_back(j);
+
+                added++;
+                if (added >= maxExtraLinks)
+                    break;
+            }
+        }
     }
 
     std::vector<Attractor> getRandomAttractors(int num, float width, float height, std::vector<Eigen::Vector2f> &pos, const Eigen::Vector2f &center)

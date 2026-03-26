@@ -42,6 +42,7 @@ namespace SCARoad
         bool isTip = true;
         // 被哪些 attractor 影响（存 index）
         std::vector<int> influencedBy;
+        std::vector<int> extraLinks;
         SCANode() = default;
     };
 
@@ -53,6 +54,7 @@ namespace SCARoad
 
         // KDTree
         using PointCloud2D = field::PointCloud2D<float>;
+        float Litten_M_PI = field::Litten_M_PI;
         std::unique_ptr<PointCloud2D> cloud;
         using KDTree = nanoflann::KDTreeSingleIndexAdaptor<nanoflann::L2_Simple_Adaptor<float, PointCloud2D>, PointCloud2D, 2>;
         std::unique_ptr<KDTree> tree;
@@ -60,6 +62,14 @@ namespace SCARoad
         std::vector<std::pair<int, int>> edges; // 额外连接（闭环）
         float attractionDist = 50.f;
         float killDist = 10.f;
+        float minBranchAngle = 20.0f;
+        float maxBranchAngle = 90.0f;
+        int internodeLength = 5;
+
+        // ===== Phase 2 =====
+        float connectDist = 8.0f;
+        int maxExtraLinks = 2;
+        float idealAngleWeight = 0.7f;
 
         enum class VenationType
         {
@@ -71,8 +81,14 @@ namespace SCARoad
         int getClosestNode(int attractorID);
         std::vector<int> getRelativeNeighbors(int attractorID) const;
         Eigen::Vector2f getAverageDirection(int nodeID) const;
-        void update(bool& growthStopped);
-        std::vector<std::vector<Eigen::Vector2f>> extractRoads()const;
+        void update(bool &growthStopped);
+        std::vector<std::vector<Eigen::Vector2f>> extractRoads() const;
+        Eigen::Vector2f clampDirection(
+            const Eigen::Vector2f &parentDir,
+            const Eigen::Vector2f &newDir) const;
+        float computeIdealAngleScore(int nodeID, int candidateID) const;
+        bool formsTriangle(int a, int b) const;
+        void buildConnections();
     };
 
     inline float randomFloat(float min, float max)
@@ -86,6 +102,6 @@ namespace SCARoad
         return outMin + t * (outMax - outMin);
     }
 
-    std::vector<Attractor> getRandomAttractors(int num, float width, float height, std::vector<Eigen::Vector2f> &pos,const Eigen::Vector2f &center = Eigen::Vector2f(0.0f, 0.0f));
+    std::vector<Attractor> getRandomAttractors(int num, float width, float height, std::vector<Eigen::Vector2f> &pos, const Eigen::Vector2f &center = Eigen::Vector2f(0.0f, 0.0f));
 
 }
