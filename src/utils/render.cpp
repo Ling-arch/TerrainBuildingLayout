@@ -661,6 +661,8 @@ namespace render
 
     void Renderer3D::draw_index_fonts(const std::vector<Vector3> &world_pos, int size, Color color)
     {
+        if (world_pos.empty())
+            return;
         for (size_t i = 0; i < world_pos.size(); ++i)
         {
             Vector2 screen = GetWorldToScreen(world_pos[i], camera_);
@@ -681,6 +683,8 @@ namespace render
 
     void Renderer3D::draw_index_fonts(const std::vector<Vec3> &world_pos, int size, Color color, Vec3 move)
     {
+        if (world_pos.empty())
+            return;
         for (size_t i = 0; i < world_pos.size(); ++i)
         {
             Vector2 screen = GetWorldToScreen(vec3_to_Vector3(world_pos[i] + move), camera_);
@@ -701,6 +705,8 @@ namespace render
 
     void Renderer3D::draw_index_fonts(const std::vector<Vec2> &world_pos, int size, Color color, float z, Vec2 move)
     {
+        if(world_pos.empty())
+            return;
         for (size_t i = 0; i < world_pos.size(); ++i)
         {
             Vector2 screen = GetWorldToScreen(vec2_to_Vector3(world_pos[i] + move, z), camera_);

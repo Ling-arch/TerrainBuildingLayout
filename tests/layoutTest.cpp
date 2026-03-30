@@ -43,6 +43,12 @@ int main()
 
     bool viewPtChanged = false;
     bool showViewPt = false;
+
+    static int debugNodeID_1 = 0;
+    static float debugRadius = 20.0f;
+
+    static int debugNodeID_2 = 0;
+    static int debugNodeID_3 = 0;
     field::Polyline2_t<float> poly = field::createRandomPolygon(ptNum, scale, threshold, Vector2f(0.f, 0.f));
     BuildingLayout<float> layout(poly, terrain);
     field::Polyline2_t<float> rect = layout.oriRect;
@@ -113,9 +119,12 @@ int main()
     // 2. 初始化 attractors
     // ============================
     std::vector<Eigen::Vector2f> attractPos;
-    net.attractors = getRandomAttractors(700, 512, 512, attractPos);
+    net.attractors = getRandomAttractors(600, 512, 512, attractPos);
+    net.initPaths();
     net.buildKDTree();
-
+    std::vector<Eigen::Vector2f> nodePoints;
+    for (auto &n : net.nodes)
+        nodePoints.push_back(n.position);
     std::cout << "Init nodes: " << net.nodes.size() << "\n";
     std::cout << "Init attractors: " << net.attractors.size() << "\n";
 
@@ -128,6 +137,7 @@ int main()
     bool scaUpdated = false;
 
     bool growthStopped = false;
+    bool showAttrIndices = true;
     rlImGuiSetup(true);
     render.runMainLoop(render::FrameCallbacks{
         [&]() { // 按键更新，重新绘图等事件，poly修改过需要重新fill
@@ -218,51 +228,70 @@ int main()
             if (IsKeyPressed(KEY_R))
             {
 
-                scaUpdated = true;
-                scaIter = 0;
+                // scaUpdated = true;
+                // scaIter = 0;
 
-                net.nodes.clear();
-                net.attractors.clear();
+                // net.nodes.clear();
+                // net.attractors.clear();
 
-                // 重新初始化
-                SCANode root;
-                root.position = Eigen::Vector2f(0, 0);
-                net.nodes.push_back(root);
+                // // 重新初始化
+                // SCANode root;
+                // root.position = Eigen::Vector2f(0, 0);
+                // net.nodes.push_back(root);
 
-                net.attractors = getRandomAttractors(700, 512, 512, attractPos);
+                // net.attractors = getRandomAttractors(700, 512, 512, attractPos);
 
-                net.buildKDTree();
-                roads.clear();
-            }
+                // net.buildKDTree();
+                // roads.clear();
+                scaIter++;
 
-            if (scaUpdated)
-            {
-                if (scaIter < maxSCAIter)
-                {
-                    scaIter++;
-                    net.update(growthStopped);
-                    roads = net.extractRoads();
-                    std::cout << "[Iter " << scaIter << "] "
-                              << "nodes=" << net.nodes.size()
-                              << " attractors=" << net.attractors.size()
-                              << "\n";
-                    if (growthStopped)
-                        scaUpdated = false;
-                    if (net.attractors.empty())
-                    {
-                        scaUpdated = false;
-                        std::cout << "All attractors consumed.\n";
-                    }
-                }
-                else
+                net.update(growthStopped);
+                nodePoints.clear();
+                for (auto &n : net.nodes)
+                    nodePoints.push_back(n.position);
+                roads = net.extractRoads();
+                std::cout << "[Iter " << scaIter << "] "
+                          << "nodes=" << net.nodes.size()
+                          << " attractors=" << net.attractors.size()
+                          << "\n";
+                if (growthStopped)
                     scaUpdated = false;
+                if (net.attractors.empty())
+                {
+                    scaUpdated = false;
+                    std::cout << "All attractors consumed.\n";
+                }
             }
+
+            // if (scaUpdated)
+            // {
+            //     if (scaIter < maxSCAIter)
+            //     {
+            //         scaIter++;
+            //         net.update(growthStopped);
+            //         roads = net.extractRoads();
+            //         std::cout << "[Iter " << scaIter << "] "
+            //                   << "nodes=" << net.nodes.size()
+            //                   << " attractors=" << net.attractors.size()
+            //                   << "\n";
+            //         if (growthStopped)
+            //             scaUpdated = false;
+            //         if (net.attractors.empty())
+            //         {
+            //             scaUpdated = false;
+            //             std::cout << "All attractors consumed.\n";
+            //         }
+            //     }
+            //     else
+            //         scaUpdated = false;
+            // }
 
         },
         [&]() { // 3维空间绘图内容部分
             // terrain.draw();
             //  layout.drawTerrain(RL_GRAY, 0.8f, true, 0.5f);
             terrain.drawContours(layers);
+            // DrawSphere({0, 0, 0}, 2.f, RL_RED);
             if (showViewPt)
             {
                 DrawSphere({terrain.testViewPt.x(), terrain.observeHeight, -terrain.testViewPt.y()}, 1.f, RL_GRAY);
@@ -320,6 +349,11 @@ int main()
             // render.draw_index_fonts(layout.rotedCenters, render.ptData.size, render.ptData.color, 0, {terrain_width / 2.f, 0.f});
             // render.draw_index_fonts(totalSeedResult.samples, render.fontData.size * 2, RL_RED, 0, {terrain_width / 2.f, 0.f});
             // render.draw_index_fonts(layout.rotedGrids, render.ptData.size, render.ptData.color);
+            // net.drawNodesWithIndices(render);
+
+            render.draw_index_fonts(nodePoints, render.fontData.size, render.fontData.color);
+            if (showAttrIndices)
+                render.draw_index_fonts(attractPos, render.fontData.size, RL_RED);
             rlImGuiBegin();
 
             render.setCameraUI(customOpen);
@@ -400,6 +434,7 @@ int main()
                     genPlot |= ImGui::SliderFloat("Threshold", &threshold, 0.f, 1.f, "%.2f");
                     terrainfieldWeightChanged |= ImGui::SliderFloat("Terrain Field Weight", &terrainWeight, 1.f, 10.f, "%.1f");
                     ImGui::Checkbox("FieldShow", &showFieldLine);
+                    ImGui::Checkbox("AttrIndicesShow", &showAttrIndices);
                     ImGui::Unindent();
                 }
             }
@@ -414,6 +449,54 @@ int main()
                     genDiffGrid |= ImGui::SliderFloat("Tau", &tau, 0.1f, 100.f, "%.1f");
                     ImGui::Unindent();
                 }
+            }
+            ImGui::End();
+
+            if (ImGui::Begin("SCADebug", &customOpen))
+            {
+                ImGui::Indent();
+
+                ImGui::Checkbox("AttrIndicesShow", &showAttrIndices);
+
+                // ============================
+                // Debug 1: Relative Neighbors
+                // ============================
+                ImGui::Separator();
+                ImGui::Text("Relative Neighbor Query");
+
+                ImGui::InputInt("Node ID##Neighbor", &debugNodeID_1);
+                ImGui::InputFloat("Radius", &debugRadius);
+
+                if (ImGui::Button("Print Relative Neighbors"))
+                {
+                    net.debugPrintRelativeNeighbors(debugNodeID_1, debugRadius);
+                }
+
+                // ============================
+                // Debug 2: Path Info
+                // ============================
+                ImGui::Separator();
+                ImGui::Text("Node Path Info");
+
+                ImGui::InputInt("Node ID##Path", &debugNodeID_2);
+
+                if (ImGui::Button("Print Node Paths"))
+                {
+                    net.debugPrintNodePaths(debugNodeID_2);
+                }
+
+                ImGui::Separator();
+                ImGui::Text("Connect Info");
+
+                ImGui::InputInt("Node ID##ConnectNode", &debugNodeID_3);
+
+                if (ImGui::Button("Debug Connect Nodes"))
+                {
+                    net.debugConnectNodes(debugNodeID_3, debugRadius);
+                }
+
+                ImGui::Unindent();
+                
             }
             ImGui::End();
             rlImGuiEnd();

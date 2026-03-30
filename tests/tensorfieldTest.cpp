@@ -44,7 +44,7 @@ int main()
     VectorDrawData vecData;
     FontDrawData fontData;
     LineDrawData lineData;
-    bool showIndices = true;
+    bool showIndices = false;
     bool genPlot = false;
     bool radiusChanged = false;
     Polyline2_t<float> poly = field::createRandomPolygon(ptNum, scale, threshold, Vector2f(0.f, 0.f));
@@ -55,6 +55,11 @@ int main()
     std::vector<Polyline2_t<float>> streamlines = tensorField.genStreamlines(seedPoints);
     bool hasTestTensor = false;
     field::Tensor<float> testTensor;
+    std::vector<Polyline2_t<float>> insideGrids;
+    std::vector<Eigen::Vector2f> gridPoints;
+    Polyline2_t<float> maxRect = geo::getMaxRectInPolyWithGrid(poly, 1, insideGrids, gridPoints);
+    static bool showRects = false;
+    
     rlImGuiSetup(true);
 
     render.runMainLoop(render::FrameCallbacks{
@@ -65,6 +70,7 @@ int main()
                 tensorField = TensorField2D<float>(geo::computeAABB<float>({poly}), 20, {poly}, attractors);
                 seedPoints = M2::gen_poisson_sites_in_poly(poly.points, 1.2f * tensorField.getGridSize(), 30, (unsigned)time(nullptr));
                 streamlines = tensorField.genStreamlines(seedPoints);
+                maxRect = geo::getMaxRectInPolyWithGrid(poly, 1, insideGrids, gridPoints);
                 genPlot = false;
             }
 
@@ -140,33 +146,43 @@ int main()
             // DrawLine3D({0, 0, 0}, {0, 10000, 0}, RL_BLUE);
             // DrawLine3D({0, 0, 0}, {0, 0, -10000}, RL_GREEN);
             // DrawGrid(100, 100.f);
-            render::stroke_bold_polygon2(polyloop::Polyloop2(poly.points), RL_BLACK, 0.f, 0.7f, 1.f);
+            render::stroke_bold_polygon2(polyloop::Polyloop2(poly.points), RL_BLACK, 0.f, lineData.Thickness, 1.f);
             // render::fill_polygon2(polyloop::Polyloop2(poly.points), YELLOW, 0.f, 0.3f, false);
-            render::draw_points(tensorField.getAllPoints(), ptData.color, 1.f, ptData.size);
-            for (int i = 0; i < tensorField.getAllTensors().size(); ++i)
-            {
-                const field::Tensor<float> &t = tensorField.getAllTensors()[i];
-                if (i < (tensorField.getGridNX() + 1) * (tensorField.getGridNY() + 1))
-                    for (int i = 0; i < 4; ++i)
-                        render::draw_vector(t.pos, t.dirs[i], RL_BLACK, vecData.scale, vecData.startThickness, vecData.endThickness, 0.f, vecData.color.a);
-                else
-                    for (int i = 0; i < 4; ++i)
-                        render::draw_vector(t.pos, t.dirs[i], RL_RED, vecData.scale, vecData.startThickness, vecData.endThickness, 0.f, vecData.color.a);
-            }
-            for (const auto &line : streamlines)
-            {
-                render::draw_bold_polyline2(line.points, lineData.color, 0.f, lineData.Thickness, lineData.color.a);
-                // render::draw_points(line.points, ptData.color, ptData.color.a, ptData.size);
-            }
+            // render::draw_points(tensorField.getAllPoints(), ptData.color, 1.f, ptData.size);
+            // for (int i = 0; i < tensorField.getAllTensors().size(); ++i)
+            // {
+            //     const field::Tensor<float> &t = tensorField.getAllTensors()[i];
+            //     if (i < (tensorField.getGridNX() + 1) * (tensorField.getGridNY() + 1))
+            //         for (int i = 0; i < 4; ++i)
+            //             render::draw_vector(t.pos, t.dirs[i], RL_BLACK, vecData.scale, vecData.startThickness, vecData.endThickness, 0.f, vecData.color.a);
+            //     else
+            //         for (int i = 0; i < 4; ++i)
+            //             render::draw_vector(t.pos, t.dirs[i], RL_RED, vecData.scale, vecData.startThickness, vecData.endThickness, 0.f, vecData.color.a);
+            // }
+            // for (const auto &line : streamlines)
+            // {
+            //     render::draw_bold_polyline2(line.points, lineData.color, 0.f, lineData.Thickness, lineData.color.a);
+            //     // render::draw_points(line.points, ptData.color, ptData.color.a, ptData.size);
+            // }
 
-            if (testTensor.dirs.size() == 4 && hasTestTensor)
-            {
-                for (int i = 0; i < 4; ++i)
-                    render::draw_vector(testTensor.pos, testTensor.dirs[i], RL_GREEN, vecData.scale, vecData.startThickness, vecData.endThickness, vecZ, vecData.color.a);
-            }
+            // if (testTensor.dirs.size() == 4 && hasTestTensor)
+            // {
+            //     for (int i = 0; i < 4; ++i)
+            //         render::draw_vector(testTensor.pos, testTensor.dirs[i], RL_GREEN, vecData.scale, vecData.startThickness, vecData.endThickness, vecZ, vecData.color.a);
+            // }
 
-            for (const auto &attr : attractors)
-                attr.draw();
+            // for (const auto &attr : attractors)
+            //     attr.draw();
+            render::draw_points(gridPoints, ptData.color, 1.f, ptData.size);
+            if(showRects){
+                render::stroke_bold_polygon2(maxRect.points, RL_RED, 0.f, lineData.Thickness);
+                for(const auto& grid:insideGrids)
+                {
+                    render::fill_polygon2(grid.points, Fade(RL_GRAY,0.5f));
+                    render::stroke_bold_polygon2(grid.points, RL_BLACK, 0.f, 0.04f);
+                }
+                   
+            }
 
         },
         [&]() { // 二维屏幕空间绘图
@@ -228,13 +244,14 @@ int main()
                     genPlot |= ImGui::SliderFloat("Scale", &scale, 0.f, 2000.f, "%.1f");
                     genPlot |= ImGui::SliderFloat("Threshold", &threshold, 0.f, 1.f, "%.2f");
                     radiusChanged |= ImGui::SliderFloat("Attractor Radius", &radius, 1.f, 200.f, "%.1f");
-
+                    
                     ImGui::Unindent();
                 }
                 if (ImGui::CollapsingHeader("ShowSetting", ImGuiTreeNodeFlags_DefaultOpen))
                 {
                     ImGui::Indent();
                     ImGui::Checkbox("Show Indices", &showIndices);
+                    ImGui::Checkbox("Show Rects", &showRects);
                     ImGui::Unindent();
                 }
             }

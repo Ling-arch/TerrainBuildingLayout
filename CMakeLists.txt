@@ -10,6 +10,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 enable_testing()
 enable_language(CUDA)
+set(CMAKE_CUDA_ARCHITECTURES native)
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=/Zc:preprocessor")
 #set lib output for windows dll
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
@@ -80,9 +81,6 @@ set(TORCH_USE_CUDSS TRUE)
 
 find_package(Torch QUIET)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
-
-
-
 
 
 if(TARGET torch)

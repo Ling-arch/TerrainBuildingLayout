@@ -286,6 +286,7 @@ int main()
     std::vector<Vec2> test_boundary = {{0.f,0.f},{1.f,0.f},{1.f,1.f},{0.f,1.f}};
     std::vector<Vec2> test_sites = M2::gen_poisson_sites_in_poly(test_boundary, Scalar(0.15), 15, (unsigned)time(nullptr));
     diffVoronoi::test_backward_cpp_exact(test_boundary, test_sites);
+    
 
     //----------------------------相当于draw部分------------------------
     render.runMainLoop(
