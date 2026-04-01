@@ -5,6 +5,7 @@
 #include <vector>
 #include <functional>
 #include "tensorField.h"
+#include "terrain.h"
 #include "render.h"
 
 namespace SCARoad
@@ -24,7 +25,7 @@ namespace SCARoad
         // 构造函数
         Attractor() = default;
         Attractor(const Eigen::Vector2f &pos, const AttractorSettings &settings)
-            : position(pos),  settings(settings) {}
+            : position(pos), settings(settings) {}
         void resetFrame()
         {
             influencingNodes.clear();
@@ -57,15 +58,12 @@ namespace SCARoad
         std::vector<Eigen::Vector2f> nodePoints;
         std::vector<std::pair<int, int>> edges; // 额外连接（闭环）
         std::vector<std::vector<int>> paths;    // 每条 path 是 node index 序列
-        std::vector<int> nodeToPath; // node -> pathID
-        float attractionDist = 50.f;
-        float killDist = 5.f;
-        float minBranchAngle = 20.0f;
-        float maxBranchAngle = 90.0f;
-        int internodeLength = 5;
-        float connectDist = 8.0f;
-        int maxExtraLinks = 2;
-        float idealAngleWeight = 0.7f;
+        std::vector<int> nodeToPath;            // node -> pathID
+        using TensorField = field::TensorField2D<float>;
+        TensorField field;
+        float attractionDist = 60.f;
+        float killDist = 3.f;
+       
 
         enum class VenationType
         {
@@ -77,23 +75,26 @@ namespace SCARoad
         std::vector<int> getNodesInRadius(const Eigen::Vector2f &pos, float radius) const;
         int getClosestNode(int attractorID);
         std::vector<int> getRelativeNeighbors(int attractorID) const;
+        std::vector<int> getRelativeNeighbors(const Attractor& a) const;
         std::vector<int> getRelativeNeighbors(Eigen::Vector2f pos, float radius) const;
         Eigen::Vector2f getAverageDirection(int nodeID) const;
         bool tooCloseInSamePath(int a, int b, int minStep) const;
         int findNearestBranchDist(int pathID, int nodeID) const;
+        std::vector<SCANode> growNodes(float stepSize, int minBranchGap);
+        bool isAttractorKilled(const Attractor &a) const;
+        void loopConnect(int forbiddenGap, int CONNECT_DIST, int MIN_BRANCH_GAP);
         void update(bool &growthStopped);
+        bool passAngleConstraint(int nodeID, const Eigen::Vector2f &candidateDir, float threshold);
+        Eigen::Vector2f getGuidedDirection(int nodeID, const Eigen::Vector2f &candidateDir, float threshold);
+        Eigen::Vector2f getConstraintDirection(int nodeID);
+        void replacePathID(int nodeID, int oldPID, int newPID);
         std::vector<std::vector<Eigen::Vector2f>> extractRoads() const;
-        Eigen::Vector2f clampDirection(
-            const Eigen::Vector2f &parentDir,
-            const Eigen::Vector2f &newDir) const;
-        float computeIdealAngleScore(int nodeID, int candidateID) const;
-        bool formsTriangle(int a, int b) const;
-        void buildConnections();
+        std::unordered_set<int> filterAllPathEndpoints(int minLen)const;
         void drawNodesWithIndices(render::Renderer3D render) const;
         void debugPrintRelativeNeighbors(int nodeIndex, float radius) const;
         void debugPrintNodePaths(int nodeIndex) const;
         void debugPrintNodeLinks(int nodeIndex) const;
-        void debugConnectNodes(int nodeIndex,float CONNECT_DIST) const;
+        void debugConnectNodes(int nodeIndex, float CONNECT_DIST) const;
     };
 
     inline float randomFloat(float min, float max)
