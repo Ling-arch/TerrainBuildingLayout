@@ -125,7 +125,7 @@ static void buildVoronoi(
     const vector<float> &room2area_trg,
     VoronoiDrawResult &result_out)
 {
-    vector<Vec2> sites = M2::gen_poisson_sites_in_poly(boundary, Scalar(3.5), 50, (unsigned)time(nullptr));
+    vector<Vec2> sites = M2::gen_poisson_sites_in_poly(boundary, Scalar(4), 50, (unsigned)time(nullptr));
     vector<float> site2xy_arr = M2::flat_vec2(sites);
     vector<size_t> site2room = loss::site2room(sites.size(), room2area_trg);
     auto options = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
@@ -260,6 +260,12 @@ int main()
         {0.f, 6.59f},
         {-5.12f, 6.59f}};
 
+        boundary = {
+        {0.f, 0.f},
+        {20.f, 0.f},
+        {20.f, 15.f},
+        {0.f, 15.f},
+       };
     std::vector<float> vtxl2xy = M2::flat_vec2(boundary);
     const int64_t num_room = 6;
     const std::vector<float> area_ratio = {0.2f, 0.4f, 0.2f, 0.2f, 0.2f, 0.1f};
@@ -312,7 +318,7 @@ int main()
                     Polyloop3 cell3d = Polyloop3(polyloop::convert_points_to_3d(cell.points(),0.f));
                     render::stroke_light_polygon2(cell, RL_BLACK, 0.f);
                     // render.fill_polygon2(cell, room_color_from_id(result.site2room[i], num_room), 0.0f, 0.5f);
-                    render::fill_polygon3(cell3d, RL_GREEN, 0.5F);
+                    render::fill_polygon3(cell3d, RL_GRAY, 0.5F);
                 }
 
                 for (size_t i = 0; i < result.diffPolys.size(); i++)

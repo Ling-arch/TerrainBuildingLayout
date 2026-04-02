@@ -18,7 +18,7 @@ namespace layout
           k(k_),
           tau(tau_)
     {
-       
+
         G = grid_xy.size(0);
         N = site_xy.size(0);
         site_xy = register_parameter(
@@ -42,7 +42,7 @@ namespace layout
         auto h_site_mean = (weights.transpose(0, 1).matmul(terrain_h)) / (A + 1e-6);
 
         base_height = h_site_mean.min().detach();
-         lloyd_optimizer = std::make_unique<torch::optim::Adam>(
+        lloyd_optimizer = std::make_unique<torch::optim::Adam>(
             this->parameters(),
             torch::optim::AdamOptions(0.05));
     }
@@ -106,82 +106,65 @@ namespace layout
         auto A = weights.sum(0); // [N]
 
         // ===============================
-        // 2. floors (integer selection)
+        // 2. site mean terrain height
         // ===============================
-        auto floor_vals = torch::arange(0, 5, device); // {0..4}
+        auto h_site_mean =
+            (weights.transpose(0, 1).matmul(terrain_h)) / (A + 1e-6); // [N]
+
+        // ---- global base height (detach!) ----
+        auto h_base = h_site_mean.min().detach(); // scalar
+
+        // ===============================
+        // 3. floors (soft integer)
+        // ===============================
+        auto floor_vals = torch::arange(0, 5, device);
         auto p_floor = torch::softmax(floor_logits, 1);
-        auto floors = (p_floor * floor_vals).sum(1); // soft int
+        auto floors = (p_floor * floor_vals).sum(1);
 
         for (int id : courtyard_ids)
             floors[id] = 0.0f;
 
         // ===============================
-        // 3. Δh only for floors > 1
+        // 4. discrete dh (relative to base)
         // ===============================
         auto delta_vals = torch::tensor({0.f, 2.f, 4.f, 6.f, 8.f}, device);
 
         auto p_delta = torch::softmax(delta_logits, 1);
-        auto dh_raw = (p_delta * delta_vals).sum(1);
-
-        auto dh = dh_raw * torch::relu(floors - 1.0f);
+        auto dh = (p_delta * delta_vals).sum(1); // [N]
 
         // ===============================
-        // 4. FAR loss (total floors)
+        // 5. final site plane height
         // ===============================
-        auto total_floors = (A * floors).sum();
-        auto target_floors = G * far;
-
-        auto L_far = (total_floors - target_floors).pow(2);
-        auto FAR = total_floors / G;
+        auto H_site = h_base + dh; // [N]
 
         // ===============================
-        // 5. terrain delta
+        // 6. terrain delta (cut & fill)
         // ===============================
-        auto delta_terrain = weights.matmul(dh + floors * 4.0f);
+        // Δh_g = sum_i w_gi * (H_i - h_g)
+        auto delta_terrain =
+            weights.matmul(H_site) - terrain_h; // [G]
 
         auto L_terrain = delta_terrain.pow(2).mean();
 
         // ===============================
-        // 6. entropy (anneal later)
+        // 7. FAR loss
         // ===============================
-        auto L_entropy = -(p_floor * torch::log(p_floor + 1e-6)).sum() - (p_delta * torch::log(p_delta + 1e-6)).sum();
+        auto total_floors = (A * floors).sum();
+        auto target_floors = G * far;
+        auto L_far = (total_floors - target_floors).pow(2);
 
         // ===============================
-        // DEBUG
+        // 8. entropy (anneal)
         // ===============================
-        {
-            auto A_cpu = A.cpu();
-            auto f_cpu = floors.cpu();
-            auto dh_cpu = dh.cpu();
-
-            std::cout << "\n======= SITE INFO =======\n";
-            for (int i = 0; i < N; ++i)
-            {
-                std::cout
-                    << "Site " << i
-                    << " | A=" << A_cpu[i].item<float>()
-                    << " | floors=" << f_cpu[i].item<float>()
-                    << " | dh=" << dh_cpu[i].item<float>()
-                    << std::endl;
-            }
-            std::cout
-                << "FAR=" << FAR.item<float>()
-                << " target=" << far << std::endl;
-
-            std::cout
-                << "L_far=" << L_far.item<float>()
-                << " | L_terrain=" << L_terrain.item<float>()
-                << " | L_entropy=" << L_entropy.item<float>()
-                << std::endl;
-            std::cout << "=========================\n";
-        }
+        auto L_entropy =
+            -(p_floor * torch::log(p_floor + 1e-6)).sum() - (p_delta * torch::log(p_delta + 1e-6)).sum();
 
         return lambda_far * L_far +
                lambda_terrain * L_terrain +
                lambda_entropy * L_entropy;
     }
 
-    void SoftRVDModel::drawGrids(float z, float size, const Eigen::Vector2f& offset) const
+    void SoftRVDModel::drawGrids(float z, float size, const Eigen::Vector2f &offset) const
     {
 
         // 1. 预先生成每个 site 的“cell 颜色”
@@ -196,9 +179,9 @@ namespace layout
             // 画一个小 cube / sphere 表示 site
             DrawCube(
                 Vector3{sx + offset.x(), 0, -(sy + offset.y())},
-                size ,
-                size ,
-                size ,
+                size,
+                size,
+                size,
                 RL_BLACK);
         }
 
@@ -225,7 +208,7 @@ namespace layout
         }
     }
 
-    void SoftRVDModel::drawTerrain(const std::vector<float> &heights, float z, float size, const Eigen::Vector2f& offset) const
+    void SoftRVDModel::drawTerrain(const std::vector<float> &heights, float z, float size, const Eigen::Vector2f &offset) const
     {
 
         // 1. 预先生成每个 site 的“cell 颜色”
@@ -309,18 +292,18 @@ namespace layout
         loss.backward();
         lloyd_optimizer->step();
         curIter++;
-         if (curIter % 50 == 0 || curIter == maxIter - 1)
-            {
-                std::cout
-                    << "[Lloyd Iter " << curIter
-                    << "] Energy = "
-                    << loss.item<float>()
-                    << std::endl;
-            }
+        if (curIter % 50 == 0 || curIter == maxIter - 1)
+        {
+            std::cout
+                << "[Lloyd Iter " << curIter
+                << "] Energy = "
+                << loss.item<float>()
+                << std::endl;
+        }
     }
 
-    void SoftRVDModel::stepOptimize(int &curIter, const int maxIter){
-        
+    void SoftRVDModel::stepOptimize(int &curIter, const int maxIter)
+    {
     }
 
     void SoftRVDModel::optimize(SoftRVDShowData &showData, int iters, float lr, int verbose_every)

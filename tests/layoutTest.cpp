@@ -20,9 +20,9 @@ int main()
     //-------------------------renderer and terrain init-------------------------
     bool customOpen = true;
     static bool needGenTerrain = false;
-    static int terrainPow = 6;
-    static float frequency = 0.01f;
-    static float amplitude = 16.5f;
+    static int terrainPow = 8;
+    static float frequency = 0.02f;
+    static float amplitude = 21.5f;
 
     rlSetClipPlanes(0.01, 100000.0);
     Renderer3D render(1920, 1080, 45.0f, CAMERA_PERSPECTIVE, "LayoutTest");
@@ -40,7 +40,7 @@ int main()
     static bool showFieldLine = false;
     static float terrainWeight = 2.f;
     bool terrainfieldWeightChanged = false;
-
+    static bool showTerrain = false;
     bool viewPtChanged = false;
     bool showViewPt = false;
 
@@ -106,22 +106,20 @@ int main()
 
     srand((unsigned)time(nullptr));
 
-    SCANetwork net;
 
     // ============================
     // 1. 初始化 seeds
-    // ============================
     SCANode root;
     root.position = Eigen::Vector2f(0, 0);
-    net.nodes.push_back(root);
-
+    std::vector<SCANode> nodes;
+    nodes.push_back(root);
+   
     // ============================
     // 2. 初始化 attractors
-    // ============================
     std::vector<Eigen::Vector2f> attractPos;
-    net.attractors = getRandomAttractors(600, 512, 512, attractPos);
-    net.initPaths();
-    net.buildKDTree();
+    std::vector<SCARoad::Attractor> attractors = SCARoad::getRandomAttractors(300, 512, 512, attractPos);
+   
+    SCANetwork net(nodes, attractors, terrain,tensorField);
     std::vector<Eigen::Vector2f> nodePoints;
     for (auto &n : net.nodes)
         nodePoints.push_back(n.position);
@@ -262,6 +260,10 @@ int main()
                     std::cout << "All attractors consumed.\n";
                 }
             }
+            if(IsKeyPressed(KEY_C)){
+                net.finalConnectNodes(10, 17, 6);
+                roads = net.extractRoads();
+            }
 
             // if (scaUpdated)
             // {
@@ -288,8 +290,10 @@ int main()
 
         },
         [&]() { // 3维空间绘图内容部分
-            // terrain.draw();
+            if(showTerrain)
+                terrain.draw();
             //  layout.drawTerrain(RL_GRAY, 0.8f, true, 0.5f);
+            DrawGrid(50,10);
             terrain.drawContours(layers);
             // DrawSphere({0, 0, 0}, 2.f, RL_RED);
             if (showViewPt)
@@ -360,6 +364,7 @@ int main()
             render.setDrawGeoDataUI(customOpen);
             if (ImGui::Begin("Terrain Info", &customOpen))
             {
+                ImGui::Checkbox("Show Terrain", &showTerrain);
                 ImGui::Text("Terrain size: %d x %d", 128, 128);
 
                 // =====================================================

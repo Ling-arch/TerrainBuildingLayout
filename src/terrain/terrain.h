@@ -227,6 +227,7 @@ namespace terrain
         bool additionalShowWire = false;
         std::vector<float> viewShedScore;      // face viewshed
         std::vector<std::vector<int>> faceAdj; // face adjacency
+        Terrain() = default;
         Terrain(int width, int height, float cellSize);
         Terrain(int seed_, int width, int height, float cellSize, float frequency, float amplitude);
         void regenerate(int w, int h, float freq, float amp);

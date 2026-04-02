@@ -61,21 +61,32 @@ namespace SCARoad
         std::vector<int> nodeToPath;            // node -> pathID
         using TensorField = field::TensorField2D<float>;
         TensorField field;
+        using Terrain = terrain::Terrain;
+        Terrain terrain;
         float attractionDist = 60.f;
         float killDist = 3.f;
-       
 
         enum class VenationType
         {
             Open,
             Closed
         } venationType = VenationType::Closed;
+
+        SCANetwork();
+        SCANetwork(std::vector<SCANode> nodesIn, std::vector<Attractor> attractorsIn, const Terrain &terrainIn, const TensorField &fieldIn)
+            : nodes(nodesIn), attractors(attractorsIn), 
+            terrain(terrainIn), field(fieldIn)
+        {
+            initPaths();
+            buildKDTree();
+        }
+
         void initPaths();
         void buildKDTree();
         std::vector<int> getNodesInRadius(const Eigen::Vector2f &pos, float radius) const;
         int getClosestNode(int attractorID);
         std::vector<int> getRelativeNeighbors(int attractorID) const;
-        std::vector<int> getRelativeNeighbors(const Attractor& a) const;
+        std::vector<int> getRelativeNeighbors(const Attractor &a) const;
         std::vector<int> getRelativeNeighbors(Eigen::Vector2f pos, float radius) const;
         Eigen::Vector2f getAverageDirection(int nodeID) const;
         bool tooCloseInSamePath(int a, int b, int minStep) const;
@@ -83,13 +94,14 @@ namespace SCARoad
         std::vector<SCANode> growNodes(float stepSize, int minBranchGap);
         bool isAttractorKilled(const Attractor &a) const;
         void loopConnect(int forbiddenGap, int CONNECT_DIST, int MIN_BRANCH_GAP);
+        void finalConnectNodes(int forbiddenGap, int CONNECT_DIST, int MIN_BRANCH_GAP);
         void update(bool &growthStopped);
-        bool passAngleConstraint(int nodeID, const Eigen::Vector2f &candidateDir, float threshold);
-        Eigen::Vector2f getGuidedDirection(int nodeID, const Eigen::Vector2f &candidateDir, float threshold);
-        Eigen::Vector2f getConstraintDirection(int nodeID);
+        Eigen::Vector2f getGuidedDirection(int nodeID, const Eigen::Vector2f &candidateDir, float blend=0.3f) const;
+        Eigen::Vector2f getConstraintDirection(int nodeID, const Eigen::Vector2f &dir) const;
         void replacePathID(int nodeID, int oldPID, int newPID);
         std::vector<std::vector<Eigen::Vector2f>> extractRoads() const;
-        std::unordered_set<int> filterAllPathEndpoints(int minLen)const;
+        std::vector<std::pair<int, std::unordered_set<int>>> collectEndpointWithForbidden(int forbiddenGap) const;
+        std::unordered_set<int> filterAllPathEndpoints(int minLen) const;
         void drawNodesWithIndices(render::Renderer3D render) const;
         void debugPrintRelativeNeighbors(int nodeIndex, float radius) const;
         void debugPrintNodePaths(int nodeIndex) const;

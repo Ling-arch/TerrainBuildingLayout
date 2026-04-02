@@ -1,12 +1,12 @@
 #include <iostream>
 #include "render.h"
-
 #include "terrain.h"
 #include "renderUtil.h"
 #include <rlImGui.h>
 #include <imgui.h>
 #include "tensorField.h"
 #include "optimizer.h"
+#include "SCARoadGenerator.h"
 
 using Eigen::Vector2f, Eigen::Vector3f, Eigen::Vector2d;
 using field::TensorField2D, field::PointAtrractor, field::TerrainTensor;
@@ -15,6 +15,7 @@ using terrain::Terrain, terrain::TerrainCell, terrain::TerrainViewMode, terrain:
 using namespace render;
 using namespace optimizer;
 using namespace geo;
+using namespace SCARoad;
 
 int main()
 {
@@ -66,7 +67,9 @@ int main()
     bool terrainfieldWeightChanged = false;
     bool showFieldLine = false;
     bool showText = false;
-
+    static bool showTerrain = false;
+    static bool showProjectedRoads = false;
+    static bool showPlanarRoads = false;
     Eigen::Vector2i roadGapRange = {18, 55};
     Eigen::Vector2i depthRange = {18, 55};
     Terrain terrain((unsigned)time(nullptr), 1 << terrainPow, 1 << terrainPow, 2.f, frequency, amplitude);
@@ -93,22 +96,13 @@ int main()
 
     std::vector<Polyline2_t<float>> pathPolylines = terrain.convertRoadToFieldLine(mainPaths);
     tensorField.addConstraint(pathPolylines, attractors, terrainTensors);
-    std::cout << "field build finished" << std::endl;
+
     std::vector<std::vector<int>> mainPathIndices;
     for (const auto &path : mainPaths)
     {
         mainPathIndices.push_back({path.path.begin(), path.path.end()});
     }
-    std::cout << "build main road finished" << std::endl;
-    std::vector<std::vector<Eigen::Vector2f>> secondaryPaths = terrain.generateRoadNetwork(tensorField, mainPathIndices, 30, 45, unsigned(time(nullptr)), {20.f, 30.f, 40.f}, 0.5, 0.5,secRoadIterstep);
-    std::vector<std::vector<Vector3f>> projSecPaths;
-    std::cout << "build secondary road finished" << std::endl;
-    for (const auto &path : secondaryPaths)
-    {
-        std::vector<Vector3f> projLine;
-        if (terrain.projectPolylineToTerrain(path, projLine))
-            projSecPaths.push_back(projLine);
-    }
+
     static int terrain_width = terrain.getCellSize() * terrain.getWidth();
     std::vector<Vector2f> terrainBounding2 = {
         {-terrain_width / 2.f, -terrain_width / 2.f},
@@ -180,6 +174,45 @@ int main()
     // geo::PolygonMesh extrudeMesh_3 = geo::PolygonMesh({{30, 0, 0}, {45, 0, 0}, {45, 15, 0}, {30, 15, 0}}, extrudeHeight);
     // polyloop::Polyloop3 polyloop({{0, 0,0}, {30, 0,0}, {30, 30,0}, {0, 30,0}});
     Color color = RL_YELLOW;
+
+    // ============================
+    // 1. 初始化 seeds
+    SCANode root;
+    root.position = Eigen::Vector2f(0, 0);
+    std::vector<SCANode> scaNodes;
+    scaNodes.push_back(root);
+
+    // ============================
+    // 2. 初始化 attractors
+    std::vector<Eigen::Vector2f> attractPos;
+    std::vector<SCARoad::Attractor> scaAttractors = SCARoad::getRandomAttractors(300, 256, 256, attractPos);
+
+    SCANetwork net(scaNodes, scaAttractors, terrain, tensorField);
+
+    std::vector<Eigen::Vector2f> nodePoints;
+    for (auto &n : net.nodes)
+        nodePoints.push_back(n.position);
+    std::cout << "Init nodes: " << net.nodes.size() << "\n";
+    std::cout << "Init attractors: " << net.attractors.size() << "\n";
+
+    // ============================
+    // 3. 迭代
+    // ============================
+    int maxSCAIter = 800;
+    auto scaRoads = net.extractRoads();
+    std::vector<std::vector<Vector3f>> projSCAroads;
+    for (const auto &l : scaRoads)
+    {
+        std::vector<Vector3f> projLine;
+        if (terrain.projectPolylineToTerrain(l, projLine))
+            projSCAroads.push_back(projLine);
+    }
+
+    int scaIter = 0;
+    bool scaUpdated = false;
+
+    bool growthStopped = false;
+    bool showAttrIndices = true;
     Ray ray = {0};
     rlImGuiSetup(true);
 
@@ -205,15 +238,6 @@ int main()
         {
             mainPathIndices.push_back({path.path.begin(), path.path.end()});
         }
-        secondaryPaths = terrain.generateRoadNetwork(tensorField, mainPathIndices, 30, 45, unsigned(time(nullptr)), {20.f, 30.f, 40.f}, 0.5, 0.5,secRoadIterstep);
-        projSecPaths.clear();
-
-        for (const auto &path : secondaryPaths)
-        {
-            std::vector<Vector3f> projLine;
-            if (terrain.projectPolylineToTerrain(path, projLine))
-                projSecPaths.push_back(projLine);
-        }
     };
 
     auto parcelsRebuild = [&]
@@ -233,6 +257,63 @@ int main()
 
     render.runMainLoop(render::FrameCallbacks{
         [&]() { // 按键更新，重新绘图等事件
+            if (IsKeyPressed(KEY_S))
+            {
+
+                // scaUpdated = true;
+                // scaIter = 0;
+
+                // net.nodes.clear();
+                // net.attractors.clear();
+
+                // // 重新初始化
+                // SCANode root;
+                // root.position = Eigen::Vector2f(0, 0);
+                // net.nodes.push_back(root);
+
+                // net.attractors = getRandomAttractors(700, 512, 512, attractPos);
+
+                // net.buildKDTree();
+                // roads.clear();
+                scaIter++;
+
+                net.update(growthStopped);
+                nodePoints.clear();
+                for (auto &n : net.nodes)
+                    nodePoints.push_back(n.position);
+                scaRoads = net.extractRoads();
+                projSCAroads.clear();
+                for (const auto &l : scaRoads)
+                {
+                    std::vector<Vector3f> projLine;
+                    if (terrain.projectPolylineToTerrain(l, projLine))
+                        projSCAroads.push_back(projLine);
+                }
+                std::cout << "[Iter " << scaIter << "] "
+                          << "nodes=" << net.nodes.size()
+                          << " attractors=" << net.attractors.size()
+                          << "\n";
+                if (growthStopped)
+                    scaUpdated = false;
+                if (net.attractors.empty())
+                {
+                    scaUpdated = false;
+                    std::cout << "All attractors consumed.\n";
+                }
+            }
+            if (IsKeyPressed(KEY_C))
+            {
+                net.finalConnectNodes(10, 17, 6);
+                scaRoads = net.extractRoads();
+                projSCAroads.clear();
+                for (const auto &l : scaRoads)
+                {
+                    std::vector<Vector3f> projLine;
+                    if (terrain.projectPolylineToTerrain(l, projLine))
+                        projSCAroads.push_back(projLine);
+                }
+            }
+
             if (IsKeyPressed(KEY_R) && parcels.size() > 0)
             {
                 plan_prob = define_field_problem(0, tensorField, parcels[0].points, area_ratio, room_connections, {}, {});
@@ -261,15 +342,7 @@ int main()
                 {
                     mainPathIndices.push_back({path.path.begin(), path.path.end()});
                 }
-                secondaryPaths = terrain.generateRoadNetwork(tensorField, mainPathIndices, 30, 45, unsigned(time(nullptr)), {20.f, 30.f, 40.f}, 0.5, 0.5,secRoadIterstep);
-                projSecPaths.clear();
 
-                for (const auto &path : secondaryPaths)
-                {
-                    std::vector<Vector3f> projLine;
-                    if (terrain.projectPolylineToTerrain(path, projLine))
-                        projSecPaths.push_back(projLine);
-                }
                 // result = build_voronoi_from_pslg(Polyline2_t<float>(terrainBounding2, true), pathPolylines);
                 weightChanged = false;
             }
@@ -284,15 +357,7 @@ int main()
                 {
                     mainPathIndices.push_back({path.path.begin(), path.path.end()});
                 }
-                secondaryPaths = terrain.generateRoadNetwork(tensorField, mainPathIndices, 30, 45, unsigned(time(nullptr)), {20.f, 30.f, 40.f}, 0.5, 0.5,secRoadIterstep);
-                projSecPaths.clear();
 
-                for (const auto &path : secondaryPaths)
-                {
-                    std::vector<Vector3f> projLine;
-                    if (terrain.projectPolylineToTerrain(path, projLine))
-                        projSecPaths.push_back(projLine);
-                }
                 // result = build_voronoi_from_pslg(Polyline2_t<float>(terrainBounding2, true), pathPolylines);
                 //  std::cout << "polylines num is " << pathPolylines.size() << std::endl;
                 tensorFieldRebuild();
@@ -313,15 +378,7 @@ int main()
                 {
                     mainPathIndices.push_back({path.path.begin(), path.path.end()});
                 }
-                secondaryPaths = terrain.generateRoadNetwork(tensorField, mainPathIndices, 30, 45, unsigned(time(nullptr)), {20.f, 30.f, 40.f}, 0.5, 0.5,secRoadIterstep);
-                projSecPaths.clear();
 
-                for (const auto &path : secondaryPaths)
-                {
-                    std::vector<Vector3f> projLine;
-                    if (terrain.projectPolylineToTerrain(path, projLine))
-                        projSecPaths.push_back(projLine);
-                }
                 tensorFieldRebuild();
                 parcelsRebuild();
             }
@@ -337,15 +394,7 @@ int main()
                 {
                     mainPathIndices.push_back({path.path.begin(), path.path.end()});
                 }
-                secondaryPaths = terrain.generateRoadNetwork(tensorField, mainPathIndices, 30, 45, unsigned(time(nullptr)), {20.f, 30.f, 40.f}, 0.5, 0.5,secRoadIterstep);
-                projSecPaths.clear();
 
-                for (const auto &path : secondaryPaths)
-                {
-                    std::vector<Vector3f> projLine;
-                    if (terrain.projectPolylineToTerrain(path, projLine))
-                        projSecPaths.push_back(projLine);
-                }
                 tensorFieldRebuild();
                 parcelsRebuild();
             }
@@ -360,15 +409,7 @@ int main()
                 {
                     mainPathIndices.push_back({path.path.begin(), path.path.end()});
                 }
-                secondaryPaths = terrain.generateRoadNetwork(tensorField, mainPathIndices, 30, 45, unsigned(time(nullptr)), {20.f, 30.f, 40.f}, 0.5, 0.5,secRoadIterstep);
-                projSecPaths.clear();
 
-                for (const auto &path : secondaryPaths)
-                {
-                    std::vector<Vector3f> projLine;
-                    if (terrain.projectPolylineToTerrain(path, projLine))
-                        projSecPaths.push_back(projLine);
-                }
                 // result = build_voronoi_from_pslg(Polyline2_t<float>(terrainBounding2, true), pathPolylines);
                 layers = terrain.extractContours(1.f);
                 terrain.applyFaceColor();
@@ -396,15 +437,7 @@ int main()
                 {
                     mainPathIndices.push_back({path.path.begin(), path.path.end()});
                 }
-                secondaryPaths = terrain.generateRoadNetwork(tensorField, mainPathIndices, 30, 45, unsigned(time(nullptr)), {20.f, 30.f, 40.f}, 0.5, 0.5,secRoadIterstep);
-                projSecPaths.clear();
 
-                for (const auto &path : secondaryPaths)
-                {
-                    std::vector<Vector3f> projLine;
-                    if (terrain.projectPolylineToTerrain(path, projLine))
-                        projSecPaths.push_back(projLine);
-                }
                 tensorFieldRebuild();
                 parcelsRebuild();
                 genTensorfield = false;
@@ -426,15 +459,7 @@ int main()
                 {
                     mainPathIndices.push_back({path.path.begin(), path.path.end()});
                 }
-                secondaryPaths = terrain.generateRoadNetwork(tensorField, mainPathIndices, 30, 45, unsigned(time(nullptr)), {20.f, 30.f, 40.f}, 0.5, 0.5,secRoadIterstep);
-                projSecPaths.clear();
 
-                for (const auto &path : secondaryPaths)
-                {
-                    std::vector<Vector3f> projLine;
-                    if (terrain.projectPolylineToTerrain(path, projLine))
-                        projSecPaths.push_back(projLine);
-                }
                 parcelsRebuild();
                 terrainfieldWeightChanged = false;
             }
@@ -459,15 +484,7 @@ int main()
                 {
                     mainPathIndices.push_back({path.path.begin(), path.path.end()});
                 }
-                secondaryPaths = terrain.generateRoadNetwork(tensorField, mainPathIndices, 30, 45, unsigned(time(nullptr)), {20.f, 30.f, 40.f}, 0.5, 0.5,secRoadIterstep);
-                projSecPaths.clear();
 
-                for (const auto &path : secondaryPaths)
-                {
-                    std::vector<Vector3f> projLine;
-                    if (terrain.projectPolylineToTerrain(path, projLine))
-                        projSecPaths.push_back(projLine);
-                }
                 parcelsRebuild();
                 radiusChanged = false;
             }
@@ -503,20 +520,34 @@ int main()
             // }
 
             // render::draw_points(testParcelBounds, ptData.color, ptData.color.a, ptData.size, 0.f, {terrain.getWidth() * terrain.getCellSize(), 0});
-            terrain.draw();
+            if (showTerrain)
+                terrain.draw();
             terrain.drawContours(layers);
-            for (const auto &l : projSecPaths)
+            if (showProjectedRoads)
             {
-                render::draw_bold_polyline3(l, lineData.color, lineData.Thickness, lineData.color.a);
+                for (const auto &l : projSCAroads)
+                {
+                    render::draw_bold_polyline3(l, lineData.color, pathWidth, lineData.color.a);
+                }
             }
-            if (mainPaths.size() > 0)
-                for (const auto &path : mainPaths)
-                    terrain.drawPath(path.path, pathWidth);
+
+            if (showPlanarRoads)
+            {
+                for (const auto &road : scaRoads)
+                {
+                    render::draw_bold_polyline2(road, render.lineData.color, 0.f, render.lineData.Thickness, render.lineData.color.a);
+                    render::draw_points(road, RL_GREEN, 1.f, render.ptData.size / 2.f);
+                }
+            }
+
+            // if (mainPaths.size() > 0)
+            //     for (const auto &path : mainPaths)
+            //         terrain.drawPath(path.path, pathWidth);
             // terrain.drawGraphEdges(debugCx,debugCy,debugRank);
             // DrawGrid(20,1.f);
-            // DrawLine3D({0, 0, 0}, {10000, 0, 0}, RED);
-            // DrawLine3D({0, 0, 0}, {0, 10000, 0}, BLUE);
-            // DrawLine3D({0, 0, 0}, {0, 0, -10000}, GREEN);
+            DrawLine3D({0, 0, 0}, {10000, 0, 0}, RL_RED);
+            DrawLine3D({0, 0, 0}, {0, 10000, 0}, RL_BLUE);
+            DrawLine3D({0, 0, 0}, {0, 0, -10000}, RL_GREEN);
 
             //----------------------------------------road path point debug----------------------------------------
             // render::draw_points(seedPoints, RL_YELLOW, 0.25f, 1.2f);
@@ -543,16 +574,18 @@ int main()
 
             if (showFieldLine)
             {
-                for (const auto &line : projStreamlines)
-                {
-                    render::draw_bold_polyline3(line, lineData.color, lineData.Thickness, lineData.color.a);
-                }
+                // for (const auto &line : projStreamlines)
+                // {
+                //     render::draw_bold_polyline3(line, lineData.color, lineData.Thickness, lineData.color.a);
+                // }
 
                 for (const auto &line : streamlines)
                 {
-                    render::draw_bold_polyline2(line.points, lineData.color, 0.f, lineData.Thickness, lineData.color.a, {terrain.getWidth() * terrain.getCellSize(), 0});
+                    render::draw_bold_polyline2(line.points, Fade(RL_GRAY, 0.5f), 0.f, lineData.Thickness, lineData.color.a /* ,{terrain.getWidth() * terrain.getCellSize(), 0}*/);
                 }
             }
+
+            render::draw_points(attractPos, render.ptData.color, 1.f, render.ptData.size);
 
             //----------------------------attractor debug--------------------------------
             // for (const auto &attr : tensorField.getAttractors())
@@ -605,6 +638,12 @@ int main()
         },
         [&]() { // 二维屏幕空间绘图
             // render.draw_index_fonts(vertices, 16, BLUE);
+            if (showPlanarRoads)
+            {
+                render.draw_index_fonts(nodePoints, render.fontData.size, render.fontData.color);
+            }
+
+
             terrain.drawContourPtIndices(layers, render);
             if (showText)
             {
@@ -621,6 +660,7 @@ int main()
             // 2. 自定义GUI窗口（纯2D固定在屏幕上）
             bool customOpen = true;
             render.setCameraUI(customOpen);
+            render.setDrawGeoDataUI(customOpen);
             if (ImGui::Begin("Render Settings", &customOpen))
             {
                 // if (ImGui::CollapsingHeader("Camera Control", ImGuiTreeNodeFlags_DefaultOpen))
@@ -672,6 +712,7 @@ int main()
             ImGui::End();
             if (ImGui::Begin("Terrain Info", &customOpen))
             {
+                ImGui::Checkbox("Show Terrain", &showTerrain);
                 ImGui::Text("Terrain size: %d x %d", 128, 128);
 
                 // =====================================================
@@ -774,6 +815,8 @@ int main()
                     ImGui::Separator();
                     ImGui::SliderFloat("Path Width", &pathWidth, 0.05f, 1.0f, "%.2f");
                     ImGui::SliderInt("MainRoadNodeNum", &mainRoadNode, 0, 30);
+                    ImGui::Checkbox("ShowProjectedRoads", &showProjectedRoads);
+                    ImGui::Checkbox("ShowPlanarRoads", &showPlanarRoads);
                     debugCx = std::clamp(debugCx, 0, terrain.getWidth());
                     debugCy = std::clamp(debugCy, 0, terrain.getHeight());
                     debugRank = std::max(1, debugRank);

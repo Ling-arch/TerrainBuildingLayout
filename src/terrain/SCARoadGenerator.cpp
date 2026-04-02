@@ -6,9 +6,13 @@
 #include <limits>
 #include <queue>
 #include <unordered_set>
-
+#include "util.h"
 namespace SCARoad
 {
+
+    SCANetwork::SCANetwork()
+    {
+    }
 
     void SCANetwork::initPaths()
     {
@@ -223,11 +227,11 @@ namespace SCARoad
     {
         growthStopped = false;
 
-        const float STEP_SIZE = 3.0f;
-        const float CONNECT_DIST = 12.0f;
+        const float STEP_SIZE = 1.5f;
+        const float CONNECT_DIST = 4.5f;
         const float CONNECT_DIST2 = CONNECT_DIST * CONNECT_DIST;
 
-        const int MIN_BRANCH_GAP = 5; //  分叉间隔
+        const int MIN_BRANCH_GAP = 7; //  分叉间隔
 
         std::cout << "\n========== [SCA UPDATE BEGIN] ==========\n";
 
@@ -319,11 +323,8 @@ namespace SCARoad
             }
         }
 
-        // // ============================
-        // // 6. Loop（DEBUG增强版）
-        // // ============================
-
-        loopConnect(10, CONNECT_DIST, MIN_BRANCH_GAP);
+        // // 6. Loop
+        loopConnect(6, CONNECT_DIST, MIN_BRANCH_GAP);
 
         // std::cout << "\n========== [LOOP DEBUG END] ==========\n";
         // 7. Remove Attractors
@@ -504,12 +505,14 @@ namespace SCARoad
                 // std::cout << "   FINAL: skip grow (branch not allowed)\n";
                 continue;
             }
+            dir = getConstraintDirection(i, dir);
+            dir = getGuidedDirection(i, dir, 0.4f);
             dir += Eigen::Vector2f(
                 (rand() / (float)RAND_MAX - 0.5f) * 0.1f,
                 (rand() / (float)RAND_MAX - 0.5f) * 0.1f);
             dir.normalize();
             // Grow
-            Eigen::Vector2f newPos = node.position + getGuidedDirection(i, dir, 0.5f) * stepSize;
+            Eigen::Vector2f newPos = node.position + dir * stepSize;
             SCANode newNode;
             newNode.position = newPos;
             newNode.parent = i;
@@ -526,10 +529,10 @@ namespace SCARoad
         auto killNodes = getNodesInRadius(a.position, killDist);
 
         if (neighbors.empty())
-            return false; //  关键：不能删
+            return false;
 
         if (killNodes.empty())
-            return false; //  你加的这个是对的
+            return false;
 
         for (int nid : neighbors)
         {
@@ -545,33 +548,51 @@ namespace SCARoad
     void SCANetwork::loopConnect(int forbiddenGap, int CONNECT_DIST, int MIN_BRANCH_GAP)
     {
         buildKDTree();
+        // std::cout << "\n================ FINAL LOOP CONNECT BEGIN ================\n";
 
-        std::cout << "\n================ LOOP CONNECT BEGIN ================\n";
+        std::vector<std::pair<int, std::unordered_set<int>>> endpointsWithForbidden = collectEndpointWithForbidden(forbiddenGap);
 
-        std::unordered_set<int> validNodes = filterAllPathEndpoints(5);
-
-        std::cout << "[Valid Endpoints] count = " << validNodes.size() << "\n  ";
-        for (int n : validNodes)
-            std::cout << n << " ";
+        // std::cout << "[Valid Endpoints] count = " << endpointsWithForbidden.size() << "\n  ";
+        std::unordered_set<int> validNodes;
+        for (auto &endpoint : endpointsWithForbidden)
+        {
+            std::cout << endpoint.first << " ";
+            validNodes.insert(endpoint.first);
+        }
         std::cout << "\n";
 
         std::unordered_set<int> connectedEndpoints;
 
-        for (int curNodeID : validNodes)
+        for (int i = 0; i < endpointsWithForbidden.size(); ++i)
         {
+            int curNodeID = endpointsWithForbidden[i].first;
+            std::unordered_set<int> branchForbidden = endpointsWithForbidden[i].second;
+            // std::cout << "  [GlobalForbidden Nodes]: ";
+
+            // if (branchForbidden.empty())
+            // {
+            //     std::cout << "none";
+            // }
+            // else
+            // {
+            //     for (int nid : branchForbidden)
+            //         std::cout << nid << " ";
+            // }
+            // std::cout << "\n";
+
             if (connectedEndpoints.count(curNodeID))
                 continue;
 
             auto &curNode = nodes[curNodeID];
 
-            std::cout << "\n--------------------------------------------------\n";
-            std::cout << "[PROCESS NODE] " << curNodeID
-                      << " | links=" << curNode.links.size()
-                      << " | path=" << curNode.paths[0] << "\n";
+            // std::cout << "\n--------------------------------------------------\n";
+            // std::cout << "[PROCESS NODE] " << curNodeID
+            //           << " | links=" << curNode.links.size()
+            //           << " | path=" << curNode.paths[0] << "\n";
 
             if (curNode.links.size() > 1)
             {
-                std::cout << "  -> SKIP: not endpoint\n";
+                // std::cout << "  -> SKIP: not endpoint\n";
                 continue;
             }
 
@@ -581,70 +602,65 @@ namespace SCARoad
             // =========================
             // 1. forbidden
             // =========================
-            std::unordered_set<int> forbidden;
+            // std::unordered_set<int> forbidden;
 
-            for (int pid : nodes[parent].paths)
-            {
-                auto &path = paths[pid];
+            // for (int pid : nodes[parent].paths)
+            // {
+            //     auto &path = paths[pid];
 
-                auto it = std::find(path.begin(), path.end(), parent);
-                int idx = std::distance(path.begin(), it);
+            //     auto it = std::find(path.begin(), path.end(), parent);
+            //     int idx = std::distance(path.begin(), it);
 
-                for (int k = -forbiddenGap; k <= forbiddenGap; ++k)
-                {
-                    int id = idx + k;
-                    if (id >= 0 && id < path.size())
-                    {
-                        forbidden.insert(path[id]);
-                    }
-                }
-            }
+            //     for (int k = -forbiddenGap; k <= forbiddenGap; ++k)
+            //     {
+            //         int id = idx + k;
+            //         if (id >= 0 && id < path.size())
+            //         {
+            //             forbidden.insert(path[id]);
+            //         }
+            //     }
+            // }
 
-            // =========================
-            // 一行打印
-            // =========================
-            std::cout << "  [Forbidden Nodes]: ";
+            // // =========================
+            // // 一行打印
+            // // =========================
+            // std::cout << "  [Forbidden Nodes]: ";
 
-            if (forbidden.empty())
-            {
-                std::cout << "none";
-            }
-            else
-            {
-                for (int nid : forbidden)
-                    std::cout << nid << " ";
-            }
+            // if (forbidden.empty())
+            // {
+            //     std::cout << "none";
+            // }
+            // else
+            // {
+            //     for (int nid : forbidden)
+            //         std::cout << nid << " ";
+            // }
 
-            std::cout << "\n";
+            // std::cout << "\n";
 
-            // =========================
             // 2. nearby
-            // =========================
             auto nearby = getNodesInRadius(curNode.position, CONNECT_DIST);
-
             std::vector<int> endpoints, branchNodes, midNodes;
-
             std::vector<int> validCandidates;
 
-            // ============================
             // 1. 打印 Nearby（原始）
-            // ============================
-            std::cout << "  [Nearby] : ";
-            for (int nid : nearby)
-            {
-                std::cout << nid << " ";
-            }
-            std::cout << "\n";
+            // std::cout << "  [Nearby] : ";
+            // for (int nid : nearby)
+            // {
+            //     std::cout << nid << " ";
+            // }
+            // std::cout << "\n";
 
             // ============================
             // 2. 过滤 + 分类
-            // ============================
             for (int nid : nearby)
             {
                 if (nid == parent)
                     continue;
-                if (forbidden.count(nid))
+                if (branchForbidden.count(nid))
                     continue;
+                // if (forbidden.count(nid))
+                //     continue;
                 if (std::find(selfPath.begin(), selfPath.end(), nid) != selfPath.end())
                     continue;
 
@@ -652,7 +668,7 @@ namespace SCARoad
 
                 int deg = nodes[nid].links.size();
 
-                if (deg == 1 && paths[nodes[nid].paths[0]].size() >= 5)
+                if (deg == 1 /*&& paths[nodes[nid].paths[0]].size() >= 5*/)
                 {
                     endpoints.push_back(nid);
                 }
@@ -669,27 +685,27 @@ namespace SCARoad
             // ============================
             // 3. 打印 Candidates（总览）
             // ============================
-            std::cout << "  [Candidates] : ";
-            for (int nid : validCandidates)
-            {
-                std::cout << nid << "(d=" << nodes[nid].links.size() << ") ";
-            }
-            std::cout << "\n";
+            // std::cout << "  [Candidates] : ";
+            // for (int nid : validCandidates)
+            // {
+            //     std::cout << nid << "(d=" << nodes[nid].links.size() << ") ";
+            // }
+            // std::cout << "\n";
 
             // ============================
             // 4. 分类打印（关键！）
             // ============================
-            auto printGroup = [&](const std::string &name, const std::vector<int> &arr)
-            {
-                std::cout << "    " << name << " : ";
-                for (int nid : arr)
-                    std::cout << nid << " ";
-                std::cout << "\n";
-            };
+            // auto printGroup = [&](const std::string &name, const std::vector<int> &arr)
+            // {
+            //     std::cout << "    " << name << " : ";
+            //     for (int nid : arr)
+            //         std::cout << nid << " ";
+            //     std::cout << "\n";
+            // };
 
-            printGroup("endpoints", endpoints);
-            printGroup("branchNodes", branchNodes);
-            printGroup("midNodes", midNodes);
+            // printGroup("endpoints", endpoints);
+            // printGroup("branchNodes", branchNodes);
+            // printGroup("midNodes", midNodes);
             // =========================
             // 3. score
             // =========================
@@ -714,8 +730,8 @@ namespace SCARoad
                 {
                     float s = score(nid);
 
-                    std::cout << "    [" << tag << "] "
-                              << nid << " score=" << s << "\n";
+                    // std::cout << "    [" << tag << "] "
+                    //           << nid << " score=" << s << "\n";
 
                     if (s > bestScore)
                     {
@@ -725,34 +741,34 @@ namespace SCARoad
                 }
             };
 
-            std::cout << "  [Selection]\n";
+            // std::cout << "  [Selection]\n";
 
             if (!endpoints.empty())
             {
-                std::cout << "    Priority: ENDPOINT\n";
+                // std::cout << "    Priority: ENDPOINT\n";
                 pickBest(endpoints, "endpoint");
             }
             else if (!branchNodes.empty())
             {
-                std::cout << "    Priority: BRANCH\n";
+                // std::cout << "    Priority: BRANCH\n";
                 pickBest(branchNodes, "branch");
             }
             else
             {
-                std::cout << "    Priority: MID\n";
+                // std::cout << "    Priority: MID\n";
 
                 for (int nid : midNodes)
                 {
                     int pid = nodes[nid].paths[0];
                     int dist = findNearestBranchDist(pid, nid);
 
-                    std::cout << "    [mid] " << nid
-                              << " branchDist=" << dist;
+                    // std::cout << "    [mid] " << nid
+                    //           << " branchDist=" << dist;
 
-                    if (dist >= MIN_BRANCH_GAP)
+                    if (dist >= 3)
                     {
                         float s = score(nid);
-                        std::cout << " score=" << s << "\n";
+                        // std::cout << " score=" << s << "\n";
 
                         if (s > bestScore)
                         {
@@ -762,14 +778,14 @@ namespace SCARoad
                     }
                     else
                     {
-                        std::cout << " -> rejected\n";
+                        // std::cout << " -> rejected\n";
                     }
                 }
             }
 
             if (best < 0)
             {
-                std::cout << "  -> NO VALID TARGET\n";
+                // std::cout << "  -> NO VALID TARGET\n";
                 continue;
             }
 
@@ -780,10 +796,10 @@ namespace SCARoad
             if (bestScore < 0)
                 continue;
 
-            std::cout << "  [SELECTED] " << best
-                      << " score=" << bestScore << " dist=" << dist << "\n";
+            // std::cout << "  [SELECTED] " << best
+            //           << " score=" << bestScore << " dist=" << dist << "\n";
 
-            std::cout << "  [LINK] " << curNodeID << " <-> " << best << "\n";
+            // std::cout << "  [LINK] " << curNodeID << " <-> " << best << "\n";
 
             // =========================
             // 6. path rebuild
@@ -792,78 +808,29 @@ namespace SCARoad
             auto &curPath = paths[curPID];
             auto &targetNode = nodes[best];
 
-            std::cout << "  [PATH UPDATE]\n";
+            // std::cout << "  [PATH UPDATE]\n";
 
             if (targetNode.links.size() == 1)
             {
                 int pid = targetNode.paths[0];
                 auto &path = paths[pid];
 
-                std::cout << "    CASE: endpoint merge | pid=" << pid << "\n";
+                // std::cout << "    CASE: endpoint merge | pid=" << pid << "\n";
 
-                if (path.front() == best)
+                if (path.empty())
                 {
-                    std::cout << "      direction: forward\n";
-                    curPath.insert(curPath.end(), path.begin(), path.end());
-                }
-                else
-                {
-                    std::cout << "      direction: reverse\n";
-                    curPath.insert(curPath.end(), path.rbegin(), path.rend());
-                }
-
-                for (int nid : path)
-                    replacePathID(nid, pid, curPID);
-
-                if (validNodes.count(best))
-                    connectedEndpoints.insert(best);
-
-                path.clear();
-            }
-            else if (targetNode.links.size() == 2)
-            {
-                std::cout << "    CASE: mid attach\n";
-
-                // 找 curNode 在 path 中的位置
-                auto it = std::find(curPath.begin(), curPath.end(), curNodeID);
-
-                if (it == curPath.end())
-                {
-                    std::cout << "    [ERROR] curNode not in curPath!\n";
+                    // std::cout << "      [WARN] empty target path\n";
                     return;
                 }
 
-                bool isHead = (it == curPath.begin());
-                bool isTail = (it == curPath.end() - 1);
-
-                if (isTail)
-                {
-                    std::cout << "      attach at TAIL\n";
-                    curPath.push_back(best);
-                }
-                else if (isHead)
-                {
-                    std::cout << "      attach at HEAD\n";
-                    curPath.insert(curPath.begin(), best);
-                }
-                else
-                {
-                    std::cout << "      [ERROR] curNode in middle of path!\n";
-                    return;
-                }
-
-                nodes[best].paths.push_back(curPID);
-            }
-            else if (targetNode.links.size() == 3)
-            {
-                std::cout << "    CASE: branch merge\n";
-
-                // 找 curNode 在 curPath 的位置
+                // =========================
+                // curNode 在 curPath 位置
+                // =========================
                 auto itCur = std::find(curPath.begin(), curPath.end(), curNodeID);
 
                 if (itCur == curPath.end())
                 {
-                    std::cout << "    [ERROR] curNode not in curPath!\n";
+                    // std::cout << "      [ERROR] curNode not in curPath\n";
                     return;
                 }
 
@@ -872,7 +839,124 @@ namespace SCARoad
 
                 if (!curIsHead && !curIsTail)
                 {
-                    std::cout << "    [ERROR] curNode in middle!\n";
+                    // std::cout << "      [ERROR] curNode in middle\n";
+                    return;
+                }
+
+                // =========================
+                // targetNode 在 targetPath 位置
+                // =========================
+                bool targetIsHead = (path.front() == best);
+                bool targetIsTail = (path.back() == best);
+
+                // std::cout << "      cur("
+                //           << (curIsHead ? "HEAD" : "TAIL") << ") "
+                //           << "target("
+                //           << (targetIsHead ? "HEAD" : "TAIL") << ")\n";
+
+                // =========================
+                // 四种情况
+                // =========================
+
+                if (curIsHead)
+                {
+                    if (targetIsHead)
+                    {
+                        // head-head → reverse + front（去掉重复 best）
+                        curPath.insert(curPath.begin(), path.rbegin(), path.rend());
+                        // std::cout << "      action: reverse + FRONT\n";
+                    }
+                    else
+                    {
+                        // head-tail → forward + front
+                        curPath.insert(curPath.begin(), path.begin(), path.end());
+                        // std::cout << "      action: forward + FRONT\n";
+                    }
+                }
+                else // curIsTail
+                {
+                    if (targetIsHead)
+                    {
+                        // tail-head → forward + back
+                        curPath.insert(curPath.end(), path.begin(), path.end());
+                        // std::cout << "      action: forward + BACK\n";
+                    }
+                    else
+                    {
+                        // tail-tail → reverse + back
+                        curPath.insert(curPath.end(), path.rbegin(), path.rend());
+                        // std::cout << "      action: reverse + BACK\n";
+                    }
+                }
+
+                // =========================
+                // 更新 path ownership
+                // =========================
+                for (int nid : path)
+                {
+                    replacePathID(nid, pid, curPID);
+                }
+
+                if (validNodes.count(best))
+                {
+                    connectedEndpoints.insert(best);
+                }
+
+                path.clear();
+            }
+            else if (targetNode.links.size() == 2)
+            {
+                // std::cout << "    CASE: mid attach\n";
+
+                // 找 curNode 在 path 中的位置
+                auto it = std::find(curPath.begin(), curPath.end(), curNodeID);
+
+                if (it == curPath.end())
+                {
+                    // std::cout << "    [ERROR] curNode not in curPath!\n";
+                    return;
+                }
+
+                bool isHead = (it == curPath.begin());
+                bool isTail = (it == curPath.end() - 1);
+
+                if (isTail)
+                {
+                    // std::cout << "      attach at TAIL\n";
+                    curPath.push_back(best);
+                }
+                else if (isHead)
+                {
+                    // std::cout << "      attach at HEAD\n";
+                    curPath.insert(curPath.begin(), best);
+                }
+                else
+                {
+                    // std::cout << "      [ERROR] curNode in middle of path!\n";
+                    return;
+                }
+
+                nodes[best].paths.push_back(curPID);
+            }
+            else if (targetNode.links.size() == 3)
+            {
+                // std::cout << "    CASE: branch merge\n";
+
+                // 找 curNode 在 curPath 的位置
+                auto itCur = std::find(curPath.begin(), curPath.end(), curNodeID);
+
+                if (itCur == curPath.end())
+                {
+                    // std::cout << "    [ERROR] curNode not in curPath!\n";
+                    return;
+                }
+
+                bool curIsHead = (itCur == curPath.begin());
+                bool curIsTail = (itCur == curPath.end() - 1);
+
+                if (!curIsHead && !curIsTail)
+                {
+                    // std::cout << "    [ERROR] curNode in middle!\n";
                     return;
                 }
 
@@ -902,12 +986,12 @@ namespace SCARoad
                         continue;
                     const SCANode &branchNbrNode = nodes[path[branchNear]];
                     float connectDot = (branchNbrNode.position - targetNode.position).dot(targetNode.position - curNode.position);
-                    
-                    if(connectDot < 0)
+
+                    if (connectDot < 0)
                         continue;
-                    std::cout << "      merge pid=" << pid
-                              << " | cur(" << (curIsHead ? "HEAD" : "TAIL") << ")"
-                              << " target(" << (targetIsHead ? "HEAD" : "TAIL") << ")\n";
+                    // std::cout << "      merge pid=" << pid
+                    //           << " | cur(" << (curIsHead ? "HEAD" : "TAIL") << ")"
+                    //           << " target(" << (targetIsHead ? "HEAD" : "TAIL") << ")\n";
 
                     // =========================
                     // 4 cases
@@ -919,13 +1003,13 @@ namespace SCARoad
                         {
                             // case 1: head-head → reverse + front
                             curPath.insert(curPath.begin(), path.rbegin(), path.rend());
-                            std::cout << "        action: reverse + insert FRONT\n";
+                            // std::cout << "        action: reverse + insert FRONT\n";
                         }
                         else
                         {
                             // case 2: head-tail → forward + front
                             curPath.insert(curPath.begin(), path.begin(), path.end());
-                            std::cout << "        action: forward + insert FRONT\n";
+                            // std::cout << "        action: forward + insert FRONT\n";
                         }
                     }
                     else // curIsTail
@@ -934,13 +1018,13 @@ namespace SCARoad
                         {
                             // case 3: tail-head → forward + back
                             curPath.insert(curPath.end(), path.begin(), path.end());
-                            std::cout << "        action: forward + insert BACK\n";
+                            // std::cout << "        action: forward + insert BACK\n";
                         }
                         else
                         {
                             // case 4: tail-tail → reverse + back
                             curPath.insert(curPath.end(), path.rbegin(), path.rend());
-                            std::cout << "        action: reverse + insert BACK\n";
+                            // std::cout << "        action: reverse + insert BACK\n";
                         }
                     }
 
@@ -962,81 +1046,308 @@ namespace SCARoad
             nodes[curNodeID].links.push_back(best);
             nodes[best].links.push_back(curNodeID);
 
-            std::cout << "   DONE\n";
+            // std::cout << "   DONE\n";
         }
 
-        std::cout << "\n================ LOOP CONNECT END =================\n";
+        // std::cout << "\n================ LOOP CONNECT END =================\n";
     }
 
-    bool SCANetwork::passAngleConstraint(int nodeID, const Eigen::Vector2f &candidateDir, float threshold)
+    void SCANetwork::finalConnectNodes(int forbiddenGap, int CONNECT_DIST, int MIN_BRANCH_GAP)
     {
-        auto &node = nodes[nodeID];
-        int deg = node.links.size();
+        buildKDTree();
 
-        if (deg == 0)
-            return true;
+        std::cout << "\n================ FINAL CONNECT BEGIN ================\n";
 
-        // 收集 neighbor direction
-        std::vector<Eigen::Vector2f> dirs;
+        const float ANGLE_COS = std::cos(30.0f * Litten_M_PI / 180.0f);
 
-        for (int nid : node.links)
+        std::vector<std::pair<int, std::unordered_set<int>>> endpointsWithForbidden = collectEndpointWithForbidden(forbiddenGap);
+
+        std::unordered_set<int> validNodes;
+        for (auto &p : endpointsWithForbidden)
+            validNodes.insert(p.first);
+
+        std::unordered_set<int> connectedEndpoints;
+
+        for (auto &entry : endpointsWithForbidden)
         {
-            Eigen::Vector2f d = (nodes[nid].position - node.position).normalized();
-            dirs.push_back(d);
-        }
+            int curNodeID = entry.first;
+            auto &branchForbidden = entry.second;
 
-        Eigen::Vector2f baseDir;
+            if (connectedEndpoints.count(curNodeID))
+                continue;
 
-        // =========================
-        // CASE 1
-        if (deg == 1)
-        {
-            baseDir = dirs[0];
-        }
+            auto &curNode = nodes[curNodeID];
 
-        // =========================
-        // CASE 2
-        else if (deg == 2)
-        {
-            Eigen::Vector2f sum = dirs[0] + dirs[1];
+            std::cout << "\n--------------------------------------------------\n";
+            std::cout << "[PROCESS NODE] " << curNodeID
+                      << " | pos=(" << curNode.position.x() << ", " << curNode.position.y() << ")"
+                      << " | links=" << curNode.links.size()
+                      << " | path=" << curNode.paths[0] << "\n";
 
-            if (sum.norm() < 1e-3f)
+            if (curNode.links.size() != 1)
             {
-                // 对向 → 用垂直方向
-                baseDir = Eigen::Vector2f(-dirs[0].y(), dirs[0].x());
+                std::cout << "  -> SKIP (not endpoint)\n";
+                continue;
+            }
+
+            int parent = curNode.parent;
+            auto &curPath = paths[curNode.paths[0]];
+
+            Eigen::Vector2f baseDir =
+                (curNode.position - nodes[parent].position).normalized();
+
+            // =========================
+            // Nearby
+            // =========================
+            auto nearby = getNodesInRadius(curNode.position, CONNECT_DIST);
+
+            std::vector<int> endpoints, branchNodes, midNodes;
+            std::vector<int> validCandidates;
+
+            std::cout << "  [Nearby] : ";
+            for (int nid : nearby)
+                std::cout << nid << " ";
+            std::cout << "\n";
+
+            for (int nid : nearby)
+            {
+                if (nid == parent)
+                    continue;
+                if (branchForbidden.count(nid))
+                    continue;
+
+                if (std::find(curPath.begin(), curPath.end(), nid) != curPath.end())
+                    continue;
+
+                Eigen::Vector2f dir2 =
+                    (nodes[nid].position - curNode.position).normalized();
+
+                float dot = baseDir.dot(dir2);
+
+                // ⭐ 角度过滤
+                if (dot < ANGLE_COS)
+                    continue;
+
+                validCandidates.push_back(nid);
+
+                int deg = nodes[nid].links.size();
+
+                if (deg == 1)
+                    endpoints.push_back(nid);
+                else if (deg >= 3)
+                    branchNodes.push_back(nid);
+                else
+                    midNodes.push_back(nid);
+            }
+
+            // =========================
+            // 打印
+            // =========================
+            std::cout << "  [Candidates] : ";
+            for (int nid : validCandidates)
+                std::cout << nid << "(d=" << nodes[nid].links.size() << ") ";
+            std::cout << "\n";
+
+            auto printGroup = [&](const std::string &name, const std::vector<int> &arr)
+            {
+                std::cout << "    " << name << " : ";
+                for (int n : arr)
+                    std::cout << n << " ";
+                std::cout << "\n";
+            };
+
+            printGroup("endpoints", endpoints);
+            printGroup("branchNodes", branchNodes);
+            printGroup("midNodes", midNodes);
+
+            // =========================
+            // score（距离主导）
+            auto score = [&](int nid)
+            {
+                float dist = (nodes[nid].position - curNode.position).norm();
+                Eigen::Vector2f dir2 = (nodes[nid].position - curNode.position).normalized();
+                float dot = baseDir.dot(dir2);
+                return -dist * 2.0f + dot;
+            };
+
+            int best = -1;
+            float bestScore = -FLT_MAX;
+
+            auto pickBest = [&](std::vector<int> &arr, const std::string &tag)
+            {
+                for (int nid : arr)
+                {
+                    float s = score(nid);
+                    std::cout << "    [" << tag << "] "
+                              << nid << " score=" << s << "\n";
+                    if (s > bestScore)
+                    {
+                        bestScore = s;
+                        best = nid;
+                    }
+                }
+            };
+
+            std::cout << "  [Selection]\n";
+            if (!endpoints.empty())
+            {
+                std::cout << "    Priority: ENDPOINT\n";
+                pickBest(endpoints, "endpoint");
+            }
+            else if (!branchNodes.empty())
+            {
+                std::cout << "    Priority: BRANCH\n";
+                pickBest(branchNodes, "branch");
             }
             else
             {
-                baseDir = sum.normalized();
+                std::cout << "    Priority: MID\n";
+
+                for (int nid : midNodes)
+                {
+                    int pid = nodes[nid].paths[0];
+                    int dist = findNearestBranchDist(pid, nid);
+
+                    if (dist < MIN_BRANCH_GAP * 1.5f)
+                        continue;
+
+                    float s = score(nid);
+
+                    std::cout << "    [mid] " << nid
+                              << " branchDist=" << dist
+                              << " score=" << s << "\n";
+
+                    if (s > bestScore)
+                    {
+                        bestScore = s;
+                        best = nid;
+                    }
+                }
             }
+
+            if (best < 0)
+            {
+                std::cout << "  -> NO VALID TARGET\n";
+                continue;
+            }
+
+            float dist = (nodes[best].position - curNode.position).norm();
+
+            std::cout << "  [SELECTED] " << best
+                      << " dist=" << dist
+                      << " score=" << bestScore << "\n";
+
+            // =========================
+            // PATH UPDATE（保持你修好的逻辑）
+            // =========================
+            auto &targetNode = nodes[best];
+
+            std::cout << "  [PATH UPDATE]\n";
+
+            // ===== MID =====
+            if (targetNode.links.size() == 2)
+            {
+                auto it = std::find(curPath.begin(), curPath.end(), curNodeID);
+
+                if (it == curPath.end())
+                    continue;
+
+                if (it == curPath.begin())
+                    curPath.insert(curPath.begin(), best);
+                else if (it == curPath.end() - 1)
+                    curPath.push_back(best);
+
+                nodes[best].paths.push_back(curNode.paths[0]);
+            }
+
+            // ===== ENDPOINT =====
+            else if (targetNode.links.size() == 1)
+            {
+                int pid = targetNode.paths[0];
+                auto &path = paths[pid];
+
+                auto itCur = std::find(curPath.begin(), curPath.end(), curNodeID);
+
+                bool curHead = (itCur == curPath.begin());
+                bool targetHead = (path.front() == best);
+
+                if (curHead)
+                {
+                    if (targetHead)
+                        curPath.insert(curPath.begin(), path.rbegin(), path.rend());
+                    else
+                        curPath.insert(curPath.begin(), path.begin(), path.end());
+                }
+                else
+                {
+                    if (targetHead)
+                        curPath.insert(curPath.end(), path.begin(), path.end());
+                    else
+                        curPath.insert(curPath.end(), path.rbegin(), path.rend());
+                }
+
+                for (int nid : path)
+                    replacePathID(nid, pid, curNode.paths[0]);
+
+                path.clear();
+                if (validNodes.count(best))
+                {
+                    connectedEndpoints.insert(best);
+                }
+            }
+
+            // ===== BRANCH =====
+            else if (targetNode.links.size() >= 3)
+            {
+                for (int pid : targetNode.paths)
+                {
+                    auto &path = paths[pid];
+                    if (path.empty())
+                        continue;
+
+                    bool targetHead = (path.front() == best);
+                    bool targetTail = (path.back() == best);
+
+                    if (!targetHead && !targetTail)
+                        continue;
+
+                    auto itCur = std::find(curPath.begin(), curPath.end(), curNodeID);
+                    bool curHead = (itCur == curPath.begin());
+
+                    if (curHead)
+                    {
+                        if (targetHead)
+                            curPath.insert(curPath.begin(), path.rbegin(), path.rend());
+                        else
+                            curPath.insert(curPath.begin(), path.begin(), path.end());
+                    }
+                    else
+                    {
+                        if (targetHead)
+                            curPath.insert(curPath.end(), path.begin(), path.end());
+                        else
+                            curPath.insert(curPath.end(), path.rbegin(), path.rend());
+                    }
+
+                    for (int nid : path)
+                        replacePathID(nid, pid, curNode.paths[0]);
+
+                    path.clear();
+                    break;
+                }
+            }
+
+            // =========================
+            // 最后再 link（避免旧bug）
+            // =========================
+            nodes[curNodeID].links.push_back(best);
+            nodes[best].links.push_back(curNodeID);
+
+            std::cout << "  [LINK] " << curNodeID << " <-> " << best << "\n";
+            std::cout << "   DONE\n";
         }
 
-        // =========================
-        // CASE 3
-        else if (deg == 3)
-        {
-            Eigen::Vector2f sum(0, 0);
-            for (auto &d : dirs)
-                sum += d;
-
-            baseDir = (-sum).normalized();
-        }
-        else
-        {
-            return false;
-        }
-
-        // =========================
-        // 方向一致性（选正方向）
-        if (baseDir.dot(candidateDir) < 0)
-            baseDir = -baseDir;
-
-        float dotVal = baseDir.dot(candidateDir);
-        dotVal = std::clamp(dotVal, -1.0f, 1.0f);
-
-        float angle = acos(dotVal);
-
-        return angle < threshold * 0.5f;
+        std::cout << "\n================ FINAL CONNECT END =================\n";
     }
 
     void SCANetwork::replacePathID(int nodeID, int oldPID, int newPID)
@@ -1190,10 +1501,7 @@ namespace SCARoad
         return roads;
     }
 
-    Eigen::Vector2f SCANetwork::getGuidedDirection(
-        int nodeID,
-        const Eigen::Vector2f &candidateDir,
-        float threshold)
+    Eigen::Vector2f SCANetwork::getGuidedDirection(int nodeID,const Eigen::Vector2f &candidateDir,float threshold) const
     {
         auto &node = nodes[nodeID];
         int deg = node.links.size();
@@ -1246,41 +1554,8 @@ namespace SCARoad
             // std::cout << "blended baseDir = (" << baseDir.x() << ", " << baseDir.y() << ")\n";
         }
 
-        // =========================
-        // CASE 2
-        // =========================
-        // else if (deg == 2 || deg == 3)
-        // {
-        //     Eigen::Vector2f sum = dirs[0] + dirs[1];
-
-        //     std::cout << "[CASE 2] potential branch\n";
-        //     std::cout << "dir0 = (" << dirs[0].x() << "," << dirs[0].y() << ")\n";
-        //     std::cout << "dir1 = (" << dirs[1].x() << "," << dirs[1].y() << ")\n";
-
-        //     if (sum.norm() < 1e-3f)
-        //     {
-        //         baseDir = Eigen::Vector2f(-dirs[0].y(), dirs[0].x());
-        //         std::cout << "opposite case -> perpendicular baseDir\n";
-        //     }
-        //     else
-        //     {
-        //         baseDir = sum.normalized();
-        //         std::cout << "sum baseDir\n";
-        //     }
-
-        //     std::cout << "raw baseDir = (" << baseDir.x() << "," << baseDir.y() << ")\n";
-        //     std::cout << "threshold blend = " << threshold << "\n";
-        //     float dot = baseDir.dot(candidateDir);
-        //     if (dot < 0)
-        //         baseDir = -baseDir;
-        //     baseDir = (baseDir * threshold + candidateDir * (1 - threshold)).normalized();
-
-        //     std::cout << "blended baseDir = (" << baseDir.x() << "," << baseDir.y() << ")\n";
-        // }
-
-        // =========================
         // CASE 3
-        // =========================
+
         else if (deg == 2 || deg == 3)
         {
             Eigen::Vector2f sum(0, 0);
@@ -1321,6 +1596,353 @@ namespace SCARoad
         // std::cout << "============================\n";
 
         return baseDir.normalized();
+    }
+
+    Eigen::Vector2f SCANetwork::getConstraintDirection(int nodeID,const Eigen::Vector2f &dir) const
+    {
+        const SCANode &node = nodes[nodeID];
+        Eigen::Vector2f guidedDir = dir.normalized();
+
+        std::cout << "\n================ [ConstraintDir] =================\n";
+        std::cout << "[Node] ID=" << nodeID
+                  << " Pos=(" << node.position.x() << ", " << node.position.y() << ")"
+                  << " InputDir=(" << dir.x() << ", " << dir.y() << ")\n";
+
+        // =========================
+        // 1. 地形采样
+        // =========================
+        terrain::TerrainPoint tp;
+        if (!terrain.sampleTerrainPtAt(tp, node.position))
+        {
+            std::cout << "[Terrain] sample FAILED\n";
+            return guidedDir;
+        }
+
+        float slope = tp.slope;
+        float slopeDeg = slope * 180.0f / Litten_M_PI;
+        float aspectDeg = tp.aspect * 180.0f / Litten_M_PI;
+
+        std::cout << "[Terrain]\n";
+        std::cout << "  slope(rad)=" << slope
+                  << " slope(deg)=" << slopeDeg << "\n";
+        std::cout << "  aspect(deg)=" << aspectDeg << "\n";
+
+        // =========================
+        // 2. Tensor 方向
+        // =========================
+        float theta = field.sampleTheta(node.position);
+
+        std::vector<Eigen::Vector2f> tensorDirs = {
+            Eigen::Vector2f(std::cos(theta), std::sin(theta)),
+            Eigen::Vector2f(std::cos(theta + Litten_M_PI / 2.f), std::sin(theta + Litten_M_PI / 2.f)),
+            Eigen::Vector2f(std::cos(theta + Litten_M_PI), std::sin(theta + Litten_M_PI)),
+            Eigen::Vector2f(std::cos(theta + 3 * Litten_M_PI / 2.f), std::sin(theta + 3 * Litten_M_PI / 2.f))};
+
+        std::cout << "[TensorDirs]\n";
+        for (int i = 0; i < 4; ++i)
+        {
+            std::cout << "  d" << i << " = ("
+                      << tensorDirs[i].x() << ", "
+                      << tensorDirs[i].y() << ")\n";
+        }
+
+        // =========================
+        // 小坡度
+        // =========================
+        const float slopeThreshold = 8.0f * Litten_M_PI / 180.0f;
+
+        if (slope < slopeThreshold)
+        {
+            std::cout << "[Mode] LOW SLOPE -> tensor only\n";
+
+            float bestDot = -1.0f;
+            Eigen::Vector2f bestDir = guidedDir;
+
+            for (auto &d : tensorDirs)
+            {
+                float dot = d.normalized().dot(guidedDir);
+                std::cout << "  dot=" << dot << "\n";
+
+                if (dot > bestDot)
+                {
+                    bestDot = dot;
+                    bestDir = d;
+                }
+            }
+
+            std::cout << "[Selected Tensor Dir] = ("
+                      << bestDir.x() << ", " << bestDir.y() << ")\n";
+
+            return bestDir.normalized();
+        }
+
+        // =========================
+        // 大坡度
+        // =========================
+        std::cout << "[Mode] HIGH SLOPE\n";
+
+        float h0;
+        if (!terrain.sampleHeightAt(h0, node.position))
+        {
+            std::cout << "[Height] sample FAILED\n";
+            return guidedDir;
+        }
+
+        std::cout << "[Height]\n";
+        std::cout << "  h0 = " << h0 << "\n";
+
+        Eigen::Vector2f dirA = tensorDirs[0].normalized();
+        Eigen::Vector2f dirB = tensorDirs[1].normalized();
+
+        float h1, h2;
+        terrain.sampleHeightAt(h1, node.position + dirA);
+        terrain.sampleHeightAt(h2, node.position + dirB);
+
+        float dh1 = std::abs(h1 - h0);
+        float dh2 = std::abs(h2 - h0);
+
+        std::cout << "[Sample Directions]\n";
+        std::cout << "  dirA = (" << dirA.x() << ", " << dirA.y() << ")\n";
+        std::cout << "    h1=" << h1 << " dh1=" << dh1 << "\n";
+
+        std::cout << "  dirB = (" << dirB.x() << ", " << dirB.y() << ")\n";
+        std::cout << "    h2=" << h2 << " dh2=" << dh2 << "\n";
+
+        Eigen::Vector2f Dir_parallel, Dir_vertical;
+
+        if (dh1 < dh2)
+        {
+            Dir_parallel = dirA;
+            Dir_vertical = dirB;
+        }
+        else
+        {
+            Dir_parallel = dirB;
+            Dir_vertical = dirA;
+        }
+
+        std::cout << "[Chosen Basis]\n";
+        std::cout << "  Parallel = (" << Dir_parallel.x() << ", " << Dir_parallel.y() << ")\n";
+        std::cout << "  Vertical = (" << Dir_vertical.x() << ", " << Dir_vertical.y() << ")\n";
+
+        // =========================
+        // 局部坐标
+        // =========================
+        float baseAngle = std::atan2(Dir_parallel.y(), Dir_parallel.x());
+
+        auto toLocalAngle = [&](const Eigen::Vector2f &v)
+        {
+            float a = std::atan2(v.y(), v.x()) - baseAngle;
+
+            while (a < 0)
+                a += 2 * Litten_M_PI;
+            while (a >= 2 * Litten_M_PI)
+                a -= 2 * Litten_M_PI;
+
+            return a;
+        };
+
+        auto fromLocalAngle = [&](float a)
+        {
+            float global = a + baseAngle;
+            return Eigen::Vector2f(std::cos(global), std::sin(global));
+        };
+
+        float guidedAngle = toLocalAngle(guidedDir);
+
+        std::cout << "[Local Space]\n";
+        std::cout << "  guidedAngle(deg)=" << guidedAngle * 180.0f / Litten_M_PI << "\n";
+
+        float thetaMax = std::asin(
+            std::clamp(std::tan(10.0f * Litten_M_PI / 180.0f) / std::tan(slope), 0.0f, 1.0f));
+
+        std::cout << "  thetaMax(deg)=" << thetaMax * 180.0f / Litten_M_PI << "\n";
+
+        // =========================
+        // Clamp
+        // =========================
+        auto clampAngle = [&](float a)
+        {
+            float orig = a;
+
+            if (a > Litten_M_PI)
+                a -= 2 * Litten_M_PI;
+
+            float absA = std::abs(a);
+
+            std::cout << "  [Clamp] input=" << orig * 180.0f / Litten_M_PI
+                      << " mapped=" << a * 180.0f / Litten_M_PI << "\n";
+
+            if (absA <= thetaMax)
+            {
+                std::cout << "    inside parallel sector\n";
+                return a;
+            }
+
+            if (std::abs(absA - Litten_M_PI) <= thetaMax)
+            {
+                std::cout << "    inside opposite sector\n";
+                return a;
+            }
+
+            float out;
+            if (absA < Litten_M_PI / 2.f)
+            {
+                out = (a > 0 ? thetaMax : -thetaMax);
+            }
+            else
+            {
+                out = (a > 0 ? Litten_M_PI - thetaMax : -Litten_M_PI + thetaMax);
+            }
+
+            std::cout << "    clamped to " << out * 180.0f / Litten_M_PI << "\n";
+            return out;
+        };
+
+        float clampedAngle = clampAngle(guidedAngle);
+
+        Eigen::Vector2f finalDir = fromLocalAngle(clampedAngle);
+
+        std::cout << "[Final]\n";
+        std::cout << "  finalDir(before flip)=("
+                  << finalDir.x() << ", " << finalDir.y() << ")\n";
+
+        if (finalDir.dot(guidedDir) < 0)
+        {
+            std::cout << "  flipped to match guidedDir\n";
+            finalDir = -finalDir;
+        }
+
+        std::cout << "  finalDir=("
+                  << finalDir.x() << ", " << finalDir.y() << ")\n";
+
+        std::cout << "==================================================\n";
+
+        return finalDir.normalized();
+    }
+
+    std::vector<std::pair<int, std::unordered_set<int>>> SCANetwork::collectEndpointWithForbidden(int forbiddenGap) const
+    {
+        std::vector<std::pair<int, std::unordered_set<int>>> result;
+
+        for (int pid = 0; pid < paths.size(); ++pid)
+        {
+            const auto &path = paths[pid];
+
+            if (path.empty())
+                continue;
+
+            // std::cout << "\n--------------------------------------------------\n";
+            std::cout << "[Path " << pid << "] size=" << path.size() << "\n";
+
+            // =========================
+            // 打印 path
+            std::cout << "  nodes: ";
+            for (int nid : path)
+                std::cout << nid << " ";
+            std::cout << "\n";
+            // =========================
+            // 1. 找 branch index
+            std::vector<int> branchIdx;
+
+            for (int i = 0; i < (int)path.size(); ++i)
+            {
+                int nid = path[i];
+                if (nodes[nid].links.size() >= 3)
+                {
+                    branchIdx.push_back(i);
+                }
+            }
+
+            // =========================
+            // 2. 找 endpoints（只看两端）
+            // =========================
+            std::vector<int> endpoints;
+            std::vector<int> endIdxs;
+
+            if (nodes[path.front()].links.size() == 1)
+            {
+                endpoints.push_back(path.front());
+                endIdxs.push_back(0);
+            }
+
+            if (nodes[path.back()].links.size() == 1)
+            {
+                endpoints.push_back(path.back());
+                endIdxs.push_back(path.size() - 1);
+            }
+
+            // =========================
+            // 3. 遍历 endpoint
+            // =========================
+            for (int i = 0; i < endpoints.size(); ++i)
+            {
+                int endpoint = endpoints[i];
+                int idx = endIdxs[i];
+
+                std::unordered_set<int> forbiddenSet;
+
+                // =========================
+                // CASE 1：没有 branch
+                // =========================
+                if (branchIdx.empty())
+                {
+                    result.emplace_back(endpoint, forbiddenSet);
+                    continue;
+                }
+
+                // =========================
+                // 找最近 branch
+                // =========================
+                int nearestBranchIdx = -1;
+                int minDist = INT_MAX;
+
+                for (int b : branchIdx)
+                {
+                    int d = abs(b - idx);
+                    if (d < minDist)
+                    {
+                        minDist = d;
+                        nearestBranchIdx = b;
+                    }
+                }
+
+                if (nearestBranchIdx < 0)
+                {
+                    result.emplace_back(endpoint, forbiddenSet);
+                    continue;
+                }
+
+                int branchNode = path[nearestBranchIdx];
+
+                // =========================
+                // 收集 forbidden（branch邻域）
+                // =========================
+                for (int bpid : nodes[branchNode].paths)
+                {
+                    const auto &bpath = paths[bpid];
+
+                    auto it = std::find(bpath.begin(), bpath.end(), branchNode);
+                    if (it == bpath.end())
+                        continue;
+
+                    int bidx = std::distance(bpath.begin(), it);
+
+                    for (int k = -forbiddenGap; k <= forbiddenGap; ++k)
+                    {
+                        int id = bidx + k;
+                        if (id >= 0 && id < bpath.size())
+                        {
+                            forbiddenSet.insert(bpath[id]);
+                        }
+                    }
+                }
+
+                result.emplace_back(endpoint, forbiddenSet);
+            }
+        }
+
+        return result;
     }
 
     std::unordered_set<int> SCANetwork::filterAllPathEndpoints(int minLen) const
@@ -1498,16 +2120,15 @@ namespace SCARoad
 
         float halfW = width * 0.5f;
         float halfH = height * 0.5f;
-
-        for (int i = 0; i < num; i++)
+        std::vector<Eigen::Vector2f> bounding = {
+            {-halfW, -halfH},
+            {halfW, -halfH},
+            {halfW, halfH},
+            {-halfW, halfH}};
+        pos = util::Math2<float>::gen_poisson_sites_in_poly(bounding, 30.f, 30, (unsigned)time(nullptr));
+        for (int i = 0; i < pos.size(); i++)
         {
-            float x = randomFloat(-halfW, halfW) + center.x();
-            float y = randomFloat(-halfH, halfH) + center.y();
-
-            Eigen::Vector2f p(x, y);
-
-            pos.push_back(p);
-            attractors.emplace_back(p, settings);
+            attractors.emplace_back(pos[i], settings);
         }
 
         return attractors;
