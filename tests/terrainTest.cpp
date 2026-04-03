@@ -133,25 +133,29 @@ int main()
         parcelObbs.push_back(obb.poly);
     }
 
-    Polyline2_t<float> testPolyA({{0.f, 0.f}, {10.f, 10.f}, {20.f, 0.f}, {20.f, 20.f}, {0.f, 20.f}, {0.f, 0.f}}, true);
+    Polyline2_t<float> testPolyA({{0.f, 0.f}, {50.f, 50.f}, {100.f, 0.f}, {100.f, 100.f}, {0.f, 100.f}, {0.f, 0.f}}, true);
     Polyline2_t<float> testPolyB({{10.f, 0.f}, {31.f, 11.f}, {12.f, 14.f}, {10.f, 0.f}}, true);
     std::vector<Vector2f> cutPoints = {{0.f, 10.f}, {20.f, 10.f}, {10.f, 30.f}, {-5.f, 10.f}};
     // cutPoints.insert(cutPoints.end(), std::make_move_iterator(cutPoints.end()), std::make_move_iterator(cutPoints.begin()));
     Polyline2_t<float> cutline(cutPoints);
 
     Polyline2_t<float> unionPoly = geo::unionPolygon(testPolyA, testPolyB);
-    std::vector<Polyline2_t<float>> subedPolys = geo::subPolygon(testPolyA, testPolyB);
-    std::vector<Polyline2_t<float>> interPolys = geo::intersectPolygon(testPolyA, testPolyB);
-    std::vector<Polyline2_t<float>> cuttedPolys = geo::splitPolygonByPolylines(testPolyA, {cutline});
-    std::cout << "cuttedpolys is " << cuttedPolys.size() << std::endl;
+    // std::vector<Polyline2_t<float>> subedPolys = geo::subPolygon(testPolyA, testPolyB);
+    // std::vector<Polyline2_t<float>> interPolys = geo::intersectPolygon(testPolyA, testPolyB);
+    // std::vector<Polyline2_t<float>> cuttedPolys = geo::splitPolygonByPolylines(testPolyA, {cutline});
+    // std::cout << "cuttedpolys is " << cuttedPolys.size() << std::endl;
     std::vector<Polyline2_t<float>> offsetPolys;
-    static float offsetDist = -1.f;
+    static float offsetDist = -6.f;
+    std::vector<Polyline2_t<float>> divPolys /*= geo::generateRandomPolysAlongPolygon(testPolyA, offsetDist, 7.f, 12.f)*/;
+
     bool offsetPoly = false;
-    for (const auto &poly : cuttedPolys)
-    {
-        std::vector<Polyline2_t<float>> offsets = geo::offsetPolygon(poly, offsetDist);
-        offsetPolys.insert(offsetPolys.end(), offsets.begin(), offsets.end());
-    }
+    static float offsetDist2 = -1.f;
+    bool offsetInside = false;
+    // for (const auto &poly : divPolys)
+    // {
+    //     std::vector<Polyline2_t<float>> offsets = geo::offsetPolygon(poly, offsetDist2);
+    //     offsetPolys.insert(offsetPolys.end(), offsets.begin(), offsets.end());
+    // }
 
     const std::vector<float> area_ratio = {0.4f, 0.3f, 0.2f, 0.1f, 0.1f, 0.1f};
     const std::vector<std::pair<size_t, size_t>> room_connections = {{0, 1}, {0, 2}, {1, 3}, {0, 4}, {4, 5}};
@@ -306,6 +310,39 @@ int main()
                 net.finalConnectNodes(10, 17, 6);
                 scaRoads = net.extractRoads();
                 projSCAroads.clear();
+                for (const auto &l : scaRoads)
+                {
+                    std::vector<Vector3f> projLine;
+                    if (terrain.projectPolylineToTerrain(l, projLine))
+                        projSCAroads.push_back(projLine);
+                }
+            }
+
+            if (IsKeyPressed(KEY_P))
+            {
+                scaRoads.clear();
+                projSCAroads.clear();
+                const auto &allRoads = net.extractCloseAndLinearRoads();
+                for (const auto &poly : allRoads.first)
+                {
+                    scaRoads.push_back(poly.points);
+                }
+                // for (const auto &poly : scaRoads)
+                // {
+                    // std::vector<Polyline2_t<float>> divSitePolys = geo::generateRandomPolysAlongPolygon(Polyline2_t(scaRoads[0]), offsetDist, 8.f, 15.f);
+                    // divPolys.insert(divPolys.end(), divSitePolys.begin(), divSitePolys.end());
+                    // for (const auto &div : divSitePolys)
+                    // {
+                    //     std::vector<Polyline2_t<float>> offsets = geo::offsetPolygon(div, offsetDist2);
+                    //     offsetPolys.insert(offsetPolys.end(), offsets.begin(), offsets.end());
+                    // }
+                // }
+
+                for (const auto &poly : allRoads.second)
+                {
+                    scaRoads.push_back(poly.points);
+                }
+
                 for (const auto &l : scaRoads)
                 {
                     std::vector<Vector3f> projLine;
@@ -491,11 +528,28 @@ int main()
             if (offsetPoly)
             {
                 offsetPolys.clear();
-                for (const auto &poly : cuttedPolys)
+                for (const auto &poly : scaRoads)
                 {
-                    std::vector<Polyline2_t<float>> offsets = geo::offsetPolygon(poly, offsetDist);
+                    std::vector<Polyline2_t<float>> divSitePolys = geo::generateRandomPolysAlongPolygon(Polyline2_t(poly), offsetDist, 8.f, 15.f);
+                    divPolys.insert(divPolys.end(), divSitePolys.begin(), divSitePolys.end());
+                    for (const auto &div : divSitePolys)
+                    {
+                        std::vector<Polyline2_t<float>> offsets = geo::offsetPolygon(div, offsetDist2);
+                        offsetPolys.insert(offsetPolys.end(), offsets.begin(), offsets.end());
+                    }
+                }
+
+                offsetPoly = false;
+            }
+            if (offsetInside)
+            {
+                offsetPolys.clear();
+                for (const auto &poly : divPolys)
+                {
+                    std::vector<Polyline2_t<float>> offsets = geo::offsetPolygon(poly, offsetDist2);
                     offsetPolys.insert(offsetPolys.end(), offsets.begin(), offsets.end());
                 }
+                offsetInside = false;
             }
         },
         [&]() { // 3维空间绘图内容部分
@@ -545,9 +599,9 @@ int main()
             //         terrain.drawPath(path.path, pathWidth);
             // terrain.drawGraphEdges(debugCx,debugCy,debugRank);
             // DrawGrid(20,1.f);
-            DrawLine3D({0, 0, 0}, {10000, 0, 0}, RL_RED);
-            DrawLine3D({0, 0, 0}, {0, 10000, 0}, RL_BLUE);
-            DrawLine3D({0, 0, 0}, {0, 0, -10000}, RL_GREEN);
+            // DrawLine3D({0, 0, 0}, {10000, 0, 0}, RL_RED);
+            // DrawLine3D({0, 0, 0}, {0, 10000, 0}, RL_BLUE);
+            // DrawLine3D({0, 0, 0}, {0, 0, -10000}, RL_GREEN);
 
             //----------------------------------------road path point debug----------------------------------------
             // render::draw_points(seedPoints, RL_YELLOW, 0.25f, 1.2f);
@@ -625,11 +679,24 @@ int main()
             //     render::draw_bold_polyline2(poly.points, RL_DARKPURPLE, 60.f, pathWidth, lineData.color.a, {terrain.getWidth() * terrain.getCellSize(), 0});
             // }
 
-            // for (const auto &poly : offsetPolys)
-            // {
-            //     render::draw_bold_polyline2(poly.points, RL_DARKGREEN, 60.f, pathWidth, lineData.color.a, {terrain.getWidth() * terrain.getCellSize(), 0});
-            // }
+            for (int i = 0; i < offsetPolys.size(); i++)
+            {
+                Color c = renderUtil::ColorFromHue((float)i / offsetPolys.size());
+                render::draw_bold_polyline2(offsetPolys[i].points, RL_DARKPURPLE, 0.f, lineData.Thickness, lineData.color.a /*,{terrain.getWidth() * terrain.getCellSize(), 0}*/);
+                render::fill_polygon2(offsetPolys[i].points, c, 0.f, 0.3f);
+            }
 
+            // for (int i = 0; i < divPolys.size(); i++)
+            // {
+            //     Color c = renderUtil::ColorFromHue((float)i / divPolys.size());
+            //     render::draw_bold_polyline2(divPolys[i].points, RL_DARKPURPLE, 0.f, pathWidth, lineData.color.a);
+            //     render::fill_polygon2(divPolys[i].points, c, 0.f, 0.3f);
+            // }
+            //  for (const auto &poly : divPolys)
+            // {
+            //     render::draw_bold_polyline2(poly.points, RL_DARKPURPLE, 60.f, pathWidth, lineData.color.a /*,{terrain.getWidth() * terrain.getCellSize(), 0}*/);
+            // }
+            //  render::draw_bold_polyline2(testPolyA.points, RL_RED, 60.f, pathWidth, lineData.color.a /*,{terrain.getWidth() * terrain.getCellSize(), 0}*/);
             // extrudeMesh.draw(color, colorAlpha,outline, wireframe, wireframeAlpha);
             // extrudeMesh_2.draw(GREEN, colorAlpha,outline, wireframe, wireframeAlpha);
             // extrudeMesh_3.draw(RED, colorAlpha,outline, wireframe, wireframeAlpha);
@@ -642,7 +709,6 @@ int main()
             {
                 render.draw_index_fonts(nodePoints, render.fontData.size, render.fontData.color);
             }
-
 
             terrain.drawContourPtIndices(layers, render);
             if (showText)
@@ -876,6 +942,7 @@ int main()
                     terrainfieldWeightChanged |= ImGui::SliderFloat("Terrain Field Weight", &terrainWeight, 1.f, 10.f, "%.1f");
                     radiusChanged |= ImGui::SliderFloat("Point Radius", &radius, 7.f, 30.f, "%.1f");
                     offsetPoly |= ImGui::SliderFloat("OffsetDist", &offsetDist, -10.f, 10.f, "%.1f");
+                    offsetInside |= ImGui::SliderFloat("OffsetDistInside", &offsetDist2, -10.f, 10.f, "%.1f");
                     ImGui::Unindent();
                 }
             }

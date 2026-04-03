@@ -868,26 +868,57 @@ namespace geo
     /*
      *offset polygon,negative distance for inward, positive for outward, return multiple offset polygons because of possible self-intersection
      */
+
     template <typename Scalar>
     std::vector<Polyline2_t<Scalar>> offsetPolygon(const Polyline2_t<Scalar> &poly, Scalar dist)
     {
         std::vector<Polyline2_t<Scalar>> out;
+
         using Ss = CGAL::Straight_skeleton_2<Kernel>;
         using SsPtr = std::shared_ptr<Ss>;
-        using OffsetPolygonPtr = std::shared_ptr<Polygon2>;
+
         Polygon2 cgalPoly = toCgalPolygon(poly);
 
-        // 先生成 Straight Skeleton
+        // =========================
+        //  输入合法性检查
+        // =========================
+
+        // 点数
+        if (cgalPoly.size() < 3)
+            return out;
+
+        // 自交检测（最重要）
+        if (!cgalPoly.is_simple())
+            return out;
+
+        // 面积退化
+        if (std::abs(cgalPoly.area()) < 1e-12)
+            return out;
+
+        // 方向修正（必须 CCW）
+        if (cgalPoly.orientation() != CGAL::COUNTERCLOCKWISE)
+            cgalPoly.reverse_orientation();
+
+        // =========================
+        // skeleton
+        // =========================
+
         SsPtr ss = CGAL::create_interior_straight_skeleton_2(cgalPoly);
 
         if (!ss)
             return out;
 
-        //  再从 skeleton 生成 offset polygon
+        // =========================
+        // offset
+        // =========================
+
         auto offset_polys = CGAL::create_offset_polygons_2<Polygon2>(-dist, *ss);
 
         for (const auto &op : offset_polys)
-            out.push_back(cgalPolygonToPolyline<Scalar>(*op));
+        {
+            if (op && op->is_simple()) // 再保险一次
+                out.push_back(cgalPolygonToPolyline<Scalar>(*op));
+        }
 
         return out;
     }
@@ -908,6 +939,58 @@ namespace geo
 
             CGAL::insert(arr, Segment_2(Point_2(typename Kernel::FT(p0.x()), typename Kernel::FT(p0.y())),
                                         Point_2(typename Kernel::FT(p1.x()), typename Kernel::FT(p1.y()))));
+        }
+    }
+
+    template <typename Scalar>
+    void insertPolygonEdges(const Polygon2 &poly, Arrangement &arr)
+    {
+        if (poly.is_empty())
+            return;
+        auto prev = poly.vertices_end();
+        --prev; // 最后一个点
+        for (auto it = poly.vertices_begin(); it != poly.vertices_end(); ++it)
+        {
+            const Point_2 &p0 = *prev;
+            const Point_2 &p1 = *it;
+            if (CGAL::squared_distance(p0, p1) > 1e-16) // 避免退化边
+                CGAL::insert(arr, Segment_2(p0, p1));
+            prev = it;
+        }
+    }
+
+    // 辅助函数：将 Polygon_with_holes_2 的所有边界（外环+所有内环）插入到 Arrangement 中
+    template <typename Kernel>
+    void insertPolygonWithHolesEdges(const CGAL::Polygon_with_holes_2<Kernel> &polyWithHoles,
+                                     CGAL::Arrangement_2<CGAL::Arr_segment_traits_2<Kernel>> &arr)
+    {
+        // 插入外环（逆时针）
+        const auto &outer = polyWithHoles.outer_boundary();
+        if (outer.size() < 3)
+            return;
+        for (auto it = outer.begin(); it != outer.end(); ++it)
+        {
+            auto next = it;
+            ++next;
+            if (next == outer.end())
+                next = outer.begin();
+            CGAL::insert(arr, Segment_2(*it, *next));
+        }
+
+        // 插入内环（洞，顺时针方向）
+        for (auto hi = polyWithHoles.holes_begin(); hi != polyWithHoles.holes_end(); ++hi)
+        {
+            const auto &hole = *hi;
+            if (hole.size() < 3)
+                continue;
+            for (auto it = hole.begin(); it != hole.end(); ++it)
+            {
+                auto next = it;
+                ++next;
+                if (next == hole.end())
+                    next = hole.begin();
+                CGAL::insert(arr, Segment_2(*it, *next));
+            }
         }
     }
 
@@ -968,6 +1051,363 @@ namespace geo
         for (const auto &pl : cutters)
             insertPolyline(pl, arr);
         return extractFaces(arr, polygon);
+    }
+
+    template <typename Scalar>
+    std::vector<Polyline2_t<Scalar>> splitPolygonWithHolesByPolylines(
+        const CGAL::Polygon_with_holes_2<Kernel> &polyWithHoles,
+        const std::vector<Polyline2_t<Scalar>> &cutters)
+    {
+
+        using Arr_traits = CGAL::Arr_segment_traits_2<Kernel>;
+
+        Arrangement arr;
+        // 插入多边形边界（外环 + 所有内环）
+        insertPolygonWithHolesEdges(polyWithHoles, arr);
+
+        // 插入所有切割线
+        for (const auto &cutter : cutters)
+        {
+            insertPolyline(cutter, arr);
+        }
+
+        // 提取位于环形区域（外环内且不在任何内环内）的有界面
+        std::vector<Polygon2> result;
+        std::vector<Polyline2_t<Scalar>> pl_result;
+        // 获取原始外环和内环用于包含性测试
+        Polygon2 outer = polyWithHoles.outer_boundary();
+        if (outer.size() < 3)
+            return pl_result;
+        if (outer.orientation() == CGAL::CLOCKWISE)
+            outer.reverse_orientation();
+        std::vector<Polygon2> holes;
+        for (auto hi = polyWithHoles.holes_begin(); hi != polyWithHoles.holes_end(); ++hi)
+        {
+            Polygon2 hole = *hi;
+            if (hole.orientation() == CGAL::CLOCKWISE)
+                hole.reverse_orientation();
+            if (hole.size() < 3)
+                continue;
+            holes.push_back(hole);
+        }
+
+        for (auto fit = arr.faces_begin(); fit != arr.faces_end(); ++fit)
+        {
+            if (fit->is_unbounded())
+                continue;
+
+            // 获取外边界环
+            auto ccb = fit->outer_ccb();
+            if (ccb == nullptr)
+                continue;
+
+            // 收集环上的点
+            std::vector<Point_2> ring;
+            auto curr = ccb;
+            do
+            {
+                ring.push_back(curr->source()->point());
+                ++curr;
+            } while (curr != ccb);
+
+            // 转换为简单多边形
+            Polygon2 candidate(ring.begin(), ring.end());
+            if (candidate.orientation() == CGAL::CLOCKWISE)
+                candidate.reverse_orientation();
+
+            // 取面内一点（重心）
+            auto pl_candi = cgalPolygonToPolyline<Scalar>(candidate);
+            Vector2<Scalar> eigen_interior = util::Math2<Scalar>::getPointStrictInSidePolygon(pl_candi.points);
+            Point_2 interior(eigen_interior.x(), eigen_interior.y());
+
+            // 判断该点是否在原始外环内且不在任何洞内
+            if (CGAL::bounded_side_2(outer.begin(), outer.end(), interior) != CGAL::ON_BOUNDED_SIDE)
+                continue;
+
+            bool insideHole = false;
+            for (const auto &hole : holes)
+            {
+                if (CGAL::bounded_side_2(hole.begin(), hole.end(), interior) == CGAL::ON_BOUNDED_SIDE)
+                {
+                    insideHole = true;
+                    break;
+                }
+            }
+            if (insideHole)
+                continue;
+
+            result.push_back(candidate);
+        }
+
+        for (auto &p : result)
+        {
+            Polyline2_t<Scalar> poly = cgalPolygonToPolyline<Scalar>(p);
+            pl_result.push_back(poly);
+        }
+
+        return pl_result;
+    }
+
+    template <typename Scalar>
+    Vector2<Scalar> closestPointOnSegment(
+        const Vector2<Scalar> &p,
+        const Vector2<Scalar> &a,
+        const Vector2<Scalar> &b)
+    {
+        Vector2<Scalar> ab = b - a;
+        Scalar len2 = ab.squaredNorm();
+
+        if (len2 < (Scalar)1e-12)
+            return a;
+
+        Scalar t = (p - a).dot(ab) / len2;
+
+        t = std::clamp(t, (Scalar)0, (Scalar)1);
+
+        return a + ab * t;
+    }
+
+    template <typename Scalar>
+    Vector2<Scalar> closestPointOnPoly(
+        const std::vector<Vector2<Scalar>> &poly,
+        const Vector2<Scalar> &p)
+    {
+        if (poly.size() < 2)
+            return p;
+
+        Scalar minDist2 = std::numeric_limits<Scalar>::max();
+        Vector2<Scalar> best = poly[0];
+
+        for (size_t i = 0; i + 1 < poly.size(); ++i)
+        {
+            const auto &a = poly[i];
+            const auto &b = poly[i + 1];
+
+            Vector2<Scalar> q = closestPointOnSegment(p, a, b);
+            Scalar d2 = (q - p).squaredNorm();
+
+            if (d2 < minDist2)
+            {
+                minDist2 = d2;
+                best = q;
+            }
+        }
+
+        return best;
+    }
+
+    template <typename Scalar>
+    std::vector<Vector2<Scalar>> dividePolyLineByRandomStep(
+        const std::vector<Vector2<Scalar>> &poly,
+        Scalar step,
+        Scalar shake,
+        Scalar minStep)
+    {
+        std::vector<Vector2<Scalar>> result;
+
+        if (poly.size() < 2)
+            return result;
+
+        std::mt19937 rng(std::random_device{}());
+        std::uniform_real_distribution<Scalar> dist(-1.0, 1.0);
+
+        Vector2<Scalar> p1 = poly[0];
+        result.push_back(p1);
+
+        Scalar curr_span = step + dist(rng) * shake;
+
+        for (size_t i = 1; i < poly.size(); ++i)
+        {
+            Vector2<Scalar> p2 = poly[i];
+
+            Vector2<Scalar> seg = p2 - p1;
+            Scalar segLen = seg.norm();
+
+            if (segLen < (Scalar)1e-8)
+            {
+                p1 = p2;
+                continue;
+            }
+
+            Vector2<Scalar> dir = seg / segLen;
+
+            Scalar remaining = segLen;
+
+            while (remaining >= curr_span)
+            {
+                Vector2<Scalar> p = p1 + dir * curr_span;
+                result.push_back(p);
+
+                p1 = p;
+                remaining -= curr_span;
+
+                curr_span = step + dist(rng) * shake;
+            }
+
+            p1 = p2;
+            curr_span -= remaining;
+        }
+
+        // 保证终点
+        if ((poly.back() - result.back()).norm() > minStep)
+        {
+            result.push_back(poly.back());
+        }
+
+        // 防止最后一个太近
+        if (result.size() > 1)
+        {
+            Scalar d = (result.back() - result[result.size() - 2]).norm();
+            if (d < minStep)
+            {
+                result.pop_back();
+            }
+        }
+
+        return result;
+    }
+
+    //*insure offset inside with negative depth
+    template <typename Scalar>
+    std::vector<Polyline2_t<Scalar>> generateRandomPolysAlongPolygon(
+        const Polyline2_t<Scalar> &poly,
+        Scalar depth,
+        Scalar minWidth,
+        Scalar maxWidth)
+    {
+        using Ss = CGAL::Straight_skeleton_2<Kernel>;
+        using SsPtr = std::shared_ptr<Ss>;
+        using PolygonWithHoles = CGAL::Polygon_with_holes_2<Kernel>;
+
+        std::vector<Polyline2_t<Scalar>> result;
+
+        std::cout << "\n================ generateRandomPolys BEGIN ================\n";
+
+        Polygon2 outer = toCgalPolygon(poly);
+
+        std::cout << "[Input] poly pts = " << poly.points.size() << "\n";
+
+        // =========================
+        // 1. offset inner
+        // =========================
+        SsPtr ss = CGAL::create_interior_straight_skeleton_2(outer);
+        if (!ss)
+        {
+            std::cout << "[ERROR] skeleton failed\n";
+            return result;
+        }
+
+        if (depth < 0)
+            depth = -depth;
+
+        std::cout << "[Offset] depth = " << depth << "\n";
+
+        auto offsets = CGAL::create_offset_polygons_2<Polygon2>(depth, *ss);
+        if (offsets.empty())
+        {
+            std::cout << "[ERROR] offset empty\n";
+            return result;
+        }
+
+        Polygon2 inner = *offsets.front();
+
+        std::cout << "[Offset] inner polygon size = " << inner.size() << "\n";
+
+        // =========================
+        // 2. ring = outer - inner
+        // =========================
+        std::list<PolygonWithHoles> diff;
+        CGAL::difference(outer, inner, std::back_inserter(diff));
+
+        if (diff.empty())
+        {
+            std::cout << "[ERROR] difference empty\n";
+            return result;
+        }
+
+        std::vector<Polyline2_t<Scalar>> pieces;
+
+        // =========================
+        // 3. inner 采样
+        // =========================
+        Polyline2_t<Scalar> innerPoly = cgalPolygonToPolyline<Scalar>(inner);
+
+        std::vector<Vector2<Scalar>> divPts = dividePolyLineByRandomStep(
+            innerPoly.points,
+            Scalar((minWidth + maxWidth) * 0.5),
+            Scalar((maxWidth - minWidth) * 0.5),
+            Scalar(minWidth));
+
+        std::cout << "[Divide] pts count = " << divPts.size() << "\n";
+
+        for (int i = 0; i < divPts.size(); ++i)
+        {
+            std::cout << "  pt" << i
+                      << " = (" << divPts[i].x() << "," << divPts[i].y() << ")\n";
+        }
+
+        // =========================
+        // 4. cutters
+        // =========================
+        std::vector<Polyline2_t<Scalar>> cutters;
+
+        int cid = 0;
+
+        for (auto &pt : divPts)
+        {
+            Vector2<Scalar> p = pt;
+
+            Vector2<Scalar> closest = closestPointOnPoly(poly.points, p);
+
+            Vector2<Scalar> dir = (closest - p);
+
+            if (dir.norm() < Scalar(1e-6))
+            {
+                std::cout << "[Skip] zero dir\n";
+                continue;
+            }
+
+            dir.normalize();
+
+            Scalar extendLen = Scalar(0.5);
+            Vector2<Scalar> a = p - dir * extendLen;
+            Vector2<Scalar> b = closest + dir * extendLen;
+
+            Polyline2_t<Scalar> cutter({a, b});
+
+            cutters.push_back(cutter);
+
+            std::cout << "[Cutter] " << cid++ << " \n";
+            std::cout << "   dir=(" << dir.x() << "," << dir.y() << ")\n";
+            std::cout << "   p=(" << p.x() << "," << p.y() << ")\n";
+            std::cout << "   closest=(" << closest.x() << "," << closest.y() << ")\n";
+        }
+
+        std::cout << "[Cutters] count = " << cutters.size() << "\n";
+        auto &ringWithHole = diff.front();
+        std::vector<Polyline2_t<Scalar>> current = splitPolygonWithHolesByPolylines(ringWithHole, cutters);
+
+        for (auto &p : current)
+        {
+            Scalar area = util::Math2<Scalar>::polygon_area(p.points);
+
+            std::cout << "  area=" << area;
+
+            if (std::abs(area) > 1e-2)
+            {
+                result.push_back(p);
+                std::cout << " -> KEEP\n";
+            }
+            else
+            {
+                std::cout << " -> DROP\n";
+            }
+        }
+
+        std::cout << "[Final] result count = " << result.size() << "\n";
+        std::cout << "================ generateRandomPolys END =================\n\n";
+
+        return result;
     }
 
     template <typename Scalar>
@@ -1414,7 +1854,8 @@ namespace geo
 
     template <typename Scalar>
     std::vector<Vector2<Scalar>>
-    samplePointsOnPolygonWithSpacing(const Polyline2_t<Scalar> &poly,int n,unsigned seed = 0){
+    samplePointsOnPolygonWithSpacing(const Polyline2_t<Scalar> &poly, int n, unsigned seed = 0)
+    {
         std::vector<Vector2<Scalar>> result;
         if (poly.points.size() < 2 || n <= 0)
             return result;

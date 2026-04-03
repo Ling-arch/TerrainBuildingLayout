@@ -10,6 +10,14 @@
 
 namespace SCARoad
 {
+
+    struct HalfEdge
+    {
+        int from;
+        int to;
+        float angle;
+    };
+
     struct AttractorSettings
     {
         float attractionDistance = 50.0f;
@@ -41,7 +49,6 @@ namespace SCARoad
         std::vector<int> influencedBy;
         std::vector<int> paths;
         std::vector<int> links;
-        std::vector<int> extraLinks;
         SCANode() = default;
     };
 
@@ -74,8 +81,8 @@ namespace SCARoad
 
         SCANetwork();
         SCANetwork(std::vector<SCANode> nodesIn, std::vector<Attractor> attractorsIn, const Terrain &terrainIn, const TensorField &fieldIn)
-            : nodes(nodesIn), attractors(attractorsIn), 
-            terrain(terrainIn), field(fieldIn)
+            : nodes(nodesIn), attractors(attractorsIn),
+              terrain(terrainIn), field(fieldIn)
         {
             initPaths();
             buildKDTree();
@@ -96,10 +103,12 @@ namespace SCARoad
         void loopConnect(int forbiddenGap, int CONNECT_DIST, int MIN_BRANCH_GAP);
         void finalConnectNodes(int forbiddenGap, int CONNECT_DIST, int MIN_BRANCH_GAP);
         void update(bool &growthStopped);
-        Eigen::Vector2f getGuidedDirection(int nodeID, const Eigen::Vector2f &candidateDir, float blend=0.3f) const;
+        Eigen::Vector2f getGuidedDirection(int nodeID, const Eigen::Vector2f &candidateDir, float blend = 0.3f) const;
         Eigen::Vector2f getConstraintDirection(int nodeID, const Eigen::Vector2f &dir) const;
         void replacePathID(int nodeID, int oldPID, int newPID);
         std::vector<std::vector<Eigen::Vector2f>> extractRoads() const;
+        using Polyline2_t = geo::Polyline2_t<float>;
+        std::pair<std::vector<Polyline2_t>, std::vector<Polyline2_t>> extractCloseAndLinearRoads() const;
         std::vector<std::pair<int, std::unordered_set<int>>> collectEndpointWithForbidden(int forbiddenGap) const;
         std::unordered_set<int> filterAllPathEndpoints(int minLen) const;
         void drawNodesWithIndices(render::Renderer3D render) const;
@@ -121,5 +130,7 @@ namespace SCARoad
     }
 
     std::vector<Attractor> getRandomAttractors(int num, float width, float height, std::vector<Eigen::Vector2f> &pos, const Eigen::Vector2f &center = Eigen::Vector2f(0.0f, 0.0f));
-
+    geo::Polyline2_t<float> buildPolyline(
+        const std::vector<SCANode> &nodes,
+        const std::vector<int> &path);
 }
