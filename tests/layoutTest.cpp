@@ -117,7 +117,7 @@ int main()
     // ============================
     // 2. 初始化 attractors
     std::vector<Eigen::Vector2f> attractPos;
-    std::vector<SCARoad::Attractor> attractors = SCARoad::getRandomAttractors(300, 512, 512, attractPos);
+    std::vector<SCARoad::Attractor> attractors = SCARoad::getRandomAttractors(35.f, 512, 512, attractPos);
    
     SCANetwork net(nodes, attractors, terrain,tensorField);
     std::vector<Eigen::Vector2f> nodePoints;
@@ -223,70 +223,6 @@ int main()
                 terrain.applyFaceColor();
             }
 
-            if (IsKeyPressed(KEY_R))
-            {
-
-                // scaUpdated = true;
-                // scaIter = 0;
-
-                // net.nodes.clear();
-                // net.attractors.clear();
-
-                // // 重新初始化
-                // SCANode root;
-                // root.position = Eigen::Vector2f(0, 0);
-                // net.nodes.push_back(root);
-
-                // net.attractors = getRandomAttractors(700, 512, 512, attractPos);
-
-                // net.buildKDTree();
-                // roads.clear();
-                scaIter++;
-
-                net.update(growthStopped);
-                nodePoints.clear();
-                for (auto &n : net.nodes)
-                    nodePoints.push_back(n.position);
-                roads = net.extractRoads();
-                std::cout << "[Iter " << scaIter << "] "
-                          << "nodes=" << net.nodes.size()
-                          << " attractors=" << net.attractors.size()
-                          << "\n";
-                if (growthStopped)
-                    scaUpdated = false;
-                if (net.attractors.empty())
-                {
-                    scaUpdated = false;
-                    std::cout << "All attractors consumed.\n";
-                }
-            }
-            if(IsKeyPressed(KEY_C)){
-                net.finalConnectNodes(10, 17, 6);
-                roads = net.extractRoads();
-            }
-
-            // if (scaUpdated)
-            // {
-            //     if (scaIter < maxSCAIter)
-            //     {
-            //         scaIter++;
-            //         net.update(growthStopped);
-            //         roads = net.extractRoads();
-            //         std::cout << "[Iter " << scaIter << "] "
-            //                   << "nodes=" << net.nodes.size()
-            //                   << " attractors=" << net.attractors.size()
-            //                   << "\n";
-            //         if (growthStopped)
-            //             scaUpdated = false;
-            //         if (net.attractors.empty())
-            //         {
-            //             scaUpdated = false;
-            //             std::cout << "All attractors consumed.\n";
-            //         }
-            //     }
-            //     else
-            //         scaUpdated = false;
-            // }
 
         },
         [&]() { // 3维空间绘图内容部分

@@ -80,16 +80,19 @@ namespace SCARoad
         } venationType = VenationType::Closed;
 
         SCANetwork();
-        SCANetwork(std::vector<SCANode> nodesIn, std::vector<Attractor> attractorsIn, const Terrain &terrainIn, const TensorField &fieldIn)
-            : nodes(nodesIn), attractors(attractorsIn),
+        SCANetwork(const std::vector<SCANode> &nodesIn, const std::vector<Attractor> &attractIn, const Terrain &terrainIn, const TensorField &fieldIn)
+            : nodes(nodesIn), attractors(attractIn),
               terrain(terrainIn), field(fieldIn)
         {
             initPaths();
             buildKDTree();
         }
 
+
+
         void initPaths();
         void buildKDTree();
+        void rebuildNet(const std::vector<SCANode> &nodesIn,const std::vector<Attractor> &attractorsIn);
         std::vector<int> getNodesInRadius(const Eigen::Vector2f &pos, float radius) const;
         int getClosestNode(int attractorID);
         std::vector<int> getRelativeNeighbors(int attractorID) const;
@@ -129,7 +132,7 @@ namespace SCARoad
         return outMin + t * (outMax - outMin);
     }
 
-    std::vector<Attractor> getRandomAttractors(int num, float width, float height, std::vector<Eigen::Vector2f> &pos, const Eigen::Vector2f &center = Eigen::Vector2f(0.0f, 0.0f));
+    std::vector<Attractor> getRandomAttractors(float gap, float width, float height, std::vector<Eigen::Vector2f> &pos, const Eigen::Vector2f &center = Eigen::Vector2f(0.0f, 0.0f));
     geo::Polyline2_t<float> buildPolyline(
         const std::vector<SCANode> &nodes,
         const std::vector<int> &path);

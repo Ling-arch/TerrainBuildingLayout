@@ -16,6 +16,7 @@ using namespace render;
 using namespace optimizer;
 using namespace geo;
 using namespace SCARoad;
+using namespace polyloop;
 
 int main()
 {
@@ -145,11 +146,13 @@ int main()
     // std::vector<Polyline2_t<float>> cuttedPolys = geo::splitPolygonByPolylines(testPolyA, {cutline});
     // std::cout << "cuttedpolys is " << cuttedPolys.size() << std::endl;
     std::vector<Polyline2_t<float>> offsetPolys;
-    static float offsetDist = -6.f;
-    std::vector<Polyline2_t<float>> divPolys /*= geo::generateRandomPolysAlongPolygon(testPolyA, offsetDist, 7.f, 12.f)*/;
+    static float offsetDist = -3.f;
+    static float buildingDepth = -8.f;
+    static float offsetDist2 = -1.5f;
+    // std::vector<Polyline2_t<float>> divPolys = geo::generateRandomPolysAlongPolygon(testPolyA, offsetDist, 7.f, 12.f);
 
     bool offsetPoly = false;
-    static float offsetDist2 = -1.f;
+
     bool offsetInside = false;
     // for (const auto &poly : divPolys)
     // {
@@ -189,7 +192,7 @@ int main()
     // ============================
     // 2. 初始化 attractors
     std::vector<Eigen::Vector2f> attractPos;
-    std::vector<SCARoad::Attractor> scaAttractors = SCARoad::getRandomAttractors(300, 256, 256, attractPos);
+    std::vector<SCARoad::Attractor> scaAttractors = SCARoad::getRandomAttractors(35.f, 512, 512, attractPos);
 
     SCANetwork net(scaNodes, scaAttractors, terrain, tensorField);
 
@@ -205,6 +208,7 @@ int main()
     int maxSCAIter = 800;
     auto scaRoads = net.extractRoads();
     std::vector<std::vector<Vector3f>> projSCAroads;
+    std::vector<Polyline2_t<float>> realSites;
     for (const auto &l : scaRoads)
     {
         std::vector<Vector3f> projLine;
@@ -264,46 +268,64 @@ int main()
             if (IsKeyPressed(KEY_S))
             {
 
-                // scaUpdated = true;
-                // scaIter = 0;
-
-                // net.nodes.clear();
-                // net.attractors.clear();
-
-                // // 重新初始化
-                // SCANode root;
-                // root.position = Eigen::Vector2f(0, 0);
-                // net.nodes.push_back(root);
-
-                // net.attractors = getRandomAttractors(700, 512, 512, attractPos);
-
-                // net.buildKDTree();
-                // roads.clear();
-                scaIter++;
-
-                net.update(growthStopped);
-                nodePoints.clear();
-                for (auto &n : net.nodes)
-                    nodePoints.push_back(n.position);
-                scaRoads = net.extractRoads();
-                projSCAroads.clear();
-                for (const auto &l : scaRoads)
-                {
-                    std::vector<Vector3f> projLine;
-                    if (terrain.projectPolylineToTerrain(l, projLine))
-                        projSCAroads.push_back(projLine);
-                }
-                std::cout << "[Iter " << scaIter << "] "
-                          << "nodes=" << net.nodes.size()
-                          << " attractors=" << net.attractors.size()
-                          << "\n";
+                scaUpdated = true;
+                scaIter = 0;
+                scaRoads.clear();
+                realSites.clear();
+                scaAttractors = SCARoad::getRandomAttractors(35.f, 512, 512, attractPos);
+                net.rebuildNet(scaNodes, scaAttractors);
                 if (growthStopped)
                     scaUpdated = false;
-                if (net.attractors.empty())
+                // scaIter++;
+
+                // net.update(growthStopped);
+                // nodePoints.clear();
+                // for (auto &n : net.nodes)
+                //     nodePoints.push_back(n.position);
+                // scaRoads = net.extractRoads();
+                // projSCAroads.clear();
+                // for (const auto &l : scaRoads)
+                // {
+                //     std::vector<Vector3f> projLine;
+                //     if (terrain.projectPolylineToTerrain(l, projLine))
+                //         projSCAroads.push_back(projLine);
+                // }
+                // std::cout << "[Iter " << scaIter << "] "
+                //           << "nodes=" << net.nodes.size()
+                //           << " attractors=" << net.attractors.size()
+                //           << "\n";
+
+                // if (net.attractors.empty())
+                // {
+                //     scaUpdated = false;
+                //     std::cout << "All attractors consumed.\n";
+                // }
+            }
+
+            if (scaUpdated)
+            {
+                if (scaIter < maxSCAIter)
                 {
-                    scaUpdated = false;
-                    std::cout << "All attractors consumed.\n";
+                    scaIter++;
+                    net.update(growthStopped);
+                    nodePoints.clear();
+                    for (auto &n : net.nodes)
+                        nodePoints.push_back(n.position);
+                    scaRoads = net.extractRoads();
+                    // std::cout << "[Iter " << scaIter << "] "
+                    //           << "nodes=" << net.nodes.size()
+                    //           << " attractors=" << net.attractors.size()
+                    //           << "\n";
+                    if (growthStopped)
+                        scaUpdated = false;
+                    if (net.attractors.empty())
+                    {
+                        scaUpdated = false;
+                        std::cout << "All attractors consumed.\n";
+                    }
                 }
+                else
+                    scaUpdated = false;
             }
             if (IsKeyPressed(KEY_C))
             {
@@ -322,33 +344,36 @@ int main()
             {
                 scaRoads.clear();
                 projSCAroads.clear();
+
                 const auto &allRoads = net.extractCloseAndLinearRoads();
                 for (const auto &poly : allRoads.first)
                 {
                     scaRoads.push_back(poly.points);
+                    std::vector<Polyline2_t<float>> offsetSites = geo::offsetPolygon(poly, offsetDist);
+                    realSites.insert(realSites.end(), offsetSites.begin(), offsetSites.end());
+                    for (const auto &poly : offsetSites)
+                    {
+                        std::vector<Polyline2_t<float>> divSitePolys = geo::generateRandomPolysAlongPolygon(poly, buildingDepth, 8.f, 10.f);
+                        // divPolys.insert(divPolys.end(), divSitePolys.begin(), divSitePolys.end());
+                            // offsetPolys.insert(offsetPolys.end(), divSitePolys.begin(), divSitePolys.end());
+                        for (const auto &div : divSitePolys)
+                        {
+                            std::vector<Polyline2_t<float>> offsets = geo::offsetPolygon(div, offsetDist2);
+                            offsetPolys.insert(offsetPolys.end(), offsets.begin(), offsets.end());
+                        }
+                    }
                 }
-                // for (const auto &poly : scaRoads)
-                // {
-                    // std::vector<Polyline2_t<float>> divSitePolys = geo::generateRandomPolysAlongPolygon(Polyline2_t(scaRoads[0]), offsetDist, 8.f, 15.f);
-                    // divPolys.insert(divPolys.end(), divSitePolys.begin(), divSitePolys.end());
-                    // for (const auto &div : divSitePolys)
-                    // {
-                    //     std::vector<Polyline2_t<float>> offsets = geo::offsetPolygon(div, offsetDist2);
-                    //     offsetPolys.insert(offsetPolys.end(), offsets.begin(), offsets.end());
-                    // }
-                // }
-
-                for (const auto &poly : allRoads.second)
-                {
-                    scaRoads.push_back(poly.points);
-                }
-
+                // std::cout << "scaRoads size: " << scaRoads.size() << std::endl;
                 for (const auto &l : scaRoads)
                 {
                     std::vector<Vector3f> projLine;
                     if (terrain.projectPolylineToTerrain(l, projLine))
                         projSCAroads.push_back(projLine);
                 }
+            }
+
+            if (IsKeyPressed(KEY_I))
+            {
             }
 
             if (IsKeyPressed(KEY_R) && parcels.size() > 0)
@@ -527,15 +552,21 @@ int main()
             }
             if (offsetPoly)
             {
+
+                realSites.clear();
                 offsetPolys.clear();
-                for (const auto &poly : scaRoads)
+                for (const auto &site : scaRoads)
                 {
-                    std::vector<Polyline2_t<float>> divSitePolys = geo::generateRandomPolysAlongPolygon(Polyline2_t(poly), offsetDist, 8.f, 15.f);
-                    divPolys.insert(divPolys.end(), divSitePolys.begin(), divSitePolys.end());
-                    for (const auto &div : divSitePolys)
+                    std::vector<Polyline2_t<float>> offsetSites = geo::offsetPolygon(Polyline2_t(site), offsetDist);
+                    realSites.insert(realSites.end(), offsetSites.begin(), offsetSites.end());
+                    for (const auto &poly : offsetSites)
                     {
-                        std::vector<Polyline2_t<float>> offsets = geo::offsetPolygon(div, offsetDist2);
-                        offsetPolys.insert(offsetPolys.end(), offsets.begin(), offsets.end());
+                        std::vector<Polyline2_t<float>> divSitePolys = geo::generateRandomPolysAlongPolygon(poly, buildingDepth, 8.f, 10.f);
+                        for (const auto &div : divSitePolys)
+                        {
+                            std::vector<Polyline2_t<float>> offsets = geo::offsetPolygon(div, offsetDist2);
+                            offsetPolys.insert(offsetPolys.end(), offsets.begin(), offsets.end());
+                        }
                     }
                 }
 
@@ -544,10 +575,17 @@ int main()
             if (offsetInside)
             {
                 offsetPolys.clear();
-                for (const auto &poly : divPolys)
+                for (const auto &poly : realSites)
                 {
-                    std::vector<Polyline2_t<float>> offsets = geo::offsetPolygon(poly, offsetDist2);
-                    offsetPolys.insert(offsetPolys.end(), offsets.begin(), offsets.end());
+                    std::vector<Polyline2_t<float>> divSitePolys = geo::generateRandomPolysAlongPolygon(poly, buildingDepth, 8.f, 10.f);
+                    // divPolys.insert(divPolys.end(), divSitePolys.begin(), divSitePolys.end());
+                    for (const auto &div : divSitePolys)
+                    {
+                        std::vector<Polyline2_t<float>> offsets = geo::offsetPolygon(div, offsetDist2);
+                        offsetPolys.insert(offsetPolys.end(), offsets.begin(), offsets.end());
+                    }
+                    // std::vector<Polyline2_t<float>> offsets = geo::offsetPolygon(Polyline2_t(poly), offsetDist);
+                    // realSites.insert(realSites.end(), offsets.begin(), offsets.end());
                 }
                 offsetInside = false;
             }
@@ -571,6 +609,14 @@ int main()
             //     {
             //         render::stroke_bold_polygon2(Polyloop2(p.points), RL_DARKPURPLE, 0.F, pathWidth, 1.F, {terrain.getWidth() * terrain.getCellSize(), 0});
             //     }
+            // }
+
+            // for (int i = 0; i < realSites.size(); i++)
+            // {
+            //     Color c = renderUtil::ColorFromHue((float)i / realSites.size());
+            //     Polyline2_t<float> site = realSites[i];
+            //     render::draw_bold_polyline2(site.points, RL_DARKPURPLE, 0.f, lineData.Thickness, lineData.color.a /*,{terrain.getWidth() * terrain.getCellSize(), 0}*/);
+            //     render::fill_polygon2(Polyloop2(site.points), c, 0.f, 0.3f);
             // }
 
             // render::draw_points(testParcelBounds, ptData.color, ptData.color.a, ptData.size, 0.f, {terrain.getWidth() * terrain.getCellSize(), 0});
@@ -682,8 +728,10 @@ int main()
             for (int i = 0; i < offsetPolys.size(); i++)
             {
                 Color c = renderUtil::ColorFromHue((float)i / offsetPolys.size());
-                render::draw_bold_polyline2(offsetPolys[i].points, RL_DARKPURPLE, 0.f, lineData.Thickness, lineData.color.a /*,{terrain.getWidth() * terrain.getCellSize(), 0}*/);
-                render::fill_polygon2(offsetPolys[i].points, c, 0.f, 0.3f);
+                const auto &poly = offsetPolys[i];
+                render::draw_bold_polyline2(poly.points, RL_DARKPURPLE, 0.f, lineData.Thickness, lineData.color.a /*,{terrain.getWidth() * terrain.getCellSize(), 0}*/);
+                render::fill_polygon2(poly.points, c, 0.f, 0.3f);
+                render::draw_points(poly.points, render.ptData.color, 1.f, render.ptData.size);
             }
 
             // for (int i = 0; i < divPolys.size(); i++)
@@ -943,6 +991,7 @@ int main()
                     radiusChanged |= ImGui::SliderFloat("Point Radius", &radius, 7.f, 30.f, "%.1f");
                     offsetPoly |= ImGui::SliderFloat("OffsetDist", &offsetDist, -10.f, 10.f, "%.1f");
                     offsetInside |= ImGui::SliderFloat("OffsetDistInside", &offsetDist2, -10.f, 10.f, "%.1f");
+                    offsetInside |= ImGui::SliderFloat("BuildingDepth", &buildingDepth, -10.f, 10.f, "%.1f");
                     ImGui::Unindent();
                 }
             }

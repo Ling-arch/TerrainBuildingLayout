@@ -17,6 +17,7 @@ namespace SCARoad
     void SCANetwork::initPaths()
     {
         // 每个 seed 初始化为一条 path
+        paths.clear();
         nodeToPath.resize(nodes.size(), -1);
         for (int i = 0; i < nodes.size(); ++i)
         {
@@ -36,6 +37,14 @@ namespace SCARoad
         tree = std::make_unique<KDTree>(2, *cloud, nanoflann::KDTreeSingleIndexAdaptorParams(10));
 
         tree->buildIndex();
+    }
+
+    void SCANetwork::rebuildNet(const std::vector<SCANode> &nodesIn, const std::vector<Attractor> &attractorsIn)
+    {
+        attractors = attractorsIn;
+        nodes = nodesIn;
+        initPaths();
+        buildKDTree();
     }
 
     std::vector<int> SCANetwork::getNodesInRadius(const Eigen::Vector2f &pos, float radius) const
@@ -233,7 +242,7 @@ namespace SCARoad
 
         const int MIN_BRANCH_GAP = 7; //  分叉间隔
 
-        std::cout << "\n========== [SCA UPDATE BEGIN] ==========\n";
+        // std::cout << "\n========== [SCA UPDATE BEGIN] ==========\n";
 
         // 1. Reset
         for (auto &a : attractors)
@@ -338,7 +347,7 @@ namespace SCARoad
                 }),
             attractors.end());
 
-        std::cout << "========== [SCA UPDATE END] ==========\n";
+        // std::cout << "========== [SCA UPDATE END] ==========\n";
     }
 
     std::vector<SCANode> SCANetwork::growNodes(float stepSize, int minBranchGap)
@@ -556,10 +565,10 @@ namespace SCARoad
         std::unordered_set<int> validNodes;
         for (auto &endpoint : endpointsWithForbidden)
         {
-            std::cout << endpoint.first << " ";
+            // std::cout << endpoint.first << " ";
             validNodes.insert(endpoint.first);
         }
-        std::cout << "\n";
+        // std::cout << "\n";
 
         std::unordered_set<int> connectedEndpoints;
 
@@ -1099,7 +1108,7 @@ namespace SCARoad
             // =========================
             // Nearby
             // =========================
-            auto nearby = getNodesInRadius(curNode.position, CONNECT_DIST);
+            auto nearby = getRelativeNeighbors(curNode.position, CONNECT_DIST);
 
             std::vector<int> endpoints, branchNodes, midNodes;
             std::vector<int> validCandidates;
@@ -1347,6 +1356,20 @@ namespace SCARoad
             // std::cout << "   DONE\n";
         }
 
+        // for (int pid = 0; pid < paths.size(); ++pid)
+        // {
+        //     const auto &path = paths[pid];
+        //     std::cout << "\n--------------------------------------------------\n";
+        //     std::cout << "[Path " << pid << "] size=" << path.size() << "\n";
+
+        //     // =========================
+        //     // 打印 path
+        //     std::cout << "  nodes: ";
+        //     for (int nid : path)
+        //         std::cout << nid << " ";
+        //     std::cout << "\n";
+        // }
+
         // std::cout << "\n================ FINAL CONNECT END =================\n";
     }
 
@@ -1448,46 +1471,66 @@ namespace SCARoad
         return roads;
     }
 
-    std::pair<std::vector<geo::Polyline2_t<float>>,std::vector<geo::Polyline2_t<float>>>SCANetwork::extractCloseAndLinearRoads() const
+    std::pair<std::vector<geo::Polyline2_t<float>>, std::vector<geo::Polyline2_t<float>>>
+    SCANetwork::extractCloseAndLinearRoads() const
     {
         std::vector<geo::Polyline2_t<float>> closeRoads;
         std::vector<geo::Polyline2_t<float>> linearRoads;
 
         int N = nodes.size();
 
+        // std::cout << "\n========== extractCloseAndLinearRoads BEGIN ==========\n";
+
         // =========================
-        // 🔧 helper: build polyline
+        // 1. adjacency
         // =========================
-        auto buildPolyline = [&](const std::vector<int> &path, bool closed)
+        std::vector<std::set<int>> adj(N);
+        for (int i = 0; i < N; ++i)
+            for (int nb : nodes[i].links)
+                adj[i].insert(nb);
+
+        // =========================
+        // 2. 剪枝（去掉线性部分）
+        // =========================
+        std::vector<bool> isRemoved(N, false);
+        std::vector<int> q;
+
+        for (int i = 0; i < N; ++i)
+            if (adj[i].size() == 1)
+                q.push_back(i);
+
+        int head = 0;
+        while (head < q.size())
         {
-            geo::Polyline2_t<float> pl;
-            for (int id : path)
-            {
-                pl.points.emplace_back(
-                    nodes[id].position.x(),
-                    nodes[id].position.y());
-            }
-            if (closed && !pl.points.empty())
-                pl.points.push_back(pl.points.front());
+            int u = q[head++];
+            if (adj[u].size() != 1)
+                continue;
 
-            pl.isClosed = closed;
-            return pl;
-        };
+            int v = *adj[u].begin();
+            adj[v].erase(u);
+            adj[u].clear();
+            isRemoved[u] = true;
+
+            if (adj[v].size() == 1)
+                q.push_back(v);
+        }
 
         // =========================
-        // 🔵 1. adjacency 按角度排序（关键！）
+        // 3. 排序邻接
         // =========================
         std::vector<std::vector<int>> sortedAdj(N);
 
         for (int i = 0; i < N; ++i)
         {
+            if (adj[i].size() < 2)
+                continue;
+
             std::vector<std::pair<float, int>> tmp;
 
-            for (int nb : nodes[i].links)
+            for (int nb : adj[i])
             {
                 Eigen::Vector2f d = nodes[nb].position - nodes[i].position;
-                float angle = std::atan2(d.y(), d.x());
-                tmp.emplace_back(angle, nb);
+                tmp.emplace_back(std::atan2(d.y(), d.x()), nb);
             }
 
             std::sort(tmp.begin(), tmp.end());
@@ -1497,31 +1540,23 @@ namespace SCARoad
         }
 
         // =========================
-        // 🔵 2. face traversal（核心）
+        // 4. 收集所有 candidate face
         // =========================
-        std::set<std::pair<int, int>> usedHalfEdge;
+        std::set<std::pair<int, int>> visitedHalfEdges;
 
-        auto nextEdge = [&](int u, int v)
+        struct Face
         {
-            const auto &adj = sortedAdj[v];
-            int k = adj.size();
-
-            for (int i = 0; i < k; ++i)
-            {
-                if (adj[i] == u)
-                {
-                    // ⭐ 左转（逆时针）
-                    return adj[(i - 1 + k) % k];
-                }
-            }
-            return -1;
+            std::vector<int> ids;
+            float area;
         };
+
+        std::vector<Face> allFaces;
 
         for (int u = 0; u < N; ++u)
         {
             for (int v : sortedAdj[u])
             {
-                if (usedHalfEdge.count({u, v}))
+                if (visitedHalfEdges.count({u, v}))
                     continue;
 
                 std::vector<int> face;
@@ -1529,81 +1564,133 @@ namespace SCARoad
                 int start_u = u;
                 int start_v = v;
 
-                int curr_u = u;
-                int curr_v = v;
+                int curr = u;
+                int next = v;
 
-                while (true)
+                while (!visitedHalfEdges.count({curr, next}))
                 {
-                    usedHalfEdge.insert({curr_u, curr_v});
-                    face.push_back(curr_u);
+                    visitedHalfEdges.insert({curr, next});
+                    face.push_back(curr);
 
-                    int next = nextEdge(curr_u, curr_v);
+                    int prev = curr;
+                    curr = next;
 
-                    if (next == -1)
+                    const auto &nbrs = sortedAdj[curr];
+                    if (nbrs.empty())
                         break;
 
-                    curr_u = curr_v;
-                    curr_v = next;
-
-                    if (curr_u == start_u && curr_v == start_v)
+                    auto it = std::find(nbrs.begin(), nbrs.end(), prev);
+                    if (it == nbrs.end())
                         break;
+
+                    int idx = std::distance(nbrs.begin(), it);
+                    next = nbrs[(idx - 1 + nbrs.size()) % nbrs.size()];
                 }
+
+                // 必须闭合
+                if (!(curr == start_u && next == start_v))
+                    continue;
 
                 if (face.size() < 3)
                     continue;
 
-                auto pl = buildPolyline(face, true);
+                // 面积
+                geo::Polyline2_t<float> pl;
+                for (int id : face)
+                    pl.points.emplace_back(nodes[id].position.x(), nodes[id].position.y());
 
                 float area = util::Math2<float>::polygon_area(pl.points);
+                if (area < 1e-4f)
+                    continue;
 
-                // ✅ 只保留内部面（过滤外部无限大面）
-                if (area > 1e-4f)
-                {
-                    closeRoads.push_back(pl);
-                }
+                allFaces.push_back({face, area});
             }
         }
 
         // =========================
-        // 🔵 3. linear 提取
+        // 5. 只保留最小面（核心！！！）
         // =========================
-        std::vector<bool> visitedNode(N, false);
+
+        // 按面积从小到大
+        std::sort(allFaces.begin(), allFaces.end(),
+                  [](const Face &a, const Face &b)
+                  { return a.area < b.area; });
+
+        int closeID = 0;
+
+        for (int i = 0; i < allFaces.size(); ++i)
+        {
+            const auto &f = allFaces[i];
+
+            // 用 centroid 判断是否被已有面包含
+            Eigen::Vector2f center(0, 0);
+            for (int id : f.ids)
+                center += nodes[id].position;
+            center /= float(f.ids.size());
+
+            bool covered = false;
+
+            for (int j = 0; j < closeRoads.size(); ++j)
+            {
+                if (util::Math2<float>::point_in_poly(closeRoads[j].points, center))
+                {
+                    covered = true;
+                    break;
+                }
+            }
+
+            if (covered)
+                continue;
+
+            geo::Polyline2_t<float> pl;
+            for (int id : f.ids)
+                pl.points.emplace_back(nodes[id].position.x(), nodes[id].position.y());
+
+            pl.points.push_back(pl.points.front());
+            pl.isClosed = true;
+
+            closeRoads.push_back(pl);
+
+            // ===== DEBUG =====
+            // std::cout << "[Close Road Path " << closeID++ << "] ";
+            // for (int k = 0; k < f.ids.size(); ++k)
+            // {
+            //     std::cout << f.ids[k];
+            //     if (k != f.ids.size() - 1)
+            //         std::cout << ",";
+            // }
+            // std::cout << "," << f.ids[0] << "\n";
+        }
+
+        // =========================
+        // 6. linear（保持你原逻辑）
+        // =========================
+        std::vector<bool> visited(N, false);
+        int linearID = 0;
 
         for (int i = 0; i < N; ++i)
         {
-            if (nodes[i].links.size() != 1)
-                continue;
-
-            if (visitedNode[i])
+            if (nodes[i].links.size() != 1 || visited[i])
                 continue;
 
             std::vector<int> path;
-
             int curr = i;
             int prev = -1;
 
             while (true)
             {
                 path.push_back(curr);
-                visitedNode[curr] = true;
+                visited[curr] = true;
 
                 int next = -1;
                 for (int nb : nodes[curr].links)
-                {
                     if (nb != prev)
-                    {
                         next = nb;
-                        break;
-                    }
-                }
 
-                if (next == -1)
-                    break;
-
-                if (nodes[next].links.size() != 2)
+                if (next == -1 || nodes[next].links.size() > 2)
                 {
-                    path.push_back(next);
-                    visitedNode[next] = true;
+                    if (next != -1)
+                        path.push_back(next);
                     break;
                 }
 
@@ -1611,33 +1698,30 @@ namespace SCARoad
                 curr = next;
             }
 
-            // =========================
-            // 长度过滤
-            // =========================
             if (path.size() < 5)
                 continue;
 
-            // =========================
-            // endpoint 是否在环内
-            // =========================
-            int start = path.front();
+            geo::Polyline2_t<float> pl;
+            for (int id : path)
+                pl.points.emplace_back(nodes[id].position.x(), nodes[id].position.y());
 
-            bool startInsideClosed = false;
+            pl.isClosed = false;
+            linearRoads.push_back(pl);
 
-            for (const auto &poly : closeRoads)
-            {
-                if (util::Math2<float>::point_in_poly(poly.points, nodes[start].position))
-                {
-                    startInsideClosed = true;
-                    break;
-                }
-            }
-
-            if (startInsideClosed)
-                continue;
-
-            linearRoads.push_back(buildPolyline(path, false));
+            // std::cout << "[Linear Road Path " << linearID++ << "] ";
+            // for (int k = 0; k < path.size(); ++k)
+            // {
+            //     std::cout << path[k];
+            //     if (k != path.size() - 1)
+            //         std::cout << ",";
+            // }
+            // std::cout << "\n";
         }
+
+        // std::cout << "[Summary] close=" << closeRoads.size()
+        //           << " linear=" << linearRoads.size() << "\n";
+
+        // std::cout << "========== extractCloseAndLinearRoads END ==========\n\n";
 
         return {closeRoads, linearRoads};
     }
@@ -1744,10 +1828,10 @@ namespace SCARoad
         const SCANode &node = nodes[nodeID];
         Eigen::Vector2f guidedDir = dir.normalized();
 
-        std::cout << "\n================ [ConstraintDir] =================\n";
-        std::cout << "[Node] ID=" << nodeID
-                  << " Pos=(" << node.position.x() << ", " << node.position.y() << ")"
-                  << " InputDir=(" << dir.x() << ", " << dir.y() << ")\n";
+        // std::cout << "\n================ [ConstraintDir] =================\n";
+        // std::cout << "[Node] ID=" << nodeID
+        //           << " Pos=(" << node.position.x() << ", " << node.position.y() << ")"
+        //           << " InputDir=(" << dir.x() << ", " << dir.y() << ")\n";
 
         // =========================
         // 1. 地形采样
@@ -1755,7 +1839,7 @@ namespace SCARoad
         terrain::TerrainPoint tp;
         if (!terrain.sampleTerrainPtAt(tp, node.position))
         {
-            std::cout << "[Terrain] sample FAILED\n";
+            // std::cout << "[Terrain] sample FAILED\n";
             return guidedDir;
         }
 
@@ -1763,10 +1847,10 @@ namespace SCARoad
         float slopeDeg = slope * 180.0f / Litten_M_PI;
         float aspectDeg = tp.aspect * 180.0f / Litten_M_PI;
 
-        std::cout << "[Terrain]\n";
-        std::cout << "  slope(rad)=" << slope
-                  << " slope(deg)=" << slopeDeg << "\n";
-        std::cout << "  aspect(deg)=" << aspectDeg << "\n";
+        // std::cout << "[Terrain]\n";
+        // std::cout << "  slope(rad)=" << slope
+        //           << " slope(deg)=" << slopeDeg << "\n";
+        // std::cout << "  aspect(deg)=" << aspectDeg << "\n";
 
         // =========================
         // 2. Tensor 方向
@@ -1779,13 +1863,13 @@ namespace SCARoad
             Eigen::Vector2f(std::cos(theta + Litten_M_PI), std::sin(theta + Litten_M_PI)),
             Eigen::Vector2f(std::cos(theta + 3 * Litten_M_PI / 2.f), std::sin(theta + 3 * Litten_M_PI / 2.f))};
 
-        std::cout << "[TensorDirs]\n";
-        for (int i = 0; i < 4; ++i)
-        {
-            std::cout << "  d" << i << " = ("
-                      << tensorDirs[i].x() << ", "
-                      << tensorDirs[i].y() << ")\n";
-        }
+        // std::cout << "[TensorDirs]\n";
+        // for (int i = 0; i < 4; ++i)
+        // {
+        //     std::cout << "  d" << i << " = ("
+        //               << tensorDirs[i].x() << ", "
+        //               << tensorDirs[i].y() << ")\n";
+        // }
 
         // =========================
         // 小坡度
@@ -1794,7 +1878,7 @@ namespace SCARoad
 
         if (slope < slopeThreshold)
         {
-            std::cout << "[Mode] LOW SLOPE -> tensor only\n";
+            // std::cout << "[Mode] LOW SLOPE -> tensor only\n";
 
             float bestDot = -1.0f;
             Eigen::Vector2f bestDir = guidedDir;
@@ -1802,7 +1886,7 @@ namespace SCARoad
             for (auto &d : tensorDirs)
             {
                 float dot = d.normalized().dot(guidedDir);
-                std::cout << "  dot=" << dot << "\n";
+                // std::cout << "  dot=" << dot << "\n";
 
                 if (dot > bestDot)
                 {
@@ -1811,8 +1895,8 @@ namespace SCARoad
                 }
             }
 
-            std::cout << "[Selected Tensor Dir] = ("
-                      << bestDir.x() << ", " << bestDir.y() << ")\n";
+            // std::cout << "[Selected Tensor Dir] = ("
+            //           << bestDir.x() << ", " << bestDir.y() << ")\n";
 
             return bestDir.normalized();
         }
@@ -1820,17 +1904,17 @@ namespace SCARoad
         // =========================
         // 大坡度
         // =========================
-        std::cout << "[Mode] HIGH SLOPE\n";
+        // std::cout << "[Mode] HIGH SLOPE\n";
 
         float h0;
         if (!terrain.sampleHeightAt(h0, node.position))
         {
-            std::cout << "[Height] sample FAILED\n";
+            // std::cout << "[Height] sample FAILED\n";
             return guidedDir;
         }
 
-        std::cout << "[Height]\n";
-        std::cout << "  h0 = " << h0 << "\n";
+        // std::cout << "[Height]\n";
+        // std::cout << "  h0 = " << h0 << "\n";
 
         Eigen::Vector2f dirA = tensorDirs[0].normalized();
         Eigen::Vector2f dirB = tensorDirs[1].normalized();
@@ -1842,12 +1926,12 @@ namespace SCARoad
         float dh1 = std::abs(h1 - h0);
         float dh2 = std::abs(h2 - h0);
 
-        std::cout << "[Sample Directions]\n";
-        std::cout << "  dirA = (" << dirA.x() << ", " << dirA.y() << ")\n";
-        std::cout << "    h1=" << h1 << " dh1=" << dh1 << "\n";
+        // std::cout << "[Sample Directions]\n";
+        // std::cout << "  dirA = (" << dirA.x() << ", " << dirA.y() << ")\n";
+        // std::cout << "    h1=" << h1 << " dh1=" << dh1 << "\n";
 
-        std::cout << "  dirB = (" << dirB.x() << ", " << dirB.y() << ")\n";
-        std::cout << "    h2=" << h2 << " dh2=" << dh2 << "\n";
+        // std::cout << "  dirB = (" << dirB.x() << ", " << dirB.y() << ")\n";
+        // std::cout << "    h2=" << h2 << " dh2=" << dh2 << "\n";
 
         Eigen::Vector2f Dir_parallel, Dir_vertical;
 
@@ -1862,9 +1946,9 @@ namespace SCARoad
             Dir_vertical = dirA;
         }
 
-        std::cout << "[Chosen Basis]\n";
-        std::cout << "  Parallel = (" << Dir_parallel.x() << ", " << Dir_parallel.y() << ")\n";
-        std::cout << "  Vertical = (" << Dir_vertical.x() << ", " << Dir_vertical.y() << ")\n";
+        // std::cout << "[Chosen Basis]\n";
+        // std::cout << "  Parallel = (" << Dir_parallel.x() << ", " << Dir_parallel.y() << ")\n";
+        // std::cout << "  Vertical = (" << Dir_vertical.x() << ", " << Dir_vertical.y() << ")\n";
 
         // =========================
         // 局部坐标
@@ -1891,13 +1975,13 @@ namespace SCARoad
 
         float guidedAngle = toLocalAngle(guidedDir);
 
-        std::cout << "[Local Space]\n";
-        std::cout << "  guidedAngle(deg)=" << guidedAngle * 180.0f / Litten_M_PI << "\n";
+        // std::cout << "[Local Space]\n";
+        // std::cout << "  guidedAngle(deg)=" << guidedAngle * 180.0f / Litten_M_PI << "\n";
 
         float thetaMax = std::asin(
             std::clamp(std::tan(10.0f * Litten_M_PI / 180.0f) / std::tan(slope), 0.0f, 1.0f));
 
-        std::cout << "  thetaMax(deg)=" << thetaMax * 180.0f / Litten_M_PI << "\n";
+        // std::cout << "  thetaMax(deg)=" << thetaMax * 180.0f / Litten_M_PI << "\n";
 
         // =========================
         // Clamp
@@ -1911,18 +1995,18 @@ namespace SCARoad
 
             float absA = std::abs(a);
 
-            std::cout << "  [Clamp] input=" << orig * 180.0f / Litten_M_PI
-                      << " mapped=" << a * 180.0f / Litten_M_PI << "\n";
+            // std::cout << "  [Clamp] input=" << orig * 180.0f / Litten_M_PI
+            //           << " mapped=" << a * 180.0f / Litten_M_PI << "\n";
 
             if (absA <= thetaMax)
             {
-                std::cout << "    inside parallel sector\n";
+                // std::cout << "    inside parallel sector\n";
                 return a;
             }
 
             if (std::abs(absA - Litten_M_PI) <= thetaMax)
             {
-                std::cout << "    inside opposite sector\n";
+                // std::cout << "    inside opposite sector\n";
                 return a;
             }
 
@@ -1936,7 +2020,7 @@ namespace SCARoad
                 out = (a > 0 ? Litten_M_PI - thetaMax : -Litten_M_PI + thetaMax);
             }
 
-            std::cout << "    clamped to " << out * 180.0f / Litten_M_PI << "\n";
+            // std::cout << "    clamped to " << out * 180.0f / Litten_M_PI << "\n";
             return out;
         };
 
@@ -1944,20 +2028,20 @@ namespace SCARoad
 
         Eigen::Vector2f finalDir = fromLocalAngle(clampedAngle);
 
-        std::cout << "[Final]\n";
-        std::cout << "  finalDir(before flip)=("
-                  << finalDir.x() << ", " << finalDir.y() << ")\n";
+        // std::cout << "[Final]\n";
+        // std::cout << "  finalDir(before flip)=("
+        //           << finalDir.x() << ", " << finalDir.y() << ")\n";
 
         if (finalDir.dot(guidedDir) < 0)
         {
-            std::cout << "  flipped to match guidedDir\n";
+            // std::cout << "  flipped to match guidedDir\n";
             finalDir = -finalDir;
         }
 
-        std::cout << "  finalDir=("
-                  << finalDir.x() << ", " << finalDir.y() << ")\n";
+        // std::cout << "  finalDir=("
+        //           << finalDir.x() << ", " << finalDir.y() << ")\n";
 
-        std::cout << "==================================================\n";
+        // std::cout << "==================================================\n";
 
         return finalDir.normalized();
     }
@@ -1982,7 +2066,7 @@ namespace SCARoad
             // for (int nid : path)
             //     std::cout << nid << " ";
             // std::cout << "\n";
-            // =========================
+
             // 1. 找 branch index
             std::vector<int> branchIdx;
 
@@ -2265,7 +2349,7 @@ namespace SCARoad
         return pl;
     }
 
-    std::vector<Attractor> getRandomAttractors(int num, float width, float height, std::vector<Eigen::Vector2f> &pos, const Eigen::Vector2f &center)
+    std::vector<Attractor> getRandomAttractors(float gap, float width, float height, std::vector<Eigen::Vector2f> &pos, const Eigen::Vector2f &center)
     {
         pos.clear();
         std::vector<Attractor> attractors;
@@ -2279,7 +2363,7 @@ namespace SCARoad
             {halfW, -halfH},
             {halfW, halfH},
             {-halfW, halfH}};
-        pos = util::Math2<float>::gen_poisson_sites_in_poly(bounding, 30.f, 30, (unsigned)time(nullptr));
+        pos = util::Math2<float>::gen_poisson_sites_in_poly(bounding, gap, 30, (unsigned)time(nullptr));
         for (int i = 0; i < pos.size(); i++)
         {
             attractors.emplace_back(pos[i], settings);
