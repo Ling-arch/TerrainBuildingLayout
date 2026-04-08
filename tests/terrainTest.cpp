@@ -150,7 +150,7 @@ int main()
     static float buildingDepth = -8.f;
     static float offsetDist2 = -1.5f;
     // std::vector<Polyline2_t<float>> divPolys = geo::generateRandomPolysAlongPolygon(testPolyA, offsetDist, 7.f, 12.f);
-
+    Polyline2_t<float> weightOffsetPoly = geo::offsetPolygon(testPolyA, offsetDist, {1.f, 1.f, 0.5f,  0.f, 0.5f})[0];
     bool offsetPoly = false;
 
     bool offsetInside = false;
@@ -355,7 +355,7 @@ int main()
                     {
                         std::vector<Polyline2_t<float>> divSitePolys = geo::generateRandomPolysAlongPolygon(poly, buildingDepth, 8.f, 10.f);
                         // divPolys.insert(divPolys.end(), divSitePolys.begin(), divSitePolys.end());
-                            // offsetPolys.insert(offsetPolys.end(), divSitePolys.begin(), divSitePolys.end());
+                        // offsetPolys.insert(offsetPolys.end(), divSitePolys.begin(), divSitePolys.end());
                         for (const auto &div : divSitePolys)
                         {
                             std::vector<Polyline2_t<float>> offsets = geo::offsetPolygon(div, offsetDist2);
@@ -708,7 +708,8 @@ int main()
             //     }
             // }
 
-            // render::draw_bold_polyline2(unionPoly.points, RL_RED, 30.f, pathWidth, lineData.color.a, {terrain.getWidth() * terrain.getCellSize(), 0});
+            render::draw_bold_polyline2(testPolyA.points, RL_RED, 30.f, pathWidth, lineData.color.a);
+            render::draw_bold_polyline2(weightOffsetPoly.points, RL_RED, 30.f, pathWidth, lineData.color.a);
 
             // for (const auto &poly : subedPolys)
             // {

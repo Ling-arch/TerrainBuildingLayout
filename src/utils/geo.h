@@ -19,6 +19,7 @@
 #include <CGAL/Delaunay_triangulation_adaptation_traits_2.h>
 #include <CGAL/Delaunay_triangulation_adaptation_policies_2.h>
 #include <CGAL/Surface_mesh.h>
+#include <CGAL/create_weighted_offset_polygons_2.h>
 
 namespace geo
 {
@@ -920,6 +921,48 @@ namespace geo
                 out.push_back(cgalPolygonToPolyline<Scalar>(*op));
         }
 
+        return out;
+    }
+
+    template <typename Scalar>
+    std::vector<Polyline2_t<Scalar>> offsetPolygon(
+        const Polyline2_t<Scalar> &poly,
+        Scalar dist,                       // 基准偏移距离
+        const std::vector<Scalar> &weights // 每条边的权重
+    )
+    {
+        using PolygonWithHoles = CGAL::Polygon_with_holes_2<Kernel>;
+        using PolygonPtr = std::shared_ptr<Polygon2>;
+
+        std::vector<Polyline2_t<Scalar>> out;
+
+        // 输入合法性检查（与原代码相同）
+        Polygon2 cgalPoly = toCgalPolygon(poly);
+        if (cgalPoly.size() < 3 || !cgalPoly.is_simple() ||
+            std::abs(cgalPoly.area()) < 1e-12)
+            return out;
+        if (cgalPoly.orientation() != CGAL::COUNTERCLOCKWISE)
+            cgalPoly.reverse_orientation();
+
+        // 确保权重数量与边数一致
+        if (weights.size() != cgalPoly.size())
+            return out; // 权重数量必须匹配边数
+
+        // 生成加权偏移多边形
+        auto offset_polys = CGAL::create_interior_weighted_skeleton_and_offset_polygons_2(
+            -dist,     // 基准偏移距离
+            cgalPoly, // 输入多边形
+            weights   // 边权重
+        );
+
+        // 转换结果
+        for (const auto &op : offset_polys)
+        {
+            if (op && op->is_simple())
+            {
+                out.push_back(cgalPolygonToPolyline<Scalar>(*op));
+            }
+        }
         return out;
     }
 
