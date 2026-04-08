@@ -532,6 +532,7 @@ namespace layout
         float lambda_terrain = 0.5f;
         float lambda_entropy = 0.01f;
         std::unique_ptr<torch::optim::Adam> lloyd_optimizer;
+        std::unique_ptr<torch::optim::Adam> optimizer;
 
     public:
         SoftRVDModel(
@@ -553,7 +554,7 @@ namespace layout
                            float lr = 0.05f,
                            int verbose_every = 50);
         void stepOptimizeLloyd(int &curIter, const int maxIter);
-        void stepOptimize(int &curIter, const int maxIter);
+        void stepOptimize(SoftRVDShowData& showData,int &curIter, int maxIter,bool& isOptimizing);
         void drawGrids(float z = 0.f, float size = 1.f, const Eigen::Vector2f &offset = Eigen::Vector2f(0.f, 0.f)) const;
         void drawTerrain(const std::vector<float> &heights, float z = 0.f, float size = 1.f, const Eigen::Vector2f &offset = Eigen::Vector2f(0.f, 0.f)) const;
     };

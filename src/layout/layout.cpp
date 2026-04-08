@@ -100,6 +100,9 @@ namespace layout
     {
         auto device = grid_xy.device();
 
+        // ⭐⭐⭐ 必须加：weights 每次更新（因为 site_xy 在变）
+        computeWeights();
+
         // ===============================
         // 1. site area
         // ===============================
@@ -121,11 +124,17 @@ namespace layout
         auto p_floor = torch::softmax(floor_logits, 1);
         auto floors = (p_floor * floor_vals).sum(1);
 
-        for (int id : courtyard_ids)
-            floors[id] = 0.0f;
+        // ⭐⭐⭐ 修复 inplace（极重要）
+        if (!courtyard_ids.empty())
+        {
+            auto mask = torch::ones_like(floors);
+            auto ids_tensor = torch::tensor(courtyard_ids, torch::dtype(torch::kLong).device(device));
+            mask.index_put_({ids_tensor}, 0.0f);
+            floors = floors * mask;
+        }
 
         // ===============================
-        // 4. discrete dh (relative to base)
+        // 4. discrete dh
         // ===============================
         auto delta_vals = torch::tensor({0.f, 2.f, 4.f, 6.f, 8.f}, device);
 
@@ -133,16 +142,15 @@ namespace layout
         auto dh = (p_delta * delta_vals).sum(1); // [N]
 
         // ===============================
-        // 5. final site plane height
+        // 5. final site height
         // ===============================
-        auto H_site = h_base + dh; // [N]
+        auto H_site = h_base + dh;
 
         // ===============================
-        // 6. terrain delta (cut & fill)
+        // 6. terrain loss
         // ===============================
-        // Δh_g = sum_i w_gi * (H_i - h_g)
         auto delta_terrain =
-            weights.matmul(H_site) - terrain_h; // [G]
+            weights.matmul(H_site) - terrain_h;
 
         auto L_terrain = delta_terrain.pow(2).mean();
 
@@ -154,14 +162,28 @@ namespace layout
         auto L_far = (total_floors - target_floors).pow(2);
 
         // ===============================
-        // 8. entropy (anneal)
+        // 8. entropy
         // ===============================
         auto L_entropy =
             -(p_floor * torch::log(p_floor + 1e-6)).sum() - (p_delta * torch::log(p_delta + 1e-6)).sum();
 
-        return lambda_far * L_far +
-               lambda_terrain * L_terrain +
-               lambda_entropy * L_entropy;
+        auto loss =
+            lambda_far * L_far +
+            lambda_terrain * L_terrain +
+            lambda_entropy * L_entropy;
+
+        // ⭐⭐⭐ NaN 防护（强烈建议）
+        if (torch::isnan(loss).any().item<bool>())
+        {
+            std::cout << "❌ LOSS IS NAN!" << std::endl;
+            std::cout << "L_far=" << L_far.item<float>()
+                      << " L_terrain=" << L_terrain.item<float>()
+                      << " L_entropy=" << L_entropy.item<float>()
+                      << std::endl;
+            exit(0);
+        }
+
+        return loss;
     }
 
     void SoftRVDModel::drawGrids(float z, float size, const Eigen::Vector2f &offset) const
@@ -302,11 +324,60 @@ namespace layout
         }
     }
 
-    void SoftRVDModel::stepOptimize(int &curIter, const int maxIter)
+    void SoftRVDModel::stepOptimize(SoftRVDShowData& showData,int &curIter, int maxIter,bool& isOptimizing)
     {
+        if (curIter >= maxIter)
+        {
+            isOptimizing = false;
+            return;
+        }
+        
+        optimizer->zero_grad();
+
+        float t = float(curIter) / float(std::max(maxIter - 1, 1));
+        float s = t * t * (3.f - 2.f * t);
+
+        lambda_entropy = 0.05f * (1.0f - s);
+
+        auto loss = forward();
+        loss.backward();
+        optimizer->step();
+
+        // 更新 showData（和你原来一样）
+        {
+            auto device = grid_xy.device();
+
+            auto floor_vals = torch::arange(0, 5, device);
+            auto p_floor = torch::softmax(floor_logits, 1);
+            auto floors_now = (p_floor * floor_vals).sum(1);
+
+            auto delta_vals = torch::tensor({0.f, 2.f, 4.f, 6.f, 8.f}, device);
+            auto p_delta = torch::softmax(delta_logits, 1);
+            auto dh_now = (p_delta * delta_vals).sum(1);
+
+            showData.grid_xy = grid_xy;
+            showData.weights = weights;
+            showData.floors = floors_now;
+            showData.dh = dh_now;
+            showData.base_h = base_height;
+            showData.G = G;
+            showData.N = N;
+        }
+
+        if (curIter % 10 == 0)
+        {
+            std::cout << "[Iter " << curIter
+                      << "] loss=" << loss.item<float>() << std::endl;
+        }
+
+        curIter++;
     }
 
-    void SoftRVDModel::optimize(SoftRVDShowData &showData, int iters, float lr, int verbose_every)
+    void SoftRVDModel::optimize(
+        SoftRVDShowData &showData,
+        int iters,
+        float lr,
+        int verbose_every)
     {
         torch::optim::Adam optimizer(
             this->parameters(),
@@ -316,12 +387,20 @@ namespace layout
         {
             optimizer.zero_grad();
 
-            float t = float(iter) / float(iters - 1);
+            float t = float(iter) / float(std::max(iters - 1, 1));
             float s = t * t * (3.f - 2.f * t);
 
             lambda_entropy = 0.05f * (1.0f - s);
 
             auto loss = forward();
+
+            // ⭐⭐⭐ 防止 backward 崩
+            if (!loss.requires_grad())
+            {
+                std::cout << "❌ loss has no grad!" << std::endl;
+                return;
+            }
+
             loss.backward();
             optimizer.step();
 
@@ -335,11 +414,21 @@ namespace layout
                 auto p_floor = torch::softmax(floor_logits, 1);
                 auto floors_now = (p_floor * floor_vals).sum(1);
 
+                // 同样要 mask（保持一致）
+                if (!courtyard_ids.empty())
+                {
+                    auto mask = torch::ones_like(floors_now);
+                    auto ids_tensor = torch::tensor(courtyard_ids, torch::dtype(torch::kLong).device(device));
+                    mask.index_put_({ids_tensor}, 0.0f);
+                    floors_now = floors_now * mask;
+                }
+
                 auto delta_vals =
                     torch::tensor({0.f, 2.f, 4.f, 6.f, 8.f}, device);
 
                 auto p_delta = torch::softmax(delta_logits, 1);
                 auto dh_now = (p_delta * delta_vals).sum(1);
+
                 dh_now = dh_now * torch::relu(floors_now - 1.0f);
 
                 showData.grid_xy = grid_xy;

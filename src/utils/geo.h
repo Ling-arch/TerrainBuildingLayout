@@ -1170,6 +1170,210 @@ namespace geo
     }
 
     template <typename Scalar>
+    std::vector<Polyline2_t<Scalar>> splitRingUsingArrangement(
+        const Polygon2 &outer,
+        const std::vector<Polygon2> &inners,
+        const std::vector<Polyline2_t<Scalar>> &cutters)
+    {
+        using Arr_traits = CGAL::Arr_segment_traits_2<Kernel>;
+
+        Arrangement arr;
+
+        std::vector<Polyline2_t<Scalar>> result;
+
+        // =========================
+        // 0. 输入保护
+        // =========================
+        if (outer.size() < 3 || !outer.is_simple() || std::abs(outer.area()) < 1e-10)
+            return result;
+
+        // =========================
+        // 1. 插入 outer
+        // =========================
+        insertPolygonEdges<Scalar>(outer, arr);
+
+        // =========================
+        // 2. 插入 inner
+        // =========================
+        for (const auto &inner : inners)
+        {
+            if (inner.size() < 3)
+                continue;
+            if (!inner.is_simple())
+                continue;
+            if (std::abs(inner.area()) < 1e-10)
+                continue;
+
+            insertPolygonEdges<Scalar>(inner, arr);
+        }
+
+        // =========================
+        // 3. 插入 cutters
+        // =========================
+        for (const auto &c : cutters)
+        {
+            if (c.points.size() < 2)
+                continue;
+
+            insertPolyline(c, arr);
+        }
+
+        // =========================
+        // 🔧 工具函数
+        // =========================
+        auto removeDuplicatePoints = [&](std::vector<Vector2<Scalar>> &pts)
+        {
+            std::vector<Vector2<Scalar>> out;
+
+            for (auto &p : pts)
+            {
+                bool dup = false;
+                for (auto &q : out)
+                {
+                    if ((p - q).norm() < Scalar(1e-6))
+                    {
+                        dup = true;
+                        break;
+                    }
+                }
+                if (!dup)
+                    out.push_back(p);
+            }
+
+            pts = std::move(out);
+        };
+
+        // =========================
+        // 4. 遍历 faces
+        // =========================
+        for (auto fit = arr.faces_begin(); fit != arr.faces_end(); ++fit)
+        {
+            if (fit->is_unbounded())
+                continue;
+
+            auto ccb = fit->outer_ccb();
+            if (ccb == nullptr)
+                continue;
+
+            // =========================
+            // 4.1 收集点
+            // =========================
+            std::vector<Vector2<Scalar>> pts;
+
+            auto curr = ccb;
+            do
+            {
+                auto p = curr->source()->point();
+
+                pts.emplace_back(
+                    Scalar(CGAL::to_double(p.x())),
+                    Scalar(CGAL::to_double(p.y())));
+
+                ++curr;
+            } while (curr != ccb);
+
+            // =========================
+            // 4.2 清洗（关键）
+            // =========================
+            removeDuplicatePoints(pts);
+
+            if (pts.size() < 3)
+                continue;
+
+            Polyline2_t<Scalar> tmp;
+            tmp.points = pts;
+            tmp.isClosed = true;
+
+            // ⭐ snap（非常重要，防止缝隙）
+            tmp = snap_near_vertices(tmp, Scalar(1e-3));
+
+            // ⭐ 去共线
+            tmp = remove_collinear_points(tmp, Scalar(1e-6));
+
+            if (tmp.points.size() < 3)
+                continue;
+
+            // =========================
+            // 4.3 转 polygon
+            // =========================
+            Polygon2 poly;
+
+            for (auto &v : tmp.points)
+            {
+                poly.push_back(Point_2(v.x(), v.y()));
+            }
+
+            // =========================
+            // 4.4 几何合法性
+            // =========================
+            if (!poly.is_simple())
+                continue;
+
+            double area = std::abs(poly.area());
+            if (area < 1e-6)
+                continue;
+
+            if (poly.orientation() == CGAL::CLOCKWISE)
+                poly.reverse_orientation();
+
+            // =========================
+            // ⭐ 细长面过滤（关键）
+            // =========================
+            double perimeter = 0.0;
+
+            for (int i = 0; i < poly.size(); ++i)
+            {
+                auto a = poly[i];
+                auto b = poly[(i + 1) % poly.size()];
+
+                perimeter += std::sqrt(
+                    CGAL::to_double(CGAL::squared_distance(a, b)));
+            }
+
+            if (area / perimeter < 1e-3)
+                continue;
+
+            // =========================
+            // 4.5 内外分类（核心）
+            // =========================
+            auto pl = cgalPolygonToPolyline<Scalar>(poly);
+
+            Vector2<Scalar> p =
+                util::Math2<Scalar>::getPointStrictInSidePolygon(pl.points);
+
+            Point_2 testP(p.x(), p.y());
+
+            // outer
+            if (CGAL::bounded_side_2(
+                    outer.begin(), outer.end(), testP) != CGAL::ON_BOUNDED_SIDE)
+                continue;
+
+            // inner
+            bool insideInner = false;
+
+            for (auto &inner : inners)
+            {
+                if (CGAL::bounded_side_2(
+                        inner.begin(), inner.end(), testP) == CGAL::ON_BOUNDED_SIDE)
+                {
+                    insideInner = true;
+                    break;
+                }
+            }
+
+            if (insideInner)
+                continue;
+
+            // =========================
+            // 4.6 输出
+            // =========================
+            result.push_back(pl);
+        }
+
+        return result;
+    }
+
+    template <typename Scalar>
     std::vector<Polyline2_t<Scalar>> splitPolygonWithHolesByPolylines(
         const CGAL::Polygon_with_holes_2<Kernel> &polyWithHoles,
         const std::vector<Polyline2_t<Scalar>> &cutters)
@@ -1502,264 +1706,178 @@ namespace geo
 
         std::vector<Polyline2_t<Scalar>> result;
 
-        std::cout << "\n========== generateRandomPolys BEGIN ==========\n";
-
         Polygon2 outer = toCgalPolygon(poly);
 
-        std::cout << "[Input] pts=" << poly.points.size()
-                  << " area=" << outer.area()
-                  << "\n";
-
         // =========================
-        // 0. outer 防御
+        // 0. outer check
         // =========================
-        if (outer.size() < 3)
-        {
-            std::cout << "[FAIL] outer < 3\n";
+        if (outer.size() < 3 || !outer.is_simple() || std::abs(outer.area()) < 1e-10)
             return result;
-        }
-
-        if (!outer.is_simple())
-        {
-            std::cout << "[FAIL] outer not simple\n";
-            return result;
-        }
-
-        if (std::abs(outer.area()) < 1e-10)
-        {
-            std::cout << "[FAIL] outer degenerate\n";
-            return result;
-        }
 
         if (outer.orientation() != CGAL::COUNTERCLOCKWISE)
-        {
             outer.reverse_orientation();
-            std::cout << "[Fix] outer reversed\n";
-        }
 
         // =========================
-        // 1. skeleton
+        // 1. skeleton + offset
         // =========================
-        std::cout << "[Step1] build skeleton...\n";
-
         SsPtr ss = CGAL::create_interior_straight_skeleton_2(outer);
-
         if (!ss)
-        {
-            std::cout << "[FAIL] skeleton failed\n";
             return result;
-        }
 
-        std::cout << "[OK] skeleton built\n";
-
-        // =========================
-        // 2. offset
-        // =========================
         if (depth <= 0)
-        {
             depth = -depth;
-            std::cout << "[FAIL] depth <= 0\n";
-            // return result;
-        }
-
-        std::cout << "[Step2] offset depth=" << depth << "\n";
 
         auto offsets = CGAL::create_offset_polygons_2<Polygon2>(depth, *ss);
 
-        std::cout << "[Offset] count=" << offsets.size() << "\n";
+        std::vector<Polygon2> inners;
 
-        if (offsets.empty())
+        for (auto &op : offsets)
         {
-            std::cout << "[FAIL] offset empty\n";
+            Polygon2 inner = *op;
+
+            if (inner.size() < 3)
+                continue;
+            if (!inner.is_simple())
+                continue;
+            if (std::abs(inner.area()) < 1e-10)
+                continue;
+
+            if (inner.orientation() != CGAL::COUNTERCLOCKWISE)
+                inner.reverse_orientation();
+
+            inners.push_back(inner);
+        }
+
+        if (inners.empty())
             return result;
-        }
-
-        Polygon2 inner = *offsets.front();
-
-        std::cout << "[Inner] pts=" << inner.size()
-                  << " area=" << inner.area() << "\n";
-
-        if (inner.size() < 3)
-        {
-            std::cout << "[FAIL] inner < 3\n";
-            return result;
-        }
-
-        if (!inner.is_simple())
-        {
-            std::cout << "[FAIL] inner not simple\n";
-            return result;
-        }
-
-        if (std::abs(inner.area()) < 1e-10)
-        {
-            std::cout << "[FAIL] inner degenerate\n";
-            return result;
-        }
-
-        if (inner.orientation() != CGAL::COUNTERCLOCKWISE)
-        {
-            inner.reverse_orientation();
-            std::cout << "[Fix] inner reversed\n";
-        }
 
         // =========================
-        // 3. difference
+        // 2. outer - ALL inners（关键）
         // =========================
-        std::cout << "[Step3] difference...\n";
+        // std::list<PolygonWithHoles> diff;
 
-        std::list<PolygonWithHoles> diff;
+        // try
+        // {
+        //     std::list<PolygonWithHoles> current;
+        //     current.push_back(PolygonWithHoles(outer));
 
-        try
-        {
-            CGAL::difference(outer, inner, std::back_inserter(diff));
-        }
-        catch (...)
-        {
-            std::cout << "[FAIL] difference exception\n";
-            return result;
-        }
+        //     for (auto &inner : inners)
+        //     {
+        //         std::list<PolygonWithHoles> next;
 
-        std::cout << "[Diff] count=" << diff.size() << "\n";
+        //         for (auto &p : current)
+        //         {
+        //             CGAL::difference(p, inner, std::back_inserter(next));
+        //         }
 
-        if (diff.empty())
-        {
-            std::cout << "[FAIL] diff empty\n";
-            return result;
-        }
+        //         current.swap(next);
+        //         if (current.empty())
+        //             break;
+        //     }
 
-        auto &ringWithHole = diff.front();
+        //     diff = current;
+        // }
+        // catch (...)
+        // {
+        //     return result;
+        // }
+
+        // if (diff.empty())
+        //     return result;
 
         // =========================
-        // 4. inner 采样
+        // 3. build ALL cutters（统一）
         // =========================
-        std::cout << "[Step4] divide polyline...\n";
+        std::vector<Polyline2_t<Scalar>> cutters;
+        std::vector<Polyline2_t<Scalar>> innerPolys;
+        for (auto &inner : inners)
+        {
+            auto innerPoly = cgalPolygonToPolyline<Scalar>(inner);
+            innerPolys.push_back(innerPoly);
 
-        Polyline2_t<Scalar> innerPoly = cgalPolygonToPolyline<Scalar>(inner);
-
-        std::vector<Vector2<Scalar>> divPts =
-            dividePolyLineByRandomStep(
+            auto divPts = dividePolyLineByRandomStep(
                 innerPoly.points,
                 Scalar((minWidth + maxWidth) * 0.5),
                 Scalar((maxWidth - minWidth) * 0.5),
                 Scalar(minWidth));
 
-        std::cout << "[Divide] count=" << divPts.size() << "\n";
-
-        if (divPts.empty())
-        {
-            std::cout << "[FAIL] no divide points\n";
-            return result;
-        }
-
-        // =========================
-        // 5. cutters
-        // =========================
-        std::cout << "[Step5] build cutters...\n";
-
-        std::vector<Polyline2_t<Scalar>> cutters;
-        int skipZero = 0;
-        int skipShort = 0;
-
-        for (auto &pt : divPts)
-        {
-            Vector2<Scalar> p = pt;
-            Vector2<Scalar> closest = closestPointOnPoly(poly.points, p);
-
-            Vector2<Scalar> dir = (closest - p);
-
-            if (dir.norm() < Scalar(1e-6))
+            for (auto &pt : divPts)
             {
-                skipZero++;
-                continue;
+                Vector2<Scalar> p = pt;
+                Vector2<Scalar> closest = closestPointOnPoly(poly.points, p);
+
+                Vector2<Scalar> dir = (closest - p);
+                if (dir.norm() < Scalar(1e-6))
+                    continue;
+
+                dir.normalize();
+
+                Scalar extendLen = std::max(depth * Scalar(0.07), Scalar(0.5));
+
+                Vector2<Scalar> a = p - dir * extendLen;
+                Vector2<Scalar> b = closest + dir * extendLen;
+
+                if ((b - a).norm() < Scalar(1e-3))
+                    continue;
+
+                cutters.emplace_back(Polyline2_t<Scalar>({a, b}));
             }
-
-            dir.normalize();
-
-            Scalar extendLen = Scalar(0.5);
-
-            Vector2<Scalar> a = p - dir * extendLen;
-            Vector2<Scalar> b = closest + dir * extendLen;
-
-            if ((b - a).norm() < Scalar(1e-3))
-            {
-                skipShort++;
-                continue;
-            }
-
-            cutters.emplace_back(Polyline2_t<Scalar>({a, b}));
         }
-
-        std::cout << "[Cutters] valid=" << cutters.size()
-                  << " skipZero=" << skipZero
-                  << " skipShort=" << skipShort << "\n";
 
         if (cutters.empty())
-        {
-            std::cout << "[FAIL] no valid cutters\n";
             return result;
-        }
 
         // =========================
-        // 6. split
+        // 4. split（一次性切所有区域）
         // =========================
-        std::cout << "[Step6] split...\n";
-
-        std::vector<Polyline2_t<Scalar>> current;
+        std::vector<Polyline2_t<Scalar>> pieces;
 
         try
         {
-            current = splitPolygonWithHolesByPolylines(ringWithHole, cutters);
+            pieces = splitRingUsingArrangement(outer, inners, cutters);
         }
         catch (...)
         {
-            std::cout << "[FAIL] split exception\n";
-            return result;
         }
 
-        std::cout << "[Split] pieces=" << current.size() << "\n";
-
         // =========================
-        // 7. 过滤
+        // 5. final filter（关键）
         // =========================
-        int keep = 0;
-        int dropSmall = 0;
-        int dropNotSimple = 0;
-
-        for (auto &p : current)
+        for (auto &p : pieces)
         {
             if (p.points.size() < 4)
-            {
-                dropSmall++;
                 continue;
-            }
 
             Scalar area = util::Math2<Scalar>::polygon_area(p.points);
-
-            if (std::abs(area) < 1e-3)
-            {
-                dropSmall++;
+            if (std::abs(area) < Scalar(40))
                 continue;
-            }
+
+            remove_collinear_points(p, Scalar(1e-4));
+            snap_near_vertices(p, Scalar(1e-4));
 
             Polygon2 test = toCgalPolygon(p);
-
             if (!test.is_simple())
-            {
-                dropNotSimple++;
                 continue;
-            }
+
+            // // 🔥 关键：排除所有 inner
+            // Vector2<Scalar> pt = util::Math2<Scalar>::getPointStrictInSidePolygon(p.points);
+
+            // bool insideInner = false;
+            // for (auto &inner : innerPolys)
+            // {
+
+            //     if (util::Math2<Scalar>::point_in_poly(inner.points, pt))
+            //     {
+            //         insideInner = true;
+            //         break;
+            //     }
+            // }
+
+            // if (insideInner)
+            //     continue;
 
             result.push_back(p);
-            keep++;
         }
-
-        std::cout << "[Result] keep=" << keep
-                  << " dropSmall=" << dropSmall
-                  << " dropNotSimple=" << dropNotSimple
-                  << "\n";
-
-        std::cout << "========== END ==========\n\n";
 
         return result;
     }

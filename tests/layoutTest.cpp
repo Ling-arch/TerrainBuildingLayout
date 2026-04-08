@@ -53,10 +53,10 @@ int main()
     BuildingLayout<float> layout(poly, terrain);
     field::Polyline2_t<float> rect = layout.oriRect;
     OBB2 obb(poly.points);
-    // std::vector<Vector3f> projPoly;
-    // std::vector<Vector3f> projRect;
-    // terrain.projectPolylineToTerrain(poly.points, projPoly);
-    // terrain.projectPolylineToTerrain(rect.points, projRect);
+    std::vector<Vector3f> projPoly;
+    std::vector<Vector3f> projRect;
+    terrain.projectPolylineToTerrain(poly.points, projPoly);
+    terrain.projectPolylineToTerrain(rect.points, projRect);
     field::TensorField2D<float> tensorField = field::TensorField2D(terrain.getAABB2(), minGridNum);
     std::unordered_map<int, field::TerrainTensor<float>> terrainTensors = terrain.sampleTensorAtGrids(tensorField.getGridPoints());
     tensorField.addConstraint({}, {}, terrainTensors);
@@ -101,41 +101,11 @@ int main()
     std::cout << "softmodel built" << std::endl;
     // softModel.optimizeLloyd();
     bool isOptimizing = false;
-    static int maxIter = 300;
+    static int maxIter = 200;
     int curIter = 0;
 
     srand((unsigned)time(nullptr));
 
-
-    // ============================
-    // 1. 初始化 seeds
-    SCANode root;
-    root.position = Eigen::Vector2f(0, 0);
-    std::vector<SCANode> nodes;
-    nodes.push_back(root);
-   
-    // ============================
-    // 2. 初始化 attractors
-    std::vector<Eigen::Vector2f> attractPos;
-    std::vector<SCARoad::Attractor> attractors = SCARoad::getRandomAttractors(35.f, 512, 512, attractPos);
-   
-    SCANetwork net(nodes, attractors, terrain,tensorField);
-    std::vector<Eigen::Vector2f> nodePoints;
-    for (auto &n : net.nodes)
-        nodePoints.push_back(n.position);
-    std::cout << "Init nodes: " << net.nodes.size() << "\n";
-    std::cout << "Init attractors: " << net.attractors.size() << "\n";
-
-    // ============================
-    // 3. 迭代
-    // ============================
-    int maxSCAIter = 800;
-    auto roads = net.extractRoads();
-    int scaIter = 0;
-    bool scaUpdated = false;
-
-    bool growthStopped = false;
-    bool showAttrIndices = true;
     rlImGuiSetup(true);
     render.runMainLoop(render::FrameCallbacks{
         [&]() { // 按键更新，重新绘图等事件，poly修改过需要重新fill
@@ -143,8 +113,8 @@ int main()
             {
                 poly = field::createRandomPolygon(ptNum, scale, threshold, Vector2f(0.f, 0.f));
                 obb = OBB2(poly.points);
-                // terrain.projectPolylineToTerrain(poly.points, projPoly);
-                // terrain.projectPolylineToTerrain(rect.points, projRect);
+                terrain.projectPolylineToTerrain(poly.points, projPoly);
+                terrain.projectPolylineToTerrain(rect.points, projRect);
                 layout = BuildingLayout<float>(poly, terrain);
                 rect = layout.oriRect;
                 samplePoints2 = M2::gen_poisson_sites_in_poly(layout.rotedRect.points, layout.divGap, 30, (unsigned)time(nullptr));
@@ -174,15 +144,15 @@ int main()
                 streamlines = tensorField.genStreamlines(samplePoints);
                 layout = BuildingLayout<float>(poly, terrain);
                 rect = layout.oriRect;
-                samplePoints2 = M2::gen_poisson_sites_in_poly(layout.rotedRect.points, layout.divGap, 30, (unsigned)time(nullptr));
+                totalSeedResult = M2::gen_poisson_sites_in_poly_with_seeds(layout.rotedRect.points, yardSeeds, layout.divGap, 7, 30, (unsigned)time(nullptr));
                 roomPoints.clear();
-                for (const auto &p : samplePoints2)
+                for (const auto &p : totalSeedResult.samples)
                 {
                     roomPoints.emplace_back(p);
                 }
                 rvd = RectVoronoi2D<float>(roomPoints, layout.rotedBound);
                 grid_xy = diffVoronoi::vec2_to_tensor(layout.rotedCenters);
-                site_xy = diffVoronoi::vec2_to_tensor(samplePoints2);
+                site_xy = diffVoronoi::vec2_to_tensor(totalSeedResult.samples);
                 terrain_h = torch::from_blob(layout.heightMap.data(), {static_cast<int64_t>(layout.heightMap.size())}).clone();
                 softModel = SoftRVDModel(grid_xy, terrain_h, site_xy, 1, {0, 1}, beta, tau);
                 needGenTerrain = false;
@@ -204,13 +174,16 @@ int main()
 
             if (IsKeyPressed(KEY_A))
             {
-                // softModel.optimize(showData);
+
                 curIter = 0;
                 isOptimizing = true;
+                softModel.optimizer = std::make_unique<torch::optim::Adam>(
+                    softModel.parameters(),
+                    torch::optim::AdamOptions(0.05));
             }
             if (isOptimizing)
             {
-                softModel.stepOptimizeLloyd(curIter, maxIter);
+                softModel.stepOptimize(showData, curIter, maxIter, isOptimizing);
             }
             if (curIter >= maxIter)
             {
@@ -223,13 +196,12 @@ int main()
                 terrain.applyFaceColor();
             }
 
-
         },
         [&]() { // 3维空间绘图内容部分
-            if(showTerrain)
+            if (showTerrain)
                 terrain.draw();
-            //  layout.drawTerrain(RL_GRAY, 0.8f, true, 0.5f);
-            DrawGrid(50,10);
+            layout.drawTerrain(RL_GRAY, 0.8f, true, 0.5f);
+            // DrawGrid(50,10);
             terrain.drawContours(layers);
             // DrawSphere({0, 0, 0}, 2.f, RL_RED);
             if (showViewPt)
@@ -237,14 +209,7 @@ int main()
                 DrawSphere({terrain.testViewPt.x(), terrain.observeHeight, -terrain.testViewPt.y()}, 1.f, RL_GRAY);
             }
 
-            for (const auto &road : roads)
-            {
-                render::draw_bold_polyline2(road, render.lineData.color, 0.f, render.lineData.Thickness, render.lineData.color.a);
-                render::draw_points(road, RL_GREEN, 1.f, render.ptData.size / 2.f);
-            }
-            render::draw_points(attractPos, render.ptData.color, 1.f, render.ptData.size);
-
-            // showData.draw();
+            showData.draw();
             // DrawLine3D({0, 0, 0}, {10000, 0, 0}, RL_RED);
             // DrawLine3D({0, 0, 0}, {0, 10000, 0}, RL_BLUE);
             // DrawLine3D({0, 0, 0}, {0, 0, -10000}, RL_GREEN);
@@ -282,7 +247,7 @@ int main()
             // render::draw_points(totalSeedResult.samples, render.ptData.color, 1.f, render.ptData.size * 1.5f, 0, {terrain_width / 2.f, 0.f});
 
             // model.drawGrids();
-            // softModel.drawGrids(0.f, 1.f, {terrain_width / 2.f, 0.f});
+            softModel.drawGrids(0.f, 1.f, {terrain_width / 2.f, 0.f});
             // softModel.drawTerrain(layout.heightMap);
         },
         [&]() { // 二维屏幕空间绘图
@@ -291,9 +256,6 @@ int main()
             // render.draw_index_fonts(layout.rotedGrids, render.ptData.size, render.ptData.color);
             // net.drawNodesWithIndices(render);
 
-            render.draw_index_fonts(nodePoints, render.fontData.size, render.fontData.color);
-            if (showAttrIndices)
-                render.draw_index_fonts(attractPos, render.fontData.size, RL_RED);
             rlImGuiBegin();
 
             render.setCameraUI(customOpen);
@@ -375,7 +337,6 @@ int main()
                     genPlot |= ImGui::SliderFloat("Threshold", &threshold, 0.f, 1.f, "%.2f");
                     terrainfieldWeightChanged |= ImGui::SliderFloat("Terrain Field Weight", &terrainWeight, 1.f, 10.f, "%.1f");
                     ImGui::Checkbox("FieldShow", &showFieldLine);
-                    ImGui::Checkbox("AttrIndicesShow", &showAttrIndices);
                     ImGui::Unindent();
                 }
             }
@@ -397,47 +358,22 @@ int main()
             {
                 ImGui::Indent();
 
-                ImGui::Checkbox("AttrIndicesShow", &showAttrIndices);
-
-                // ============================
                 // Debug 1: Relative Neighbors
-                // ============================
                 ImGui::Separator();
                 ImGui::Text("Relative Neighbor Query");
 
                 ImGui::InputInt("Node ID##Neighbor", &debugNodeID_1);
                 ImGui::InputFloat("Radius", &debugRadius);
 
-                if (ImGui::Button("Print Relative Neighbors"))
-                {
-                    net.debugPrintRelativeNeighbors(debugNodeID_1, debugRadius);
-                }
-
-                // ============================
                 // Debug 2: Path Info
-                // ============================
                 ImGui::Separator();
                 ImGui::Text("Node Path Info");
-
                 ImGui::InputInt("Node ID##Path", &debugNodeID_2);
-
-                if (ImGui::Button("Print Node Paths"))
-                {
-                    net.debugPrintNodePaths(debugNodeID_2);
-                }
-
                 ImGui::Separator();
                 ImGui::Text("Connect Info");
-
                 ImGui::InputInt("Node ID##ConnectNode", &debugNodeID_3);
 
-                if (ImGui::Button("Debug Connect Nodes"))
-                {
-                    net.debugConnectNodes(debugNodeID_3, debugRadius);
-                }
-
                 ImGui::Unindent();
-                
             }
             ImGui::End();
             rlImGuiEnd();
