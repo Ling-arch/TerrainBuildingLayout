@@ -285,6 +285,66 @@ namespace loss
         return (site2xy - site2xytrg_tensor).pow(2).sum();
     }
 
+    WallEdgeInfo extract_wall_and_exterior_edges(
+        const VoronoiInfo &voronoi_info,
+        const std::vector<size_t> &site2room)
+    {
+        const auto &site2idx = voronoi_info.site2idx;
+        const auto &idx2vtxv = voronoi_info.idx2vtxv;
+        const auto &idx2site = voronoi_info.idx2site;
+
+        WallEdgeInfo result;
+
+        for (size_t i_site = 0; i_site + 1 < site2idx.size(); ++i_site)
+        {
+            size_t i_room = site2room[i_site];
+            if (i_room == INVALID)
+                continue;
+
+            size_t beg = site2idx[i_site];
+            size_t end = site2idx[i_site + 1];
+            size_t num_v = end - beg;
+
+            for (size_t i0 = 0; i0 < num_v; ++i0)
+            {
+                size_t idx = beg + i0;
+                size_t i1 = (i0 + 1) % num_v;
+
+                size_t v0 = idx2vtxv[idx];
+                size_t v1 = idx2vtxv[beg + i1];
+
+                size_t j_site = idx2site[idx];
+
+                // =============================
+                // 1️⃣ 外墙（无遮挡 half-edge）
+                // =============================
+                if (j_site == INVALID)
+                {
+                    result.edge2vtxv_ext.push_back(v0);
+                    result.edge2vtxv_ext.push_back(v1);
+                    result.edge2room_ext.push_back(i_room);
+                    continue;
+                }
+
+                // =============================
+                // 2️⃣ 内墙（两个不同房间）
+                // =============================
+                if (i_site < j_site) // 防止重复
+                {
+                    size_t j_room = site2room[j_site];
+
+                    if (j_room != INVALID && i_room != j_room)
+                    {
+                        result.edge2vtxv_wall.push_back(v0);
+                        result.edge2vtxv_wall.push_back(v1);
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
     std::vector<size_t> edge2vtvx_wall(const VoronoiInfo &voronoi_info, const std::vector<size_t> &site2room)
     {
         const auto &site2idx = voronoi_info.site2idx;
@@ -334,6 +394,51 @@ namespace loss
         }
 
         return edge2vtxv;
+    }
+
+    std::pair<std::vector<size_t>, std::vector<size_t>>
+    edge2vtvx_exterior(
+        const VoronoiInfo &voronoi_info,
+        const std::vector<size_t> &site2room)
+    {
+        const auto &site2idx = voronoi_info.site2idx;
+        const auto &idx2vtxv = voronoi_info.idx2vtxv;
+        const auto &idx2site = voronoi_info.idx2site;
+
+        std::vector<size_t> edge2vtxv; // [v0, v1, v0, v1, ...]
+        std::vector<size_t> edge2room; // 每条 edge 对应的 room
+
+        for (size_t i_site = 0; i_site + 1 < site2idx.size(); ++i_site)
+        {
+            size_t i_room = site2room[i_site];
+            if (i_room == INVALID)
+                continue;
+
+            size_t beg = site2idx[i_site];
+            size_t end = site2idx[i_site + 1];
+            size_t num_v = end - beg;
+
+            for (size_t i0 = 0; i0 < num_v; ++i0)
+            {
+                size_t idx = beg + i0;
+                size_t i1 = (i0 + 1) % num_v;
+
+                size_t v0 = idx2vtxv[idx];
+                size_t v1 = idx2vtxv[beg + i1];
+
+                size_t j_site = idx2site[idx];
+
+                //  核心：没有邻居 = 外墙
+                if (j_site == INVALID)
+                {
+                    edge2vtxv.push_back(v0);
+                    edge2vtxv.push_back(v1);
+                    edge2room.push_back(i_room);
+                }
+            }
+        }
+
+        return {edge2vtxv, edge2room};
     }
 
     torch::Tensor loss_lloyd_internal(

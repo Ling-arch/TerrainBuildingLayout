@@ -20,6 +20,13 @@ namespace loss
     using M2 = util::Math2<voronoi2::Scalar>;
     using Vector2 = typename M2::Vector2;
 
+    struct WallEdgeInfo
+    {
+        std::vector<size_t> edge2vtxv_wall; // 室内墙（房间之间）
+        std::vector<size_t> edge2vtxv_ext;  // 外墙
+        std::vector<size_t> edge2room_ext;  // 外墙属于哪个 room
+    };
+
     inline constexpr size_t INVALID = static_cast<size_t>(std::numeric_limits<int64_t>::max());
 
     std::tuple<size_t, std::vector<size_t>, std::vector<std::vector<size_t>>> topology(
@@ -49,10 +56,19 @@ namespace loss
         const VoronoiInfo &voronoi_info,
         const std::vector<std::pair<size_t, size_t>> &room_connections);
 
+    WallEdgeInfo extract_wall_and_exterior_edges(
+        const VoronoiInfo &voronoi_info,
+        const std::vector<size_t> &site2room);
+
     std::vector<size_t> edge2vtvx_wall(
         const VoronoiInfo &voronoi_info,
         const std::vector<size_t> &site2room);
 
+    std::pair<std::vector<size_t>, std::vector<size_t>>
+    edge2vtvx_exterior(
+        const VoronoiInfo &voronoi_info,
+        const std::vector<size_t> &site2room);
+        
     torch::Tensor loss_lloyd_internal(
         const VoronoiInfo &voronoi_info,
         const std::vector<size_t> &site2room,
@@ -96,13 +112,13 @@ namespace loss
         const torch::Tensor &vtx2xy,
         const polyloop::NormalizeTransform2D<float> &tf);
 
-      torch::Tensor build_edge_tensor_dir(
+    torch::Tensor build_edge_tensor_dir(
         const std::vector<size_t> &edge2vtx,
         const field::TensorField2D<float> &field,
         const torch::Tensor &vtx2xy,
         const polyloop::NormalizeTransform2D<float> &tf);
 
-      std::vector<std::vector<size_t>> build_wall_chains(const std::vector<size_t> &edge2vtxv);
-      std::vector<size_t> chain_to_edge2vtxv(const std::vector<size_t> &chain);
-      
+    std::vector<std::vector<size_t>> build_wall_chains(const std::vector<size_t> &edge2vtxv);
+    std::vector<size_t> chain_to_edge2vtxv(const std::vector<size_t> &chain);
+
 }

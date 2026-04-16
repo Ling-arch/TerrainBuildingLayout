@@ -16,7 +16,6 @@ target_include_directories(Terrain
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${UtilsDir}
     ${PlanDir}
-    ${BuildingDir}
     ${CMAKE_SOURCE_DIR}/thirdparty/include
 )
 
@@ -24,4 +23,5 @@ target_link_libraries(Terrain
     PUBLIC
     Utils
     viewshed_cuda
+    ${TORCH_LIBS}
 )

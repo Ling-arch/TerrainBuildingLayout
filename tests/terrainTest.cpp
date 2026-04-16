@@ -7,7 +7,7 @@
 #include "tensorField.h"
 #include "optimizer.h"
 #include "SCARoadGenerator.h"
-
+#include "building.h"
 using Eigen::Vector2f, Eigen::Vector3f, Eigen::Vector2d;
 using field::TensorField2D, field::PointAtrractor, field::TerrainTensor;
 using render::Renderer3D;
@@ -46,7 +46,7 @@ int main()
 
     static int terrainPow = 7;
     static float frequency = 0.02f;
-    static float amplitude = 26.5f;
+    static float amplitude = 16.5f;
     static int mainRoadNode = 16;
     int lastMainRoadNode = -1;
     static float extrudeHeight = 2.f;
@@ -147,10 +147,11 @@ int main()
     // std::cout << "cuttedpolys is " << cuttedPolys.size() << std::endl;
     std::vector<Polyline2_t<float>> offsetPolys;
     static float offsetDist = -3.f;
-    static float buildingDepth = -8.f;
+    static float buildingDepth = -12.f;
     static float offsetDist2 = -1.5f;
     // std::vector<Polyline2_t<float>> divPolys = geo::generateRandomPolysAlongPolygon(testPolyA, offsetDist, 7.f, 12.f);
-    Polyline2_t<float> weightOffsetPoly = geo::offsetPolygon(testPolyA, offsetDist, {1.f, 1.f, 0.5f,  0.f, 0.5f})[0];
+    std::vector<Polyline2_t<float>> weightOffsetPoly = geo::offsetPolygon(testPolyA, offsetDist, {1.f, 1.f, 0.5f, 0.07f, 0.5f});
+    Polyline2_t<float> averageOffsetPoly = geo::offsetPolygon(testPolyA, offsetDist)[0];
     bool offsetPoly = false;
 
     bool offsetInside = false;
@@ -176,7 +177,7 @@ int main()
     OptimizeDrawData draw_data;
     size_t cur_iter = 0;
     bool is_optimizing = false;
-    // geo::PolygonMesh extrudeMesh = geo::PolygonMesh({{0, 0, 0}, {30, 0, 0}, {30, 15, 0}, {45, 15, 0}, {45, 30, 0}, {0, 30, 0}}, extrudeHeight);
+    geo::PolygonMesh extrudeMesh = geo::PolygonMesh({{0, 0, 0}, {30, 0, 0}, {30, 15, 0}, {45, 15, 0}, {45, 30, 0}, {0, 30, 0}}, extrudeHeight);
     // geo::PolygonMesh extrudeMesh_2 = geo::PolygonMesh({{0, 0, extrudeHeight}, {30, 0, extrudeHeight}, {30, 30, extrudeHeight}, {0, 30, extrudeHeight}}, extrudeHeight);
     // geo::PolygonMesh extrudeMesh_3 = geo::PolygonMesh({{30, 0, 0}, {45, 0, 0}, {45, 15, 0}, {30, 15, 0}}, extrudeHeight);
     // polyloop::Polyloop3 polyloop({{0, 0,0}, {30, 0,0}, {30, 30,0}, {0, 30,0}});
@@ -192,7 +193,7 @@ int main()
     // ============================
     // 2. 初始化 attractors
     std::vector<Eigen::Vector2f> attractPos;
-    std::vector<SCARoad::Attractor> scaAttractors = SCARoad::getRandomAttractors(35.f, 512, 512, attractPos);
+    std::vector<SCARoad::Attractor> scaAttractors = SCARoad::getRandomAttractors(25.f, 256, 256, attractPos);
 
     SCANetwork net(scaNodes, scaAttractors, terrain, tensorField);
 
@@ -209,6 +210,7 @@ int main()
     auto scaRoads = net.extractRoads();
     std::vector<std::vector<Vector3f>> projSCAroads;
     std::vector<Polyline2_t<float>> realSites;
+    std::vector<Polyline2_t<float>> allOffsetSites;
     for (const auto &l : scaRoads)
     {
         std::vector<Vector3f> projLine;
@@ -221,6 +223,10 @@ int main()
 
     bool growthStopped = false;
     bool showAttrIndices = true;
+    
+    bool showVolumes = true;
+    std::vector<building::Building> buildings;
+
     Ray ray = {0};
     rlImGuiSetup(true);
 
@@ -272,7 +278,7 @@ int main()
                 scaIter = 0;
                 scaRoads.clear();
                 realSites.clear();
-                scaAttractors = SCARoad::getRandomAttractors(35.f, 512, 512, attractPos);
+                scaAttractors = SCARoad::getRandomAttractors(25.f, 256, 256, attractPos);
                 net.rebuildNet(scaNodes, scaAttractors);
                 if (growthStopped)
                     scaUpdated = false;
@@ -344,7 +350,9 @@ int main()
             {
                 scaRoads.clear();
                 projSCAroads.clear();
-
+                realSites.clear();
+                allOffsetSites.clear();
+                
                 const auto &allRoads = net.extractCloseAndLinearRoads();
                 for (const auto &poly : allRoads.first)
                 {
@@ -353,6 +361,8 @@ int main()
                     realSites.insert(realSites.end(), offsetSites.begin(), offsetSites.end());
                     for (const auto &poly : offsetSites)
                     {
+                        std::vector<Polyline2_t<float>> siteOffsets = geo::offsetPolygon(poly, buildingDepth);
+                        allOffsetSites.insert(allOffsetSites.end(), siteOffsets.begin(), siteOffsets.end());
                         std::vector<Polyline2_t<float>> divSitePolys = geo::generateRandomPolysAlongPolygon(poly, buildingDepth, 8.f, 10.f);
                         // divPolys.insert(divPolys.end(), divSitePolys.begin(), divSitePolys.end());
                         // offsetPolys.insert(offsetPolys.end(), divSitePolys.begin(), divSitePolys.end());
@@ -360,10 +370,56 @@ int main()
                         {
                             std::vector<Polyline2_t<float>> offsets = geo::offsetPolygon(div, offsetDist2);
                             offsetPolys.insert(offsetPolys.end(), offsets.begin(), offsets.end());
+                            // if (buildings.size() < 30)
+                            // {
+                            for (const auto &offset : offsets)
+                            {
+                                // --- 面积检查（推荐）
+                                float area = M2::polygon_area(offset.points); // 你应该有这个函数
+                                if (std::abs(area) < 50.f)
+                                {
+                                    std::cout << "[WARNING] offset polygon too small\n";
+                                    continue;
+                                }
+
+                                // --- 顶点数检查
+                                if (offset.points.size() < 3)
+                                {
+                                    std::cout << "[WARNING] invalid offset polygon\n";
+                                    continue;
+                                }
+
+                                // =========================
+                                // 5. 构建 Building（重点保护）
+                                // =========================
+                                try
+                                {
+                                    building::Building building(offset, terrain);
+
+                                    // 可选：检查 mesh 是否有效
+                                    // if (!building.buildingMesh.isValid()) continue;
+
+                                    buildings.push_back(std::move(building));
+                                }
+                                catch (const std::exception &e)
+                                {
+                                    std::cout << "[ERROR] Building construction failed: "
+                                              << e.what() << "\n";
+                                }
+                                catch (...)
+                                {
+                                    std::cout << "[ERROR] Building construction crashed\n";
+                                }
+                            }
+                            // }
                         }
                     }
                 }
                 // std::cout << "scaRoads size: " << scaRoads.size() << std::endl;
+                for (const auto &poly : allRoads.second)
+                {
+                    scaRoads.push_back(poly.points);
+                }
                 for (const auto &l : scaRoads)
                 {
                     std::vector<Vector3f> projLine;
@@ -372,22 +428,6 @@ int main()
                 }
             }
 
-            if (IsKeyPressed(KEY_I))
-            {
-            }
-
-            if (IsKeyPressed(KEY_R) && parcels.size() > 0)
-            {
-                plan_prob = define_field_problem(0, tensorField, parcels[0].points, area_ratio, room_connections, {}, {});
-                testParcelBounds = polyloop::denormalize_to_pts(plan_prob.vtxl2xy_norm, plan_prob.tf);
-                is_optimizing = true;
-                cur_iter = 0;
-            }
-
-            if (is_optimizing)
-            {
-                optimize_field_problem_and_draw_bystep(plan_prob, cur_iter, 350, draw_data);
-            }
             if (debugRank != lastRank)
             {
                 adj = terrain.buildAdjacencyGraph(debugRank);
@@ -618,6 +658,27 @@ int main()
             //     render::draw_bold_polyline2(site.points, RL_DARKPURPLE, 0.f, lineData.Thickness, lineData.color.a /*,{terrain.getWidth() * terrain.getCellSize(), 0}*/);
             //     render::fill_polygon2(Polyloop2(site.points), c, 0.f, 0.3f);
             // }
+            // extrudeMesh.draw(RL_LIGHTGRAY, 0.8f, true, false, 0.2f);
+            // for (const auto &site : allOffsetSites)
+            // {
+            //     // Color c = renderUtil::ColorFromHue((float)i / realSites.size());
+            //     // Polyline2_t<float> site = allOffsetSites[i];
+            //     render::draw_bold_polyline2(site.points, RL_DARKPURPLE, 0.f, lineData.Thickness, lineData.color.a /*,{terrain.getWidth() * terrain.getCellSize(), 0}*/);
+            //     // render::fill_polygon2(Polyloop2(site.points), c, 0.f, 0.3f);
+            // }
+            if(showVolumes){
+                for (const auto &building : buildings)
+                {
+                    try
+                    {
+                        building.buildingMesh.draw(RL_LIGHTGRAY, 0.6f, true, false, 0.2f);
+                    }
+                    catch (...)
+                    {
+                    }
+                }
+            }
+          
 
             // render::draw_points(testParcelBounds, ptData.color, ptData.color.a, ptData.size, 0.f, {terrain.getWidth() * terrain.getCellSize(), 0});
             if (showTerrain)
@@ -638,6 +699,14 @@ int main()
                     render::draw_bold_polyline2(road, render.lineData.color, 0.f, render.lineData.Thickness, render.lineData.color.a);
                     render::draw_points(road, RL_GREEN, 1.f, render.ptData.size / 2.f);
                 }
+                // for (int i = 0; i < offsetPolys.size(); i++)
+                // {
+                //     Color c = renderUtil::ColorFromHue((float)i / offsetPolys.size());
+                //     const auto &poly = offsetPolys[i];
+                //     render::draw_bold_polyline2(poly.points, RL_DARKPURPLE, 0.f, lineData.Thickness, lineData.color.a /*,{terrain.getWidth() * terrain.getCellSize(), 0}*/);
+                //     render::fill_polygon2(poly.points, c, 0.f, 0.3f);
+                //     render::draw_points(poly.points, render.ptData.color, 1.f, render.ptData.size);
+                // }
             }
 
             // if (mainPaths.size() > 0)
@@ -708,8 +777,12 @@ int main()
             //     }
             // }
 
-            render::draw_bold_polyline2(testPolyA.points, RL_RED, 30.f, pathWidth, lineData.color.a);
-            render::draw_bold_polyline2(weightOffsetPoly.points, RL_RED, 30.f, pathWidth, lineData.color.a);
+            // render::draw_bold_polyline2(testPolyA.points, RL_RED, 30.f, pathWidth, lineData.color.a);
+            // for (const auto &p : weightOffsetPoly)
+            // {
+            //     render::draw_bold_polyline2(p.points, RL_RED, 30.f, pathWidth, lineData.color.a);
+            // }
+            // render::draw_bold_polyline2(averageOffsetPoly.points, RL_GREEN, 10.f, pathWidth, lineData.color.a);
 
             // for (const auto &poly : subedPolys)
             // {
@@ -726,14 +799,7 @@ int main()
             //     render::draw_bold_polyline2(poly.points, RL_DARKPURPLE, 60.f, pathWidth, lineData.color.a, {terrain.getWidth() * terrain.getCellSize(), 0});
             // }
 
-            for (int i = 0; i < offsetPolys.size(); i++)
-            {
-                Color c = renderUtil::ColorFromHue((float)i / offsetPolys.size());
-                const auto &poly = offsetPolys[i];
-                render::draw_bold_polyline2(poly.points, RL_DARKPURPLE, 0.f, lineData.Thickness, lineData.color.a /*,{terrain.getWidth() * terrain.getCellSize(), 0}*/);
-                render::fill_polygon2(poly.points, c, 0.f, 0.3f);
-                render::draw_points(poly.points, render.ptData.color, 1.f, render.ptData.size);
-            }
+          
 
             // for (int i = 0; i < divPolys.size(); i++)
             // {
@@ -932,6 +998,7 @@ int main()
                     ImGui::SliderInt("MainRoadNodeNum", &mainRoadNode, 0, 30);
                     ImGui::Checkbox("ShowProjectedRoads", &showProjectedRoads);
                     ImGui::Checkbox("ShowPlanarRoads", &showPlanarRoads);
+                    ImGui::Checkbox("ShowVolumes", &showVolumes);
                     debugCx = std::clamp(debugCx, 0, terrain.getWidth());
                     debugCy = std::clamp(debugCy, 0, terrain.getHeight());
                     debugRank = std::max(1, debugRank);

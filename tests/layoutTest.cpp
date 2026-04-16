@@ -7,13 +7,14 @@
 #include "renderUtil.h"
 #include "diffVoronoi.h"
 #include "SCARoadGenerator.h"
-
+#include "grid.h"
 using namespace geo;
 using namespace render;
 using namespace terrain;
 using namespace Eigen;
 using namespace layout;
 using namespace SCARoad;
+using namespace grid;
 
 int main()
 {
@@ -104,6 +105,26 @@ int main()
     static int maxIter = 200;
     int curIter = 0;
 
+    Polyline2_t<float> testGridPoly({{0.f, 0.f},
+                                     {18.f, 0.f},
+                                     {18.f, 8.f},
+                                     {12.f, 8.f},
+                                     {12.f, 15.f},
+                                     {4.f, 15.f},
+                                     {4.f, 10.f},
+                                     {0.f, 10.f}},
+                                    true);
+    CellGenerator cellGen(testGridPoly, 1.f);
+    std::vector<int> indices;
+    indices.reserve(cellGen.cells.size());
+
+    for (int i = 0; i < cellGen.cells.size(); ++i)
+    {
+        indices.push_back(i);
+    }
+    CellGroup cellGroup(indices, &cellGen.cells, 0);
+    cellGroup.debugPrintSegments();
+    cellGroup.debugPrintContour();
     srand((unsigned)time(nullptr));
 
     rlImGuiSetup(true);

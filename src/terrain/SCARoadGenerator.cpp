@@ -237,10 +237,10 @@ namespace SCARoad
         growthStopped = false;
 
         const float STEP_SIZE = 1.5f;
-        const float CONNECT_DIST = 4.5f;
+        const float CONNECT_DIST = 5.0f;
         const float CONNECT_DIST2 = CONNECT_DIST * CONNECT_DIST;
 
-        const int MIN_BRANCH_GAP = 7; //  分叉间隔
+        const int MIN_BRANCH_GAP = 8; //  分叉间隔
 
         // std::cout << "\n========== [SCA UPDATE BEGIN] ==========\n";
 
@@ -1662,60 +1662,119 @@ namespace SCARoad
             // std::cout << "," << f.ids[0] << "\n";
         }
 
-        // =========================
-        // 6. linear（保持你原逻辑）
-        // =========================
+        // =========================================================
+        // 6. ✅ NEW：linear 提取（基于 isRemoved 连通分量）
+        // =========================================================
         std::vector<bool> visited(N, false);
-        int linearID = 0;
 
         for (int i = 0; i < N; ++i)
         {
-            if (nodes[i].links.size() != 1 || visited[i])
+            if (!isRemoved[i] || visited[i])
                 continue;
 
-            std::vector<int> path;
-            int curr = i;
-            int prev = -1;
+            // ===== BFS 找 component =====
+            std::vector<int> comp;
+            std::queue<int> q2;
+            q2.push(i);
+            visited[i] = true;
 
-            while (true)
+            while (!q2.empty())
             {
-                path.push_back(curr);
-                visited[curr] = true;
+                int u = q2.front();
+                q2.pop();
+                comp.push_back(u);
 
-                int next = -1;
-                for (int nb : nodes[curr].links)
-                    if (nb != prev)
-                        next = nb;
-
-                if (next == -1 || nodes[next].links.size() > 2)
+                for (int v : nodes[u].links)
                 {
-                    if (next != -1)
-                        path.push_back(next);
-                    break;
+                    if (isRemoved[v] && !visited[v])
+                    {
+                        visited[v] = true;
+                        q2.push(v);
+                    }
                 }
-
-                prev = curr;
-                curr = next;
             }
 
-            if (path.size() < 5)
-                continue;
+            // ===== 找 endpoints（deg != 2）=====
+            std::vector<int> endpoints;
 
-            geo::Polyline2_t<float> pl;
-            for (int id : path)
-                pl.points.emplace_back(nodes[id].position.x(), nodes[id].position.y());
+            for (int u : comp)
+            {
+                int deg = 0;
+                for (int v : nodes[u].links)
+                    if (isRemoved[v])
+                        deg++;
 
-            pl.isClosed = false;
-            linearRoads.push_back(pl);
+                if (deg != 2)
+                    endpoints.push_back(u);
+            }
 
-            // std::cout << "[Linear Road Path " << linearID++ << "] ";
-            // for (int k = 0; k < path.size(); ++k)
-            // {
-            //     std::cout << path[k];
-            //     if (k != path.size() - 1)
-            //         std::cout << ",";
-            // }
-            // std::cout << "\n";
+            // ===== 构造路径 =====
+            std::set<std::pair<int, int>> usedEdges;
+
+            for (int start : endpoints)
+            {
+                for (int nb : nodes[start].links)
+                {
+                    if (!isRemoved[nb])
+                        continue;
+
+                    if (usedEdges.count({start, nb}))
+                        continue;
+
+                    std::vector<int> path;
+
+                    int prev = start;
+                    int curr = nb;
+
+                    path.push_back(start);
+
+                    while (true)
+                    {
+                        path.push_back(curr);
+                        usedEdges.insert({prev, curr});
+                        usedEdges.insert({curr, prev});
+
+                        int next = -1;
+
+                        for (int x : nodes[curr].links)
+                        {
+                            if (x != prev && isRemoved[x])
+                            {
+                                next = x;
+                                break;
+                            }
+                        }
+
+                        if (next == -1)
+                            break;
+
+                        prev = curr;
+                        curr = next;
+
+                        // 到 endpoint 停止
+                        int deg = 0;
+                        for (int v : nodes[curr].links)
+                            if (isRemoved[v])
+                                deg++;
+
+                        if (deg != 2)
+                        {
+                            path.push_back(curr);
+                            break;
+                        }
+                    }
+
+                    if (path.size() >= 2)
+                    {
+                        geo::Polyline2_t<float> pl;
+                        for (int id : path)
+                            pl.points.emplace_back(nodes[id].position.x(), nodes[id].position.y());
+
+                        pl.isClosed = false;
+                        linearRoads.push_back(pl);
+                    }
+                }
+            }
         }
 
         // std::cout << "[Summary] close=" << closeRoads.size()

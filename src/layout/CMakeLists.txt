@@ -10,14 +10,13 @@ target_include_directories(Layout
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${UtilsDir}
     ${PlanDir}
-    ${BuildingDir}
     ${TerrainDir}
 )
 
 target_link_libraries(Layout
     PUBLIC
     Terrain
-    Building
     Utils
     ${THIRD_PARTY_LIBS}
-    )
+
+)

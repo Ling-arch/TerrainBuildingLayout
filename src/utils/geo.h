@@ -128,6 +128,7 @@ namespace geo
     {
     public:
         MeshData mesh;
+
         PolygonMesh() = default;
         PolygonMesh(const std::vector<Eigen::Vector3f> &points_, float height_)
             : points(points_), height(height_)
@@ -138,7 +139,8 @@ namespace geo
         void build();
         void upload();
         void regenerate(float newHeight);
-        void draw(Color color, float colorAlpha, bool outline, bool wireframe, float wireframeAlpha);
+        void draw(Color color, float colorAlpha, bool outline, bool wireframe, float wireframeAlpha) const;
+        const Model &getModel() const { return model; }
 
     private:
         std::vector<Eigen::Vector3f> points;
@@ -927,42 +929,154 @@ namespace geo
     template <typename Scalar>
     std::vector<Polyline2_t<Scalar>> offsetPolygon(
         const Polyline2_t<Scalar> &poly,
-        Scalar dist,                       // 基准偏移距离
-        const std::vector<Scalar> &weights // 每条边的权重
-    )
+        Scalar dist,
+        const std::vector<Scalar> &weights)
     {
-        using PolygonWithHoles = CGAL::Polygon_with_holes_2<Kernel>;
-        using PolygonPtr = std::shared_ptr<Polygon2>;
+        using FT = typename Kernel::FT;
 
         std::vector<Polyline2_t<Scalar>> out;
 
-        // 输入合法性检查（与原代码相同）
+        std::cout << "\n===== offsetPolygon BEGIN =====\n";
+
+        // =========================
+        // 1. 转 CGAL polygon
+        // =========================
         Polygon2 cgalPoly = toCgalPolygon(poly);
-        if (cgalPoly.size() < 3 || !cgalPoly.is_simple() ||
-            std::abs(cgalPoly.area()) < 1e-12)
-            return out;
-        if (cgalPoly.orientation() != CGAL::COUNTERCLOCKWISE)
-            cgalPoly.reverse_orientation();
-
-        // 确保权重数量与边数一致
-        if (weights.size() != cgalPoly.size())
-            return out; // 权重数量必须匹配边数
-
-        // 生成加权偏移多边形
-        auto offset_polys = CGAL::create_interior_weighted_skeleton_and_offset_polygons_2(
-            -dist,     // 基准偏移距离
-            cgalPoly, // 输入多边形
-            weights   // 边权重
-        );
-
-        // 转换结果
-        for (const auto &op : offset_polys)
+        // =========================
+        // 0. 基本输入检查
+        // =========================
+        if (cgalPoly.size() < 3)
         {
-            if (op && op->is_simple())
+            std::cout << "[ERROR] poly.size < 3\n";
+            return out;
+        }
+
+        if (weights.size() != cgalPoly.size())
+        {
+            std::cout << "[ERROR] weights size mismatch: "
+                      << weights.size() << " vs " << cgalPoly.size() << "\n";
+            return out;
+        }
+
+        // std::cout << "[INFO] input poly size: " << poly.size() << "\n";
+        // std::cout << "[INFO] offset dist: " << dist << "\n";
+
+        if (!cgalPoly.is_simple())
+        {
+            std::cout << "[ERROR] polygon is NOT simple\n";
+            return out;
+        }
+
+        double area = cgalPoly.area();
+        std::cout << "[INFO] area: " << area << "\n";
+
+        if (std::abs(area) < 1e-12)
+        {
+            std::cout << "[ERROR] area too small\n";
+            return out;
+        }
+
+        if (cgalPoly.orientation() != CGAL::COUNTERCLOCKWISE)
+        {
+            std::cout << "[INFO] reversing orientation\n";
+            cgalPoly.reverse_orientation();
+        }
+
+        // =========================
+        // 2. 检查边是否退化
+        // =========================
+        {
+            int i = 0;
+            for (auto e = cgalPoly.edges_begin(); e != cgalPoly.edges_end(); ++e, ++i)
             {
+                auto p0 = e->source();
+                auto p1 = e->target();
+
+                double dx = CGAL::to_double(p1.x() - p0.x());
+                double dy = CGAL::to_double(p1.y() - p0.y());
+                double len2 = dx * dx + dy * dy;
+
+                if (len2 < 1e-12)
+                {
+                    std::cout << "[ERROR] degenerate edge at index " << i << "\n";
+                    return out;
+                }
+            }
+        }
+
+        // =========================
+        // 3. 权重检查
+        // =========================
+        std::vector<FT> outerWeights;
+        outerWeights.reserve(weights.size());
+
+        for (int i = 0; i < weights.size(); ++i)
+        {
+            Scalar w = weights[i];
+
+            if (!std::isfinite(w))
+            {
+                std::cout << "[ERROR] weight not finite at " << i << "\n";
+                return out;
+            }
+
+            if (w <= 0)
+            {
+                std::cout << "[WARNING] weight <= 0 at " << i << ", clamp to 1\n";
+                w = 1;
+            }
+
+            outerWeights.push_back(static_cast<FT>(w));
+        }
+
+        std::vector<std::vector<FT>> weights2;
+        weights2.push_back(outerWeights);
+
+        // =========================
+        // 4. 调用 CGAL（重点保护）
+        // =========================
+        try
+        {
+            std::cout << "[INFO] calling CGAL...\n";
+
+            auto offset_polys =
+                CGAL::create_interior_weighted_skeleton_and_offset_polygons_2(
+                    FT(-dist),
+                    cgalPoly,
+                    weights2);
+
+            std::cout << "[INFO] CGAL returned: " << offset_polys.size() << " polygons\n";
+
+            for (int i = 0; i < offset_polys.size(); ++i)
+            {
+                const auto &op = offset_polys[i];
+
+                if (!op)
+                {
+                    std::cout << "[WARNING] null polygon at " << i << "\n";
+                    continue;
+                }
+
+                if (!op->is_simple())
+                {
+                    std::cout << "[WARNING] non-simple result at " << i << "\n";
+                    continue;
+                }
+
                 out.push_back(cgalPolygonToPolyline<Scalar>(*op));
             }
         }
+        catch (const std::exception &e)
+        {
+            std::cout << "[EXCEPTION] std::exception: " << e.what() << "\n";
+        }
+        catch (...)
+        {
+            std::cout << "[EXCEPTION] unknown exception\n";
+        }
+
+        std::cout << "===== offsetPolygon END =====\n";
+
         return out;
     }
 
@@ -1735,6 +1849,110 @@ namespace geo
         return result;
     }
 
+    template <typename Scalar>
+    std::vector<Vector2<Scalar>> dividePolyLineSmart(
+        const std::vector<Vector2<Scalar>> &poly,
+        Scalar minStep,
+        Scalar maxStep)
+    {
+        std::vector<Vector2<Scalar>> result;
+        if (poly.size() < 2)
+            return result;
+
+        std::mt19937 rng(std::random_device{}());
+        std::uniform_real_distribution<Scalar> dist(minStep, maxStep);
+
+        result.push_back(poly[0]);
+
+        Scalar remain = dist(rng); // 当前目标步长
+
+        Vector2<Scalar> curr = poly[0];
+
+        for (size_t i = 1; i < poly.size(); ++i)
+        {
+            Vector2<Scalar> p2 = poly[i];
+            Vector2<Scalar> seg = p2 - curr;
+
+            Scalar segLen = seg.norm();
+            if (segLen < 1e-8)
+                continue;
+
+            Vector2<Scalar> dir = seg / segLen;
+
+            Scalar traveled = 0;
+
+            while (traveled + remain <= segLen)
+            {
+                Vector2<Scalar> p = curr + dir * remain;
+
+                result.push_back(p);
+
+                curr = p;
+                seg = p2 - curr;
+                segLen = seg.norm();
+                dir = segLen > 1e-8 ? seg / segLen : Vector2<Scalar>(0, 0);
+
+                traveled = 0;
+
+                // 下一段随机
+                remain = dist(rng);
+            }
+
+            // 剩余长度
+            Scalar leftover = segLen;
+
+            // ===== 尾段处理（关键）=====
+            if (leftover < minStep)
+            {
+                if (result.size() >= 2)
+                {
+                    Vector2<Scalar> last = result.back();
+                    Vector2<Scalar> prev = result[result.size() - 2];
+
+                    Scalar lastLen = (last - prev).norm();
+
+                    if (leftover < minStep * 0.5)
+                    {
+                        // 并入上一段
+                        result.back() = p2;
+                    }
+                    else if (leftover < minStep * (Scalar)0.66)
+                    {
+                        // 平均分
+                        result.pop_back();
+
+                        Scalar sum = lastLen + leftover;
+                        Scalar half = sum * 0.5;
+
+                        Vector2<Scalar> dir2 = (p2 - prev).normalized();
+
+                        result.push_back(prev + dir2 * half);
+                        result.push_back(p2);
+                    }
+                    else
+                    {
+                        result.push_back(p2);
+                    }
+                }
+                else
+                {
+                    result.push_back(p2);
+                }
+
+                curr = p2;
+                remain = dist(rng);
+            }
+            else
+            {
+                // 继续累计
+                curr = p2;
+                remain -= leftover;
+            }
+        }
+
+        return result;
+    }
+
     //*insure offset inside with negative depth
     template <typename Scalar>
     std::vector<Polyline2_t<Scalar>> generateRandomPolysAlongPolygon(
@@ -1838,12 +2056,12 @@ namespace geo
             auto innerPoly = cgalPolygonToPolyline<Scalar>(inner);
             innerPolys.push_back(innerPoly);
 
+            // auto divPts = dividePolyLineSmart(innerPoly.points,Scalar(minWidth),Scalar(maxWidth));
             auto divPts = dividePolyLineByRandomStep(
                 innerPoly.points,
                 Scalar((minWidth + maxWidth) * 0.5),
                 Scalar((maxWidth - minWidth) * 0.5),
                 Scalar(minWidth));
-
             for (auto &pt : divPts)
             {
                 Vector2<Scalar> p = pt;
@@ -2162,6 +2380,172 @@ namespace geo
             {x1, y1},
             {x0, y1},
             {x0, y0}};
+
+        return Polyline2_t<Scalar>(rect, true);
+    }
+
+    template <typename Scalar>
+    Polyline2_t<Scalar> getMaxRectInPolyWithRatio(
+        const Polyline2_t<Scalar> &poly,
+        double gridSize,
+        double ratio)
+    {
+        Eigen::AlignedBox<Scalar, 2> aabb = poly.getAABB2();
+        if (aabb.isEmpty())
+            return Polyline2_t<Scalar>();
+
+        Scalar minx = aabb.min().x();
+        Scalar miny = aabb.min().y();
+        Scalar maxx = aabb.max().x();
+        Scalar maxy = aabb.max().y();
+
+        Scalar width = maxx - minx;
+        Scalar height = maxy - miny;
+
+        int rows = std::max(1, int(std::ceil(width / gridSize)));
+        int cols = std::max(1, int(std::ceil(height / gridSize)));
+
+        Scalar cellX = width / rows;
+        Scalar cellY = height / cols;
+
+        // ===== NodeInside =====
+        std::vector<std::vector<int>> nodeInside(
+            rows + 1, std::vector<int>(cols + 1, 0));
+
+        for (int r = 0; r <= rows; ++r)
+        {
+            for (int c = 0; c <= cols; ++c)
+            {
+                Scalar x = minx + r * cellX;
+                Scalar y = miny + c * cellY;
+                nodeInside[r][c] =
+                    util::Math2<Scalar>::point_in_poly(poly.points, Vector2<Scalar>(x, y)) ? 1 : 0;
+            }
+        }
+
+        // ===== CellInside =====
+        std::vector<std::vector<int>> cellInside(
+            rows, std::vector<int>(cols, 0));
+
+        for (int r = 0; r < rows; ++r)
+        {
+            for (int c = 0; c < cols; ++c)
+            {
+                cellInside[r][c] =
+                    nodeInside[r][c] &
+                    nodeInside[r + 1][c] &
+                    nodeInside[r][c + 1] &
+                    nodeInside[r + 1][c + 1];
+            }
+        }
+
+        std::vector<int> hist(cols, 0);
+
+        int bestArea = 0;
+        int bestR0 = 0, bestR1 = -1;
+        int bestC0 = 0, bestC1 = -1;
+
+        // ===== 主循环 =====
+        for (int r = 0; r < rows; ++r)
+        {
+            for (int c = 0; c < cols; ++c)
+                hist[c] = cellInside[r][c] ? hist[c] + 1 : 0;
+
+            std::vector<int> st;
+            int c = 0;
+
+            while (c < cols)
+            {
+                if (st.empty() || hist[st.back()] <= hist[c])
+                {
+                    st.push_back(c++);
+                }
+                else
+                {
+                    int top = st.back();
+                    st.pop_back();
+
+                    int w_cells = st.empty() ? c : (c - st.back() - 1);
+                    int h_cells = hist[top];
+
+                    // ===== 转换为真实长度 =====
+                    double w = w_cells * cellX;
+                    double h = h_cells * cellY;
+
+                    if (w < 1e-8 || h < 1e-8)
+                        continue;
+
+                    double aspect = std::max(w, h) / std::min(w, h);
+
+                    // ===== ratio 约束 =====
+                    if (aspect > ratio)
+                        continue;
+
+                    int area = w_cells * h_cells;
+
+                    if (area > bestArea)
+                    {
+                        bestArea = area;
+                        bestR0 = r - h_cells + 1;
+                        bestR1 = r;
+                        bestC0 = st.empty() ? 0 : (st.back() + 1);
+                        bestC1 = c - 1;
+                    }
+                }
+            }
+
+            while (!st.empty())
+            {
+                int top = st.back();
+                st.pop_back();
+
+                int w_cells = st.empty() ? c : (c - st.back() - 1);
+                int h_cells = hist[top];
+
+                double w = w_cells * cellX;
+                double h = h_cells * cellY;
+
+                if (w < 1e-8 || h < 1e-8)
+                    continue;
+
+                double aspect = std::max(w, h) / std::min(w, h);
+
+                if (aspect > ratio)
+                    continue;
+
+                int area = w_cells * h_cells;
+
+                if (area > bestArea)
+                {
+                    bestArea = area;
+                    bestR0 = r - h_cells + 1;
+                    bestR1 = r;
+                    bestC0 = st.empty() ? 0 : (st.back() + 1);
+                    bestC1 = c - 1;
+                }
+            }
+        }
+
+        if (bestArea <= 0)
+        {
+            // std::cout << "[WARNING] no valid rectangle under ratio constraint\n";
+            return Polyline2_t<Scalar>();
+        }
+
+        // ===== 转回世界坐标 =====
+        Scalar x0 = minx + bestR0 * cellX;
+        Scalar y0 = miny + bestC0 * cellY;
+        Scalar x1 = minx + (bestR1 + 1) * cellX;
+        Scalar y1 = miny + (bestC1 + 1) * cellY;
+
+        std::vector<Vector2<Scalar>> rect = {
+            {x0, y0},
+            {x1, y0},
+            {x1, y1},
+            {x0, y1},
+            {x0, y0}};
+
+        // std::cout << "[INFO] best rect area: " << bestArea << "\n";
 
         return Polyline2_t<Scalar>(rect, true);
     }

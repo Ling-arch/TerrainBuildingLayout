@@ -119,7 +119,12 @@ namespace optimizer
                                                                        { return site2room[i_site] != INVALID; });
 
         // std::cout << "can calculate " << std::endl;
-        vector<size_t> edge2vtxv_wall = loss::edge2vtvx_wall(voronoi_info, site2room);
+        const vector<size_t>& edge2vtxv_wall = loss::edge2vtvx_wall(voronoi_info, site2room);
+        // const auto& edge_info = loss::extract_wall_and_exterior_edges(voronoi_info, site2room);
+
+        // const auto &edge2vtxv_wall = edge_info.edge2vtxv_wall;
+        // const auto &edge2vtxv_ext = edge_info.edge2vtxv_ext;
+        // const auto &edge2room_ext = edge_info.edge2room_ext;
         // std::cout << "can wall " << std::endl;
         torch::Tensor room2area = loss::room2area(site2room, num_room, voronoi_info.site2idx, voronoi_info.idx2vtxv, vtxv2xy);
         // std::cout << "can area " << std::endl;
@@ -147,23 +152,52 @@ namespace optimizer
             site2xy,
             vtxv2xy);
 
+        // diffVoronoi::Vtx2XYZToEdgeVectorLayer ext_edge_layer(edge2vtxv_ext);
+        // torch::Tensor ext_edge2xy = ext_edge_layer.forward(vtxv2xy);
+
+        // // 每条 edge 长度
+        // torch::Tensor ext_len = ext_edge2xy.norm(2, 1);
+
+        // // 累加到 room
+        // torch::Tensor room_ext_len = torch::zeros({(int64_t)num_room}, vtxv2xy.options());
+
+        // for (size_t i = 0; i < edge2room_ext.size(); ++i)
+        // {
+        //     size_t r = edge2room_ext[i];
+        //     room_ext_len[r] += ext_len[i];
+        // }
+
+        // // 惩罚没有外墙 or 外墙过短
+        // torch::Tensor loss_lighting = (room_ext_len < 1e-4).to(torch::kFloat32).sum();
+        // torch::Tensor room_has_ext =
+        //     torch::zeros({(int64_t)num_room}, torch::TensorOptions().dtype(torch::kFloat32));
+
+        // for (size_t i = 0; i < edge2room_ext.size(); ++i)
+        // {
+        //     room_has_ext[edge2room_ext[i]] = 1.0;
+        // }
+
+        // // 没有外墙的房间惩罚
+        // torch::Tensor loss_lighting = (1.0 - room_has_ext).sum();
+
         loss_each_area = loss_each_area * 1.0;
         loss_total_area = loss_total_area * 10.0;
         loss_walllen = loss_walllen * 0.02;
         loss_topo = loss_topo * 1.0;
         loss_fix = loss_fix * 100.0;
         loss_lloyd = loss_lloyd * 0.1;
+        // loss_lighting = loss_lighting * 0.2;
         torch::Tensor loss = loss_each_area + loss_total_area + loss_walllen + loss_topo + loss_fix + loss_lloyd;
 
         // 每25次迭代打印损失信息
-        if (cur_iter % 25 == 0)
+        if (cur_iter % 5 == 0)
         {
             std::cout << "Iter " << cur_iter << " - Loss: " << loss.item<float>()
                       << " (areas: " << loss_each_area.item<float>()
                       << ", total_areas: " << loss_total_area.item<float>()
                       << ", topo: " << loss_topo.item<float>()
                       << ", fix: " << loss_fix.item<float>()
-                      << ", wall: " << loss_walllen.item<float>() << ")" << std::endl;
+                      << ", wall: " << loss_walllen.item<float>()<< ")" << std::endl;
         }
 
         plan_prob.optimizer->zero_grad();

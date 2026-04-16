@@ -23,7 +23,6 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/lib)
 #set subdirectory path variables
 set(UtilsDir ${CMAKE_SOURCE_DIR}/src/utils)
 set(PlanDir ${CMAKE_SOURCE_DIR}/src/differentiablePlan)
-set(BuildingDir ${CMAKE_SOURCE_DIR}/src/building)
 set(TerrainDir ${CMAKE_SOURCE_DIR}/src/terrain)
 set(LayoutDir ${CMAKE_SOURCE_DIR}/src/Layout)
 

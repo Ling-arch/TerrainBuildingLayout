@@ -2,7 +2,6 @@ project(app)
 
 add_subdirectory(utils)
 add_subdirectory(differentiablePlan)
-add_subdirectory(building)
 add_subdirectory(terrain)
 add_subdirectory(layout)
 
@@ -16,7 +15,6 @@ target_include_directories(${PROJECT_NAME}
 PUBLIC 
 ${UtilsDir} 
 ${PlanDir} 
-${BuildingDir} 
 ${TerrainDir}
 ${LayoutDir}
 )

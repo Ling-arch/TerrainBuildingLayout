@@ -1,44 +1,20 @@
 #pragma once
 
 #include "geo.h"
+#include "grid.h"
+#include "layout.h"
+
 
 namespace building
 {
-    enum class EdgeDirection{
-        Up,
-        Right,
-        Down,
-        Left
-    };
-
-    struct GridCell
-    {
-        Eigen::Vector2f center;
-        float size;
-        std::vector<Eigen::Vector2f> corners;
-        int id;
-        geo::Polyline2_t<float> cellPoly;
-        GridCell() = default;
-        GridCell(const Eigen::Vector2f &cen, float inSize) : center(cen), size(inSize)
-        {
-            corners.resize(4);
-            float half = size / 2.0f;
-
-            // 顺序：左上 → 右上 → 右下 → 左下
-            corners[0] = center + Eigen::Vector2f(-half, half); // 左上
-            corners[1] = center + Eigen::Vector2f(half, half);  // 右上
-            corners[2] = center + Eigen::Vector2f(half, -half);   // 右下
-            corners[3] = center + Eigen::Vector2f(-half, -half);  // 左下
-            cellPoly = corners;
-        }
-    };
+  
 
     struct Room2D
     {
-        std::vector<GridCell> cells;
+        std::vector<grid::GridCell> cells;
         int id;
         Room2D() = default;
-        Room2D(const std::vector<GridCell> &inCells, int inId) : cells(inCells), id(inId)
+        Room2D(const std::vector<grid::GridCell> &inCells, int inId) : cells(inCells), id(inId)
         {
             for (auto &cell : cells)
                 cell.id = id;
@@ -55,7 +31,6 @@ namespace building
         {
         }
         void calConnection();
-
     };
 
     struct Room3D
@@ -74,11 +49,28 @@ namespace building
     public:
         std::vector<Plan> plans;
         std::vector<Room3D> rooms;
+        using PolygonMesh = geo::PolygonMesh;
+        using Polyline2_t = geo::Polyline2_t<float>;
+        Polyline2_t site; // 建筑占地轮廓
+        std::vector<PolygonMesh> roomMeshes; // 每个房间的可视化网格
+        PolygonMesh buildingMesh;              //建筑体量的简化网格
+        std::vector<PolygonMesh> volumeMeshes;   //根据地形高差划分的体量网格
+        using BuildingLayout = layout::BuildingLayout<float>;
+        BuildingLayout layout; // 布局的地形信息
         Building() = default;
+        Building(const Polyline2_t &site_, const terrain::Terrain &terrain) : site(site_)
+        {
+            layout = BuildingLayout(site, terrain);
+            buildBuildingMesh();
+        }
         Building(const std::vector<Room3D> &inRooms) : rooms(inRooms)
         {
         }
 
+        
+
+    public:
+        void buildBuildingMesh();
         void arrangeRoomsToPlan();
     };
 }

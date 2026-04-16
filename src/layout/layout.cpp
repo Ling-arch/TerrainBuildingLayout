@@ -171,11 +171,11 @@ namespace layout
             lambda_far * L_far +
             lambda_terrain * L_terrain +
             lambda_entropy * L_entropy;
-
-        // ⭐⭐⭐ NaN 防护（强烈建议）
+ 
+        // NaN 防护（强烈建议）
         if (torch::isnan(loss).any().item<bool>())
         {
-            std::cout << "❌ LOSS IS NAN!" << std::endl;
+            std::cout << " LOSS IS NAN!" << std::endl;
             std::cout << "L_far=" << L_far.item<float>()
                       << " L_terrain=" << L_terrain.item<float>()
                       << " L_entropy=" << L_entropy.item<float>()

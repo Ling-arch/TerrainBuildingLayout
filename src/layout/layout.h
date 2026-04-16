@@ -213,8 +213,8 @@ namespace layout
         // GPU mesh
     public:
         Polyline2_t<Scalar> site;
-        Polyline2_t<Scalar> oriRect;
-        Polyline2_t<Scalar> rotedRect;
+        Polyline2_t<Scalar> oriRect;// 原始矩形（未旋转）
+        Polyline2_t<Scalar> rotedRect;// 旋转后的矩形
         Eigen::AlignedBox<Scalar, 2> rotedBound;
         Eigen::Matrix<Scalar, 2, 2> Rinv;
         std::vector<Scalar> heightMap;
@@ -243,7 +243,7 @@ namespace layout
         Rinv = R.transpose();
         Polyline2_t<Scalar> rotPoly = geo::rotatePoly(site, R);
         // --- compute max rect in rotated space
-        rotedRect = geo::getMaxRectInPoly(rotPoly, 0.5);
+        rotedRect = geo::getMaxRectInPolyWithRatio(rotPoly, 0.5, 2.0);
         std::vector<Eigen::Vector2<Scalar>> originalPts;
         for (const auto &p : rotedRect.points)
             originalPts.emplace_back(Rinv * p);
