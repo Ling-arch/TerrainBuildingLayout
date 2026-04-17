@@ -753,6 +753,10 @@ namespace util
                     if (!is_far_enough(p, samples))
                         continue;
 
+                    // ⭐ 再检查一次（关键）
+                    if ((int)samples.size() >= target_count)
+                        break;
+
                     int new_idx = (int)samples.size();
                     samples.push_back(p);
                     active.push_back(new_idx);

@@ -26,7 +26,9 @@ namespace grid
     struct ContourSegment
     {
         std::vector<BoundaryEdge> segments; // 对应边
-        int dir;                            // 0= up, 1=right, 2=down, 3=left                                                       //
+        int dir;                            // 0= up, 1=right, 2=down, 3=left
+        bool startConvex = false;                      // 起点是否是凸点
+        bool endConvex = false;                        // 终点是否是凸点
     };
 
     struct GridCell
@@ -86,8 +88,7 @@ namespace grid
 
         void buildContourSegments();
         void buildContour();
-        void debugPrintSegments() const;
-        void debugPrintContour() const;
+     
 
     };
 

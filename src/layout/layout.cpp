@@ -2,50 +2,7 @@
 
 namespace layout
 {
-    SoftRVDModel::SoftRVDModel(
-        const torch::Tensor &grid_xy_,
-        const torch::Tensor &terrain_h_,
-        const torch::Tensor &site_xy_,
-        float far_,
-        const std::vector<int> &courtyard_ids_,
-        float k_,
-        float tau_)
-        : grid_xy(grid_xy_),
-          terrain_h(terrain_h_),
-          site_xy(site_xy_),
-          far(far_),
-          courtyard_ids(courtyard_ids_),
-          k(k_),
-          tau(tau_)
-    {
-
-        G = grid_xy.size(0);
-        N = site_xy.size(0);
-        site_xy = register_parameter(
-            "site_xy",
-            site_xy_.clone());
-        auto device = grid_xy.device();
-
-        // -------- trainable --------
-        floor_logits = register_parameter(
-            "floor_logits",
-            0.01f * torch::randn({N, 5}, device));
-
-        delta_logits = register_parameter(
-            "delta_logits",
-            0.01f * torch::randn({N, 5}, device));
-
-        computeWeights();
-        register_buffer("weights", weights);
-        // -------- base height (最低地基) --------
-        auto A = weights.sum(0);
-        auto h_site_mean = (weights.transpose(0, 1).matmul(terrain_h)) / (A + 1e-6);
-
-        base_height = h_site_mean.min().detach();
-        lloyd_optimizer = std::make_unique<torch::optim::Adam>(
-            this->parameters(),
-            torch::optim::AdamOptions(0.05));
-    }
+    
 
     void SoftRVDModel::computeWeights()
     {
@@ -100,7 +57,6 @@ namespace layout
     {
         auto device = grid_xy.device();
 
-        // ⭐⭐⭐ 必须加：weights 每次更新（因为 site_xy 在变）
         computeWeights();
 
         // ===============================
@@ -109,77 +65,164 @@ namespace layout
         auto A = weights.sum(0); // [N]
 
         // ===============================
-        // 2. site mean terrain height
+        // 2. terrain stats
         // ===============================
         auto h_site_mean =
-            (weights.transpose(0, 1).matmul(terrain_h)) / (A + 1e-6); // [N]
+            (weights.transpose(0, 1).matmul(terrain_h)) / (A + 1e-6);
 
-        // ---- global base height (detach!) ----
-        auto h_base = h_site_mean.min().detach(); // scalar
+        // =========================================================
+        // ⭐⭐⭐ 正确的“区域最大高度”（核心修复！！！）
+        // =========================================================
+        float k_max = 50.0f;
+
+        auto log_w = torch::log(weights + 1e-6); // [G,N]
+        auto h_expand = terrain_h.unsqueeze(1);  // [G,1]
+
+        auto val = k_max * (h_expand + log_w); // [G,N]
+
+        auto h_site_max =
+            torch::logsumexp(val, 0) / k_max; // [N]
+
+        // =========================================================
+
+        auto h_base = h_site_mean.min().detach();
 
         // ===============================
-        // 3. floors (soft integer)
+        // 3. floors（0~3）
         // ===============================
-        auto floor_vals = torch::arange(0, 5, device);
-        auto p_floor = torch::softmax(floor_logits, 1);
+        auto floor_vals = torch::tensor({0.f, 1.f, 2.f, 3.f}, device);
+
+        auto p_floor = torch::softmax(
+            floor_logits.index({torch::indexing::Slice(),
+                                torch::indexing::Slice(0, 4)}),
+            1);
+
         auto floors = (p_floor * floor_vals).sum(1);
 
-        // ⭐⭐⭐ 修复 inplace（极重要）
+        // courtyard → 0层
         if (!courtyard_ids.empty())
         {
             auto mask = torch::ones_like(floors);
-            auto ids_tensor = torch::tensor(courtyard_ids, torch::dtype(torch::kLong).device(device));
+            auto ids_tensor =
+                torch::tensor(courtyard_ids, torch::kLong).to(device);
             mask.index_put_({ids_tensor}, 0.0f);
             floors = floors * mask;
         }
 
         // ===============================
-        // 4. discrete dh
+        // 4. dh
         // ===============================
-        auto delta_vals = torch::tensor({0.f, 2.f, 4.f, 6.f, 8.f}, device);
+        auto delta_vals =
+            torch::tensor({0.f, 2.f, 4.f, 6.f, 8.f}, device);
 
         auto p_delta = torch::softmax(delta_logits, 1);
-        auto dh = (p_delta * delta_vals).sum(1); // [N]
+        auto dh = (p_delta * delta_vals).sum(1);
 
         // ===============================
-        // 5. final site height
+        // 5. 接地 / 架空 mask
         // ===============================
-        auto H_site = h_base + dh;
+        auto affect_mask =
+            torch::tensor(isAffectLands, torch::kFloat32).to(device);
 
         // ===============================
-        // 6. terrain loss
+        // 6. site height（核心逻辑）
+        // ===============================
+
+        // 接地
+        auto H_ground = h_base + dh;
+
+        // ⭐⭐⭐ 架空：必须高于区域最高点
+        float clearance = 1.0f; // 离地高度（你可以调 0.5~2.0）
+
+        auto H_float = h_site_max + clearance;
+
+        auto H_site =
+            affect_mask * H_ground +
+            (1.0f - affect_mask) * H_float;
+
+        // ===============================
+        // 7. terrain loss（仅接地）
         // ===============================
         auto delta_terrain =
             weights.matmul(H_site) - terrain_h;
 
-        auto L_terrain = delta_terrain.pow(2).mean();
+        auto affect_per_grid =
+            weights.matmul(affect_mask);
+
+        auto L_terrain =
+            (delta_terrain.pow(2) * affect_per_grid).mean();
 
         // ===============================
-        // 7. FAR loss
+        // 8. FAR
         // ===============================
         auto total_floors = (A * floors).sum();
         auto target_floors = G * far;
-        auto L_far = (total_floors - target_floors).pow(2);
+
+        auto L_far =
+            (total_floors - target_floors).pow(2);
+
+        float actual_far =
+            total_floors.detach().item<float>() / float(G);
 
         // ===============================
-        // 8. entropy
+        // ⭐ 高度稳定（防止浮空乱飞）
+        // ===============================
+        auto L_height =
+            (H_site - h_site_mean).pow(2).mean();
+
+        // ===============================
+        // 9. entropy
         // ===============================
         auto L_entropy =
-            -(p_floor * torch::log(p_floor + 1e-6)).sum() - (p_delta * torch::log(p_delta + 1e-6)).sum();
+            -(p_floor * torch::log(p_floor + 1e-6)).sum() -
+            (p_delta * torch::log(p_delta + 1e-6)).sum();
+
+        float lambda_height = 0.05f;
 
         auto loss =
             lambda_far * L_far +
             lambda_terrain * L_terrain +
-            lambda_entropy * L_entropy;
- 
-        // NaN 防护（强烈建议）
+            lambda_entropy * L_entropy +
+            lambda_height * L_height;
+
+        // =========================================================
+        // DEBUG
+        // =========================================================
+        static int debug_counter = 0;
+
+        if (debug_counter % 20 == 0)
+        {
+            std::cout << "\n========== SoftRVD Debug ==========\n";
+
+            std::cout << "[FAR] target=" << far
+                      << " actual=" << actual_far << "\n";
+
+            std::cout << "[Loss] "
+                      << "L_far=" << L_far.item<float>()
+                      << " L_terrain=" << L_terrain.item<float>()
+                      << " L_height=" << L_height.item<float>()
+                      << " total=" << loss.item<float>() << "\n";
+
+            int checkN = std::min(5, N);
+
+            for (int i = 0; i < checkN; ++i)
+            {
+                std::cout << "Site " << i
+                          << " mean=" << h_site_mean[i].item<float>()
+                          << " max=" << h_site_max[i].item<float>()
+                          << " H=" << H_site[i].item<float>()
+                          << " type=" << (isAffectLands[i] ? "GROUND" : "FLOAT")
+                          << "\n";
+            }
+
+            std::cout << "===================================\n";
+        }
+
+        debug_counter++;
+
         if (torch::isnan(loss).any().item<bool>())
         {
             std::cout << " LOSS IS NAN!" << std::endl;
-            std::cout << "L_far=" << L_far.item<float>()
-                      << " L_terrain=" << L_terrain.item<float>()
-                      << " L_entropy=" << L_entropy.item<float>()
-                      << std::endl;
             exit(0);
         }
 
@@ -225,7 +268,7 @@ namespace layout
             Color c = renderUtil::mixColor(cellColors, w);
 
             // ---- draw ----
-            DrawCube(Vector3{x + offset.x(), 0, -(y + offset.y())}, size, 0, size, c);
+            DrawCube(Vector3{x + offset.x(), 0, -(y + offset.y())}, size, 0, size, Fade(c,0.3f));
             DrawCubeWires(Vector3{x + offset.x(), 0, -(y + offset.y())}, size, 0, size, RL_BLACK);
         }
     }
@@ -324,14 +367,14 @@ namespace layout
         }
     }
 
-    void SoftRVDModel::stepOptimize(SoftRVDShowData& showData,int &curIter, int maxIter,bool& isOptimizing)
+    void SoftRVDModel::stepOptimize(SoftRVDShowData &showData, int &curIter, int maxIter, bool &isOptimizing)
     {
         if (curIter >= maxIter)
         {
             isOptimizing = false;
             return;
         }
-        
+
         optimizer->zero_grad();
 
         float t = float(curIter) / float(std::max(maxIter - 1, 1));
@@ -343,13 +386,22 @@ namespace layout
         loss.backward();
         optimizer->step();
 
-        // 更新 showData（和你原来一样）
         {
             auto device = grid_xy.device();
 
-            auto floor_vals = torch::arange(0, 5, device);
-            auto p_floor = torch::softmax(floor_logits, 1);
+            // ⭐ 限制0~3层
+            auto floor_vals = torch::tensor({0.f, 1.f, 2.f, 3.f}, device);
+            auto p_floor = torch::softmax(floor_logits.index({torch::indexing::Slice(), torch::indexing::Slice(0, 4)}), 1);
             auto floors_now = (p_floor * floor_vals).sum(1);
+
+            // ⭐ courtyard mask
+            if (!courtyard_ids.empty())
+            {
+                auto mask = torch::ones_like(floors_now);
+                auto ids_tensor = torch::tensor(courtyard_ids, torch::kLong).to(device);
+                mask.index_put_({ids_tensor}, 0.0f);
+                floors_now = floors_now * mask;
+            }
 
             auto delta_vals = torch::tensor({0.f, 2.f, 4.f, 6.f, 8.f}, device);
             auto p_delta = torch::softmax(delta_logits, 1);
@@ -362,12 +414,6 @@ namespace layout
             showData.base_h = base_height;
             showData.G = G;
             showData.N = N;
-        }
-
-        if (curIter % 10 == 0)
-        {
-            std::cout << "[Iter " << curIter
-                      << "] loss=" << loss.item<float>() << std::endl;
         }
 
         curIter++;
@@ -438,6 +484,7 @@ namespace layout
                 showData.base_h = base_height;
                 showData.G = G;
                 showData.N = N;
+                showData.courtyard_ids = courtyard_ids;
             }
 
             if (iter % verbose_every == 0 || iter == iters - 1)
@@ -492,7 +539,14 @@ namespace layout
 
             float floors_soft = f_cpu[best_i].item<float>();
             int floors_int = int(std::round(floors_soft));
-
+            for (int cid : courtyard_ids)
+            {
+                if (best_i == cid)
+                {
+                    floors_int = 0;
+                    break;
+                }
+            }
             if (floors_int <= 0)
                 continue;
 
@@ -510,7 +564,7 @@ namespace layout
                 grid_size,
                 height,
                 grid_size,
-                cellColors[best_i]);
+                Fade(cellColors[best_i],0.3f));
         }
     }
 

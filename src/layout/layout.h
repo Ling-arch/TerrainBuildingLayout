@@ -209,6 +209,7 @@ namespace layout
 
     private:
         geo::MeshData meshData; // CPU mesh
+        // geo::MeshData orthogonalMesh;
         Model model;
         // GPU mesh
     public:
@@ -305,7 +306,8 @@ namespace layout
                 bool success = terrain.sampleHeightAt(height, v);
                 // heightMap.push_back(height);
                 grids.push_back({v.x(), v.y(), height});
-                geo::Vertex mv({(float)v.x(), (float)v.y(), (float)height});
+                Eigen::Vector2f orthoV = R * v;
+                geo::Vertex mv({(float)orthoV.x(), (float)orthoV.y(), (float)height});
                 meshData.vertices.push_back(mv);
             }
         }
@@ -487,7 +489,7 @@ namespace layout
         torch::Tensor floors;  // [N]
         torch::Tensor dh;      // [N]
         torch::Tensor base_h;  // scalar
-
+        std::vector<int> courtyard_ids;
         int G = 0;
         int N = 0;
 
@@ -526,9 +528,9 @@ namespace layout
 
         // ===================== Derived =====================
         torch::Tensor base_height; // scalar (最低地基)
-
-        // ===================== Hyper =====================
-        float lambda_far = 1.0f;
+        std::vector<int> isAffectLands;
+            // ===================== Hyper =====================
+            float lambda_far = 1.0f;
         float lambda_terrain = 0.5f;
         float lambda_entropy = 0.01f;
         std::unique_ptr<torch::optim::Adam> lloyd_optimizer;
@@ -541,8 +543,65 @@ namespace layout
             const torch::Tensor &site_xy_,
             float far_,
             const std::vector<int> &courtyard_ids_,
+            const std::vector<int> &isAffectLands_, // ⭐ 新增
             float k_,
-            float tau_);
+            float tau_)
+            : grid_xy(grid_xy_),
+              terrain_h(terrain_h_),
+              site_xy(site_xy_),
+              far(far_),
+              courtyard_ids(courtyard_ids_),
+              k(k_),
+              tau(tau_)
+        {
+            G = grid_xy.size(0);
+            N = site_xy.size(0);
+
+            site_xy = register_parameter(
+                "site_xy",
+                site_xy_.clone());
+
+            auto device = grid_xy.device();
+
+            // ===============================
+            // ⭐ 处理 isAffectLands 长度
+            // ===============================
+            isAffectLands = isAffectLands_; // 先拷贝
+
+            if ((int)isAffectLands.size() < N)
+            {
+                // 不够 → 补 0（默认架空）
+                isAffectLands.resize(N, 0);
+            }
+            else if ((int)isAffectLands.size() > N)
+            {
+                // 超出 → 截断
+                isAffectLands.resize(N);
+            }
+
+            // ⭐⭐⭐ 楼层限制：0~3（4种）
+            floor_logits = register_parameter(
+                "floor_logits",
+                0.01f * torch::randn({N, 4}, device)); // ⭐ 改这里
+
+            delta_logits = register_parameter(
+                "delta_logits",
+                0.01f * torch::randn({N, 5}, device));
+
+            computeWeights();
+            register_buffer("weights", weights);
+
+            auto A = weights.sum(0);
+            auto h_site_mean =
+                (weights.transpose(0, 1).matmul(terrain_h)) / (A + 1e-6);
+
+            base_height = h_site_mean.min().detach();
+
+            lloyd_optimizer = std::make_unique<torch::optim::Adam>(
+                this->parameters(),
+                torch::optim::AdamOptions(0.05));
+        }
+
         void computeWeights();
         torch::Tensor forward();
         torch::Tensor energyLloyd();

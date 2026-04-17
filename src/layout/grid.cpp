@@ -10,12 +10,13 @@ namespace grid
         if (!globalCells)
             return;
 
-        // 1️ group set（用于判断是否在 group 内）
         std::unordered_set<int> groupSet(cellIndices.begin(), cellIndices.end());
 
-        // 2️ 收集 boundary edges
         std::vector<BoundaryEdge> edges;
 
+        // =====================================================
+        // 1. collect boundary edges
+        // =====================================================
         for (int idx : cellIndices)
         {
             const auto &c = globalCells->at(idx);
@@ -31,248 +32,384 @@ namespace grid
             }
         }
 
-        if (edges.empty())
-            return;
-
-        // 3️ 建立 (coord, dir) → edge index 的映射
-        std::unordered_map<int64_t, int> edgeMap;
-
-        auto encodeEdge = [](int x, int y, int dir)
-        {
-            return (int64_t(x) << 32) | (uint32_t(y << 2 | dir));
-        };
-
+        // std::cout << "========== Step1: Collect Edges ==========\n";
         for (int i = 0; i < edges.size(); ++i)
         {
             const auto &e = edges[i];
             const auto &c = globalCells->at(e.cellIdx);
 
-            edgeMap[encodeEdge(c.coord.x(), c.coord.y(), e.dir)] = i;
+            // std::cout << "Edge " << i
+            //           << " cell=" << e.cellIdx
+            //           << " dir=" << e.dir
+            //           << " coord=(" << c.coord.x() << "," << c.coord.y() << ")\n";
         }
 
-        // 4️ 找起点（左下角优先）
-        int start = 0;
+        if (edges.empty())
+            return;
+
+        // =====================================================
+        // 2. 分组（dir + 轴）
+        // =====================================================
+        std::unordered_map<int64_t, std::vector<BoundaryEdge>> groups;
+
+        for (const auto &e : edges)
         {
-            int minX = INT_MAX, minY = INT_MAX;
-
-            for (int i = 0; i < edges.size(); ++i)
-            {
-                const auto &c = globalCells->at(edges[i].cellIdx);
-
-                if (c.coord.y() < minY ||
-                    (c.coord.y() == minY && c.coord.x() < minX))
-                {
-                    minX = c.coord.x();
-                    minY = c.coord.y();
-                    start = i;
-                }
-            }
-        }
-
-        // 5️ 按拓扑走 loop（O(N)）
-        std::vector<BoundaryEdge> ordered;
-        std::vector<bool> used(edges.size(), false);
-
-        int cur = start;
-
-        while (true)
-        {
-            if (used[cur])
-                break;
-
-            used[cur] = true;
-            const auto &e = edges[cur];
-            ordered.push_back(e);
-
             const auto &c = globalCells->at(e.cellIdx);
-            int x = c.coord.x();
-            int y = c.coord.y();
-            int d = e.dir;
 
-            //  找下一条（基于 coord）
-            int nx = x, ny = y, nd = d;
+            int keyAxis;
 
-            if (d == 0)
+            if (e.dir == 0 || e.dir == 2)
             {
-                nx = x + 1;
-                ny = y;
-            } // Up
-            else if (d == 1)
-            {
-                nx = x;
-                ny = y - 1;
-            } // Right
-            else if (d == 2)
-            {
-                nx = x - 1;
-                ny = y;
-            } // Down
-            else if (d == 3)
-            {
-                nx = x;
-                ny = y + 1;
-            } // Left
-
-            auto it = edgeMap.find(encodeEdge(nx, ny, nd));
-
-            if (it == edgeMap.end())
-                break;
-
-            cur = it->second;
-        }
-
-        // 6️ 按方向分段（你要的逻辑 ✔）
-        ContourSegment current;
-        current.dir = ordered[0].dir;
-
-        for (const auto &e : ordered)
-        {
-            if (e.dir == current.dir)
-            {
-                current.segments.push_back(e);
+                // horizontal → same Y
+                keyAxis = c.coord.y();
             }
             else
             {
-                contourSegments.push_back(current);
+                // vertical → same X
+                keyAxis = c.coord.x();
+            }
 
-                current = ContourSegment();
-                current.dir = e.dir;
-                current.segments.push_back(e);
+            int64_t fullKey = ((int64_t)e.dir << 32) | (uint32_t)keyAxis;
+            groups[fullKey].push_back(e);
+        }
+
+        // std::cout << "\n========== Step2: Grouping ==========\n";
+        for (auto &kv : groups)
+        {
+            int dir = (int)(kv.first >> 32);
+            int axis = (int)(kv.first & 0xffffffff);
+
+            // std::cout << "Group dir=" << dir << " axis=" << axis
+            //           << " size=" << kv.second.size() << "\n";
+        }
+
+        // =====================================================
+        // 3. 每组排序 + 连续性拆分
+        // =====================================================
+        // std::cout << "\n========== Step3: Build Segments ==========\n";
+
+        for (auto &kv : groups)
+        {
+            auto &list = kv.second;
+            if (list.empty())
+                continue;
+
+            int dir = list[0].dir;
+
+            // -------- 排序 --------
+            std::sort(list.begin(), list.end(),
+                      [&](const BoundaryEdge &a, const BoundaryEdge &b)
+                      {
+                          const auto &ca = globalCells->at(a.cellIdx);
+                          const auto &cb = globalCells->at(b.cellIdx);
+
+                          if (dir == 0 || dir == 2)
+                              return ca.coord.x() < cb.coord.x(); // horizontal
+                          else
+                              return ca.coord.y() < cb.coord.y(); // vertical
+                      });
+
+            // -------- debug 排序结果 --------
+            // std::cout << "\nSorted group dir=" << dir << ":\n";
+            // for (auto &e : list)
+            // {
+            //     const auto &c = globalCells->at(e.cellIdx);
+            //     std::cout << "  cell=" << e.cellIdx
+            //               << " coord=(" << c.coord.x() << "," << c.coord.y() << ")\n";
+            // }
+
+            // -------- 连续性拆分 --------
+            ContourSegment seg;
+            seg.dir = dir;
+
+            seg.segments.push_back(list[0]);
+
+            for (int i = 1; i < list.size(); ++i)
+            {
+                const auto &prev = list[i - 1];
+                const auto &cur = list[i];
+
+                const auto &cp = globalCells->at(prev.cellIdx);
+                const auto &cc = globalCells->at(cur.cellIdx);
+
+                bool continuous = false;
+
+                if (dir == 0 || dir == 2)
+                {
+                    // horizontal → y 相同，x 连续
+                    continuous = (cc.coord.y() == cp.coord.y()) &&
+                                 (cc.coord.x() == cp.coord.x() + 1);
+                }
+                else
+                {
+                    // vertical → x 相同，y 连续
+                    continuous = (cc.coord.x() == cp.coord.x()) &&
+                                 (cc.coord.y() == cp.coord.y() + 1);
+                }
+
+                if (!continuous)
+                {
+                    // ---- 断开，保存当前 segment ----
+                    contourSegments.push_back(seg);
+
+                    // std::cout << "  [Split] new segment\n";
+
+                    seg = ContourSegment();
+                    seg.dir = dir;
+                }
+
+                seg.segments.push_back(cur);
+            }
+
+            if (!seg.segments.empty())
+                contourSegments.push_back(seg);
+        }
+
+        for (auto &seg : contourSegments)
+        {
+            int dir = seg.dir;
+
+            // Down / Left 需要反转
+            if (dir == 1 || dir == 2)
+            {
+                std::reverse(seg.segments.begin(), seg.segments.end());
             }
         }
 
-        if (!current.segments.empty())
-            contourSegments.push_back(current);
+        // =====================================================
+        // 4. 最终结果打印
+        // =====================================================
+        // std::cout << "\n========== Final Segments ==========\n";
+
+        // for (int i = 0; i < contourSegments.size(); ++i)
+        // {
+        //     const auto &seg = contourSegments[i];
+
+        //     std::cout << "Segment " << i
+        //               << " dir=" << seg.dir
+        //               << " size=" << seg.segments.size() << "\n";
+
+        //     const auto &first = seg.segments.front();
+        //     const auto &last = seg.segments.back();
+
+        //     const auto &c0 = globalCells->at(first.cellIdx);
+        //     const auto &c1 = globalCells->at(last.cellIdx);
+
+        //     std::cout << "  start coord=(" << c0.coord.x() << "," << c0.coord.y() << ")\n";
+        //     std::cout << "  end   coord=(" << c1.coord.x() << "," << c1.coord.y() << ")\n";
+        //     std::cout << " startPt=(" << c0.getEdge(first.dir).first.x() << "," << c0.getEdge(first.dir).first.y() << ")\n";
+        //     std::cout << "   endPt=(" << c1.getEdge(last.dir).second.x() << "," << c1.getEdge(last.dir).second.y() << ")\n";
+        // }
     }
 
     void CellGroup::buildContour()
     {
         contourPoly.points.clear();
 
-        if (contourSegments.empty() || globalCells == nullptr)
+        if (contourSegments.empty() || !globalCells)
             return;
 
-        std::vector<Eigen::Vector2f> pts;
-        pts.reserve(contourSegments.size() + 1);
+        const float EPS = 1e-6f;
+        int N = (int)contourSegments.size();
 
-        for (int i = 0; i < contourSegments.size(); ++i)
+        struct SegInfo
         {
-            const auto &seg = contourSegments[i];
+            Eigen::Vector2f startPt;
+            Eigen::Vector2f endPt;
+            Eigen::Vector2i startCoord;
+            Eigen::Vector2i endCoord;
+        };
 
-            if (seg.segments.empty())
-                continue;
+        std::vector<SegInfo> segs(N);
 
-            const BoundaryEdge &first = seg.segments.front();
-            const BoundaryEdge &last = seg.segments.back();
+        // ============================================
+        // 1️⃣ 提取 segment 信息
+        // ============================================
+        for (int i = 0; i < N; ++i)
+        {
+            auto &seg = contourSegments[i];
 
-            const GridCell &c0 = globalCells->at(first.cellIdx);
-            const GridCell &c1 = globalCells->at(last.cellIdx);
+            auto &first = seg.segments.front();
+            auto &last = seg.segments.back();
 
-            // 当前 segment 的起点 / 终点
-            auto [p0_start, p0_end] = c0.getEdge(first.dir);
-            auto [p1_start, p1_end] = c1.getEdge(last.dir);
+            const auto &c0 = globalCells->at(first.cellIdx);
+            const auto &c1 = globalCells->at(last.cellIdx);
 
-            // segment 起点
-            Eigen::Vector2f start = p0_start;
+            auto [p0s, p0e] = c0.getEdge(first.dir);
+            auto [p1s, p1e] = c1.getEdge(last.dir);
 
-            // segment 终点
-            Eigen::Vector2f end = p1_end;
+            segs[i].startPt = p0s;
+            segs[i].endPt = p1e;
 
-            // 第一段初始化
-            if (pts.empty())
-            {
-                pts.push_back(start);
-            }
-            else
-            {
-                // 防止重复点（非常重要）
-                if ((pts.back() - start).squaredNorm() > 1e-6)
-                    pts.push_back(start);
-            }
+            segs[i].startCoord = c0.coord;
+            segs[i].endCoord = c1.coord;
 
-            pts.push_back(end);
+            // 初始化
+            contourSegments[i].startConvex = false;
+            contourSegments[i].endConvex = false;
         }
 
-        // 闭合处理（确保首尾一致）
+        // ============================================
+        // 2️⃣ traversal（严格 end → start）
+        // ============================================
+        std::vector<bool> used(N, false);
+        std::vector<Eigen::Vector2f> pts;
+
+        int start = 0;
+        int cur = start;
+
+        used[cur] = true;
+
+        pts.push_back(segs[cur].startPt);
+        pts.push_back(segs[cur].endPt);
+
+        Eigen::Vector2f curEnd = segs[cur].endPt;
+
+        // std::cout << "\n=========== Traversal ===========\n";
+        // std::cout << "Start seg = " << cur << "\n";
+
+        // ============================================
+        // 主循环
+        // ============================================
+        for (int step = 0; step < N - 1; ++step)
+        {
+            int next = -1;
+
+            for (int i = 0; i < N; ++i)
+            {
+                if (used[i] || i == cur)
+                    continue;
+
+                //  唯一规则：end → start 精确匹配
+                if ((segs[i].startPt - curEnd).squaredNorm() < EPS)
+                {
+                    next = i;
+                    break;
+                }
+            }
+
+            if (next == -1)
+            {
+                // std::cout << "[ERROR] cannot find next segment\n";
+                break;
+            }
+
+            // ========================================
+            // convex 判断（你的定义）
+            // ========================================
+            auto &c0 = segs[cur].endCoord;
+            auto &c1 = segs[next].startCoord;
+
+            bool convex = (c0 == c1);
+
+            contourSegments[cur].endConvex = convex;
+            contourSegments[next].startConvex = convex;
+
+            // std::cout << "Connect " << cur << " -> " << next
+            //           << " convex=" << convex << "\n";
+
+            // ========================================
+            // 拼接
+            // ========================================
+            pts.push_back(segs[next].endPt);
+
+            used[next] = true;
+            cur = next;
+            curEnd = segs[cur].endPt;
+        }
+
+        // ============================================
+        // 闭环 convex
+        // ============================================
+        {
+            int first = start;
+            int last = cur;
+
+            auto &c0 = segs[last].endCoord;
+            auto &c1 = segs[first].startCoord;
+
+            bool convex = (c0 == c1);
+
+            contourSegments[last].endConvex = convex;
+            contourSegments[first].startConvex = convex;
+
+            // std::cout << "Connect " << last << " -> " << first
+            //           << " (CLOSE LOOP) convex=" << convex << "\n";
+        }
+
+        // ============================================
+        // 4️⃣ 闭合 polyline
+        // ============================================
         if (!pts.empty())
         {
-            if ((pts.front() - pts.back()).squaredNorm() > 1e-6)
+            if ((pts.front() - pts.back()).squaredNorm() > EPS)
                 pts.push_back(pts.front());
         }
 
         contourPoly = geo::Polyline2_t<float>(pts, true);
+
+        // ============================================
+        // DEBUG: contour
+        // ============================================
+        // std::cout << "\n=========== FINAL CONTOUR ===========\n";
+        // for (int i = 0; i < pts.size(); ++i)
+        // {
+        //     std::cout << "P[" << i << "] = ("
+        //               << pts[i].x() << ", "
+        //               << pts[i].y() << ")\n";
+        // }
+        // std::cout << "Point count = " << pts.size() << "\n";
+        // std::cout << "====================================\n";
+
+        // ============================================
+        // DEBUG: segment detail
+        // ============================================
+        // std::cout << "\n=========== SEGMENT DETAIL ===========\n";
+
+        // for (int i = 0; i < contourSegments.size(); ++i)
+        // {
+        //     const auto &seg = contourSegments[i];
+
+        //     const auto &first = seg.segments.front();
+        //     const auto &last = seg.segments.back();
+
+        //     const auto &c0 = globalCells->at(first.cellIdx);
+        //     const auto &c1 = globalCells->at(last.cellIdx);
+
+        //     auto [p0s, p0e] = c0.getEdge(first.dir);
+        //     auto [p1s, p1e] = c1.getEdge(last.dir);
+
+        //     std::cout << "Segment " << i << "\n";
+
+        //     std::cout << "  startCoord = ("
+        //               << c0.coord.x() << ", "
+        //               << c0.coord.y() << ")\n";
+
+        //     std::cout << "  startPt    = ("
+        //               << p0s.x() << ", "
+        //               << p0s.y() << ")\n";
+
+        //     std::cout << "  startConvex = "
+        //               << (seg.startConvex ? "true" : "false") << "\n";
+
+        //     std::cout << "  endCoord   = ("
+        //               << c1.coord.x() << ", "
+        //               << c1.coord.y() << ")\n";
+
+        //     std::cout << "  endPt      = ("
+        //               << p1e.x() << ", "
+        //               << p1e.y() << ")\n";
+
+        //     std::cout << "  endConvex  = "
+        //               << (seg.endConvex ? "true" : "false") << "\n";
+
+        //     std::cout << "-------------------------------------\n";
+        // }
+
+        // std::cout << "=====================================\n";
     }
 
-    void CellGroup::debugPrintSegments() const
-    {
-        if (!globalCells)
-        {
-            std::cout << "[Debug] globalCells is null\n";
-            return;
-        }
-
-        std::cout << "================ Contour Segments ================\n";
-
-        for (int i = 0; i < contourSegments.size(); ++i)
-        {
-            const auto &seg = contourSegments[i];
-
-            std::cout << "Segment " << i << " dir = " << seg.dir
-                      << " size = " << seg.segments.size() << "\n";
-
-            if (seg.segments.empty())
-                continue;
-
-            const auto &first = seg.segments.front();
-            const auto &last = seg.segments.back();
-
-            const GridCell &c0 = globalCells->at(first.cellIdx);
-            const GridCell &c1 = globalCells->at(last.cellIdx);
-
-            auto [s0, s1] = c0.getEdge(first.dir);
-            auto [e0, e1] = c1.getEdge(last.dir);
-
-            std::cout << "  StartCellIdx: " << first.cellIdx
-                      << " coord=(" << c0.coord.x() << "," << c0.coord.y() << ")"
-                      << " startPt=(" << s0.x() << "," << s0.y() << ")\n";
-
-            std::cout << "  EndCellIdx:   " << last.cellIdx
-                      << " coord=(" << c1.coord.x() << "," << c1.coord.y() << ")"
-                      << " endPt=(" << e1.x() << "," << e1.y() << ")\n";
-        }
-
-        std::cout << "===================================================\n";
-    }
-
-    void CellGroup::debugPrintContour() const
-    {
-        std::cout << "================ Contour Polyline ================\n";
-
-        const auto &pts = contourPoly.points;
-
-        for (int i = 0; i < pts.size(); ++i)
-        {
-            std::cout << "P[" << i << "] = ("
-                      << pts[i].x() << ", "
-                      << pts[i].y() << ")\n";
-        }
-
-        std::cout << "Point count = " << pts.size() << "\n";
-
-        if (!pts.empty())
-        {
-            float dx = pts.front().x() - pts.back().x();
-            float dy = pts.front().y() - pts.back().y();
-
-            std::cout << "Closed check: "
-                      << (std::sqrt(dx * dx + dy * dy) < 1e-6 ? "YES" : "NO")
-                      << "\n";
-        }
-
-        std::cout << "==================================================\n";
-    }
-
-    void CellGenerator::generateCells(const geo::Polyline2_t<float> &site) 
+    void CellGenerator::generateCells(const geo::Polyline2_t<float> &site)
     {
 
         cells.clear();
@@ -289,7 +426,7 @@ namespace grid
         {
             for (int ix = 0; ix < nx; ++ix)
             {
-                Eigen::Vector2f center(minX + (ix + 0.5f) * cellSize,minY + (iy + 0.5f) * cellSize);
+                Eigen::Vector2f center(minX + (ix + 0.5f) * cellSize, minY + (iy + 0.5f) * cellSize);
 
                 if (!util::Math2<float>::point_in_poly(site.points, center))
                     continue;
@@ -313,7 +450,7 @@ namespace grid
         }
 
         // 2️ 查邻居（O(1)）
-        //上（0，1）右（1，0）下（0，-1）左（-1，0）
+        // 上（0，1）右（1，0）下（0，-1）左（-1，0）
         const int dx[4] = {0, 1, 0, -1};
         const int dy[4] = {1, 0, -1, 0};
 
