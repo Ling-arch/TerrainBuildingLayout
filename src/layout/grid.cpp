@@ -345,68 +345,28 @@ namespace grid
             if ((pts.front() - pts.back()).squaredNorm() > EPS)
                 pts.push_back(pts.front());
         }
-
+        std::reverse(pts.begin(), pts.end());
         contourPoly = geo::Polyline2_t<float>(pts, true);
+        std::cout << "\n=========== CONTOUR POLY DEBUG ===========\n";
+        std::cout << "points count = " << contourPoly.points.size() << "\n";
 
-        // ============================================
-        // DEBUG: contour
-        // ============================================
-        // std::cout << "\n=========== FINAL CONTOUR ===========\n";
-        // for (int i = 0; i < pts.size(); ++i)
-        // {
-        //     std::cout << "P[" << i << "] = ("
-        //               << pts[i].x() << ", "
-        //               << pts[i].y() << ")\n";
-        // }
-        // std::cout << "Point count = " << pts.size() << "\n";
-        // std::cout << "====================================\n";
+        for (size_t i = 0; i < contourPoly.points.size(); ++i)
+        {
+            const auto &p = contourPoly.points[i];
 
-        // ============================================
-        // DEBUG: segment detail
-        // ============================================
-        // std::cout << "\n=========== SEGMENT DETAIL ===========\n";
+            std::cout << i << ": ("
+                      << p.x() << ", "
+                      << p.y() << ")";
 
-        // for (int i = 0; i < contourSegments.size(); ++i)
-        // {
-        //     const auto &seg = contourSegments[i];
+            if (i + 1 < contourPoly.points.size())
+                std::cout << " -> ";
 
-        //     const auto &first = seg.segments.front();
-        //     const auto &last = seg.segments.back();
+            // 每 6 个点换行（避免太长）
+            if (i % 6 == 5)
+                std::cout << "\n";
+        }
 
-        //     const auto &c0 = globalCells->at(first.cellIdx);
-        //     const auto &c1 = globalCells->at(last.cellIdx);
-
-        //     auto [p0s, p0e] = c0.getEdge(first.dir);
-        //     auto [p1s, p1e] = c1.getEdge(last.dir);
-
-        //     std::cout << "Segment " << i << "\n";
-
-        //     std::cout << "  startCoord = ("
-        //               << c0.coord.x() << ", "
-        //               << c0.coord.y() << ")\n";
-
-        //     std::cout << "  startPt    = ("
-        //               << p0s.x() << ", "
-        //               << p0s.y() << ")\n";
-
-        //     std::cout << "  startConvex = "
-        //               << (seg.startConvex ? "true" : "false") << "\n";
-
-        //     std::cout << "  endCoord   = ("
-        //               << c1.coord.x() << ", "
-        //               << c1.coord.y() << ")\n";
-
-        //     std::cout << "  endPt      = ("
-        //               << p1e.x() << ", "
-        //               << p1e.y() << ")\n";
-
-        //     std::cout << "  endConvex  = "
-        //               << (seg.endConvex ? "true" : "false") << "\n";
-
-        //     std::cout << "-------------------------------------\n";
-        // }
-
-        // std::cout << "=====================================\n";
+        std::cout << "\n==========================================\n";
     }
 
     void CellGenerator::generateCells(const geo::Polyline2_t<float> &site)
@@ -467,6 +427,45 @@ namespace grid
                 if (it != coordMap.end())
                     cell.neighbors[d] = it->second;
             }
+        }
+    }
+
+    void CellRegion::swapEdgeCells()
+    {
+    }
+
+    void CellRegion::mergeSingleCell()
+    {
+    }
+
+    void CellRegion::pushAdditionalCells(){
+
+    }
+
+    void CellRegion::buildContourMeshes(const std::vector<float> &baseHeights,const std::vector<int> &floors)
+    {
+        if (groups.empty())
+            return;
+
+        if (groups.size() != baseHeights.size())
+        {
+            std::cerr << "[ERROR] baseHeights size should match groups size\n";
+            return;
+        }
+
+        if (groups.size() != floors.size())
+        {
+            std::cerr << "[ERROR] floors size should match groups size\n";
+            return;
+        }
+
+        for (int i = 0; i < groups.size(); ++i)
+        {
+            const auto &cellGrp = groups[i];
+            float height = baseHeights[i];
+            int floor = floors[i];
+            std::vector<Eigen::Vector3f> pts3d = geo::convertPolyline2To3D(cellGrp.contourPoly, height);
+            contourMeshes.emplace_back(pts3d, floor * 4.0f);
         }
     }
 }

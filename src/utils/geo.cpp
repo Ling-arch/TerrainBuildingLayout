@@ -119,7 +119,7 @@ namespace geo
 
     void PolygonMesh::build()
     {
-        std::cout << "\n[BUILD] begin\n";
+        // std::cout << "\n[BUILD] begin\n";
 
         if (points.size() < 3)
         {
@@ -137,6 +137,8 @@ namespace geo
             std::cout << "[BUILD ERROR] triangulation failed\n";
             return;
         }
+
+        
 
         const Eigen::Vector3f normal = poly.normal();
 
@@ -237,15 +239,15 @@ namespace geo
             mesh.vertices[bot1].normal = sideNormal;
         }
 
-        std::cout << "[BUILD] vertex count: " << mesh.vertices.size() << "\n";
-        std::cout << "[BUILD] index count: " << mesh.indices.size() << "\n";
+        // std::cout << "[BUILD] vertex count: " << mesh.vertices.size() << "\n";
+        // std::cout << "[BUILD] index count: " << mesh.indices.size() << "\n";
     }
 
     Mesh buildRaylibMesh(const MeshData &src)
     {
-        std::cout << "\n[UPLOAD] begin\n";
-        std::cout << "[UPLOAD] vertex count: " << src.vertices.size() << "\n";
-        std::cout << "[UPLOAD] index count: " << src.indices.size() << "\n";
+        // std::cout << "\n[UPLOAD] begin\n";
+        // std::cout << "[UPLOAD] vertex count: " << src.vertices.size() << "\n";
+        // std::cout << "[UPLOAD] index count: " << src.indices.size() << "\n";
 
         Mesh mesh = {0};
 
@@ -321,13 +323,13 @@ namespace geo
 
         UploadMesh(&mesh, true);
 
-        std::cout << "[UPLOAD] success\n";
+        // std::cout << "[UPLOAD] success\n";
         return mesh;
     }
 
     void PolygonMesh::upload()
     {
-        std::cout << "[UPLOAD] model begin\n";
+        // std::cout << "[UPLOAD] model begin\n";
 
         Mesh m = buildRaylibMesh(mesh);
 
@@ -337,11 +339,11 @@ namespace geo
             return;
         }
 
-        std::cout << "[UPLOAD] calling LoadModelFromMesh...\n";
+        // std::cout << "[UPLOAD] calling LoadModelFromMesh...\n";
 
         model = LoadModelFromMesh(m);
 
-        std::cout << "[UPLOAD] model created SUCCESS\n";
+        // std::cout << "[UPLOAD] model created SUCCESS\n";
     }
 
     void PolygonMesh::draw(Color color, float colorAlpha, bool outline, bool wireframe, float wireframeAlpha)const

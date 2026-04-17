@@ -27,8 +27,8 @@ namespace grid
     {
         std::vector<BoundaryEdge> segments; // 对应边
         int dir;                            // 0= up, 1=right, 2=down, 3=left
-        bool startConvex = false;                      // 起点是否是凸点
-        bool endConvex = false;                        // 终点是否是凸点
+        bool startConvex = false;           // 起点是否是凸点
+        bool endConvex = false;             // 终点是否是凸点
     };
 
     struct GridCell
@@ -77,19 +77,69 @@ namespace grid
         const std::vector<GridCell> *globalCells; // 指向全局
         std::vector<ContourSegment> contourSegments;
         geo::Polyline2_t<float> contourPoly;
+        CellGroup() = default;
         CellGroup(const std::vector<int> &indices,
                   const std::vector<GridCell> *global,
                   int inId)
             : cellIndices(indices), globalCells(global), id(inId)
         {
+            if (globalCells)
+            {
+                for (int idx : cellIndices)
+                {
+                    // 防越界
+                    if (idx < 0 || idx >= (int)globalCells->size())
+                        continue;
+
+                    // 修改 global cell 的归属 id
+                    const_cast<GridCell &>((*globalCells)[idx]).id = id;
+                }
+            }
+
             buildContourSegments();
             buildContour();
         }
 
         void buildContourSegments();
         void buildContour();
-     
+    };
 
+    // 管理多个cell group的边界关系，构建轮廓网格
+    struct CellRegion
+    {
+        const std::vector<GridCell> *globalCells;
+        std::vector<CellGroup> groups;
+        std::vector<geo::PolygonMesh> contourMeshes;
+        
+        CellRegion(int dim,
+                   const std::vector<GridCell> *global,
+                   const std::vector<std::vector<int>> &groupIndices,
+                   const std::vector<float> &baseHeights,
+                   const std::vector<int> &floors)
+            : globalCells(global)
+        {
+            int id = 0;
+            groups.clear();
+            for (const auto &indices : groupIndices)
+            {
+                groups.emplace_back(indices, globalCells, id++);
+            }
+
+            mergeSingleCell();
+            swapEdgeCells();
+
+            if (dim == 3)
+            {
+                pushAdditionalCells();
+            }
+
+            buildContourMeshes(baseHeights, floors);
+        }
+        CellRegion() = default;
+        void swapEdgeCells();
+        void mergeSingleCell();
+        void pushAdditionalCells();
+        void buildContourMeshes(const std::vector<float> &baseHeights, const std::vector<int> &floors);
     };
 
     // 全局的Cell数组

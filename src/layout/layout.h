@@ -4,7 +4,7 @@
 #include "geo.h"
 #include "diffVoronoi.h"
 #include <torch/torch.h>
-
+#include "grid.h"
 namespace layout
 {
 
@@ -193,7 +193,7 @@ namespace layout
         template <typename Scalar>
         using Polyline2_t = geo::Polyline2_t<Scalar>;
         using Point_3 = geo::Point_3;
-        using SurfaceMesh = geo::SurfaceMesh;
+        // using SurfaceMesh = geo::SurfaceMesh;
         template <typename Scalar>
         using Vector2 = Eigen::Matrix<Scalar, 2, 1>;
         using Vector3 = Eigen::Matrix<Scalar, 3, 1>;
@@ -214,8 +214,9 @@ namespace layout
         // GPU mesh
     public:
         Polyline2_t<Scalar> site;
-        Polyline2_t<Scalar> oriRect;// 原始矩形（未旋转）
-        Polyline2_t<Scalar> rotedRect;// 旋转后的矩形
+        Polyline2_t<Scalar> oriRect;   // 原始矩形（未旋转）
+        Polyline2_t<Scalar> rotedRect; // 旋转后的矩形
+        Polyline2_t<Scalar> rotedSite; // 旋转后的地块
         Eigen::AlignedBox<Scalar, 2> rotedBound;
         Eigen::Matrix<Scalar, 2, 2> Rinv;
         std::vector<Scalar> heightMap;
@@ -224,7 +225,7 @@ namespace layout
         Scalar divGap;
         // std::vector<Vector2<Scalar>> rotedVertices;
         std::vector<Eigen::Vector3<Scalar>> grids;
-        SurfaceMesh heMesh;
+        // SurfaceMesh heMesh;
     };
 
     template <typename Scalar>
@@ -235,122 +236,150 @@ namespace layout
         upload();
     }
 
-    template <typename Scalar>
+     template <typename Scalar>
     void BuildingLayout<Scalar>::initLayout(const terrain::Terrain &terrain)
     {
-        // 1. compute OBB of site
         geo::OBB2<Scalar> obb(site.points);
         Eigen::Matrix<Scalar, 2, 2> R = geo::rotationToXAxis(obb.axis0);
         Rinv = R.transpose();
+
         Polyline2_t<Scalar> rotPoly = geo::rotatePoly(site, R);
-        // --- compute max rect in rotated space
         rotedRect = geo::getMaxRectInPolyWithRatio(rotPoly, 0.5, 2.0);
+        auto offsets = geo::offsetPolygon(rotedRect, Scalar(-0.5));
+        if (!offsets.empty())
+        {
+            rotedSite = offsets[0];
+        }
+        else
+        {
+          return;
+        }
         std::vector<Eigen::Vector2<Scalar>> originalPts;
         for (const auto &p : rotedRect.points)
             originalPts.emplace_back(Rinv * p);
 
         oriRect = Polyline2_t<Scalar>(originalPts, true);
-        // 2. sample height for each vertex
+
         heightMap.clear();
         meshData.vertices.clear();
         meshData.indices.clear();
+
         Vector2<Scalar> p0 = oriRect.points[0];
         Vector2<Scalar> p1 = oriRect.points[1];
         Vector2<Scalar> p3 = oriRect.points[3];
-        Vector2<Scalar> edgeW = p1 - p0; // 宽方向
-        Vector2<Scalar> edgeH = p3 - p0; // 高方向
+
+        Vector2<Scalar> edgeW = p1 - p0;
+        Vector2<Scalar> edgeH = p3 - p0;
+
         Scalar width = edgeW.norm();
         Scalar height = edgeH.norm();
+
         Scalar newW = std::floor(width);
         Scalar newH = std::floor(height);
+
         Vector2<Scalar> center = (p0 + oriRect.points[2]) * Scalar(0.5);
+
         Vector2<Scalar> dirW = edgeW.normalized();
         Vector2<Scalar> dirH = edgeH.normalized();
+
         Scalar hw = newW * Scalar(0.5);
         Scalar hh = newH * Scalar(0.5);
+
         Scalar minW = std::min(newW, newH);
         Scalar maxW = std::max(newW, newH);
+
         divGap = std::min(Scalar(0.3 * minW), Scalar(0.2 * maxW));
+
         Vector2<Scalar> newP0 = center - dirW * hw - dirH * hh;
         Vector2<Scalar> newP1 = center + dirW * hw - dirH * hh;
         Vector2<Scalar> newP2 = center + dirW * hw + dirH * hh;
         Vector2<Scalar> newP3 = center - dirW * hw + dirH * hh;
 
-        Vector2<Scalar> rotedP0 = R * newP0;
-        Vector2<Scalar> rotedP1 = R * newP1;
-        Vector2<Scalar> rotedP2 = R * newP2;
-        Vector2<Scalar> rotedP3 = R * newP3;
-        std::vector<Vector2<Scalar>> newRotedRect = {rotedP0, rotedP1, rotedP2, rotedP3, rotedP0};
-        rotedRect = Polyline2_t<Scalar>(newRotedRect, true);
-
-        rotedBound = geo::computeAABB(std::vector<Polyline2_t<Scalar>>{rotedRect});
-        std::vector<Vector2<Scalar>> newRect = {newP0, newP1, newP2, newP3, newP0};
-        oriRect = Polyline2_t<Scalar>(newRect, true);
         int nx = static_cast<int>(newW);
         int ny = static_cast<int>(newH);
-        // build heMesh / meshData / renderMesh
 
-        std::vector<std::vector<SurfaceMesh::Vertex_index>> vtx;
+        // =========================================================
+        // ⭐ IMPORTANT FIX: vtx[y][x] style (NY OUTER LOOP SAFE)
+        // =========================================================
+        // std::vector<std::vector<SurfaceMesh::Vertex_index>> vtx;
+        // vtx.resize(ny + 1);
+        // for (int j = 0; j <= ny; ++j)
+        //     vtx[j].resize(nx + 1);
 
-        vtx.resize(nx + 1);
-
-        for (int i = 0; i <= nx; ++i)
+        // =========================
+        // vertices (NY OUTER LOOP)
+        // =========================
+        for (int j = 0; j <= ny; ++j)
         {
-            vtx[i].resize(ny + 1);
-            for (int j = 0; j <= ny; ++j)
+            for (int i = 0; i <= nx; ++i)
             {
-                Vector2<Scalar> v = newP0 + dirW * i + dirH * j;
+                Vector2<Scalar> v = newP0 + dirW * Scalar(i) + dirH * Scalar(j);
 
-                vtx[i][j] = heMesh.add_vertex(geo::to_cgal_point(v, Scalar(0)));
-                Scalar height = Scalar(0);
-                bool success = terrain.sampleHeightAt(height, v);
-                // heightMap.push_back(height);
-                grids.push_back({v.x(), v.y(), height});
+                // vtx[j][i] = heMesh.add_vertex(
+                //     geo::to_cgal_point(v, Scalar(0)));
+
+                Scalar h = Scalar(0);
+                terrain.sampleHeightAt(h, v);
+
+                grids.push_back({v.x(), v.y(), h});
+
                 Eigen::Vector2f orthoV = R * v;
-                geo::Vertex mv({(float)orthoV.x(), (float)orthoV.y(), (float)height});
+
+                geo::Vertex mv({(float)orthoV.x(),
+                                (float)orthoV.y(),
+                                (float)h});
+
                 meshData.vertices.push_back(mv);
             }
         }
-        for (int i = 0; i < nx; ++i)
+
+        // =========================
+        // faces (STRICT CONSISTENCY)
+        // =========================
+        for (int j = 0; j < ny; ++j)
         {
-            for (int j = 0; j < ny; ++j)
+            for (int i = 0; i < nx; ++i)
             {
-                heMesh.add_face(
-                    vtx[i][j],
-                    vtx[i + 1][j],
-                    vtx[i + 1][j + 1],
-                    vtx[i][j + 1]);
-                geo::Point_3 p00 = heMesh.point(vtx[i][j]);
-                geo::Point_3 p11 = heMesh.point(vtx[i + 1][j + 1]);
+                Vector2<Scalar> v00 = newP0 + dirW * i + dirH * j;
+                Vector2<Scalar> v11 = newP0 + dirW * (i + 1) + dirH * (j + 1);
+                // SurfaceMesh::Vertex_index v00 = vtx[j][i];
+                // SurfaceMesh::Vertex_index v10 = vtx[j][i + 1];
+                // SurfaceMesh::Vertex_index v01 = vtx[j + 1][i];
+                // SurfaceMesh::Vertex_index v11 = vtx[j + 1][i + 1];
 
-                geo::Point_3 c3(
-                    (p00.x() + p11.x()) * Scalar(0.5),
-                    (p00.y() + p11.y()) * Scalar(0.5),
-                    (p00.z() + p11.z()) * Scalar(0.5));
+                // heMesh.add_face(v00, v10, v11, v01);
 
-                Vector2<Scalar> center(c3.x(), c3.y());
-                Vector2<Scalar> rotedCenter = R * center;
+                // geo::Point_3 p00 = heMesh.point(v00);
+                // geo::Point_3 p11 = heMesh.point(v11);
+
+                // geo::Point_3 c3(
+                //     (p00.x() + p11.x()) * Scalar(0.5),
+                //     (p00.y() + p11.y()) * Scalar(0.5),
+                //     (p00.z() + p11.z()) * Scalar(0.5));
+              
+                Vector2<Scalar> c2((v00.x() + v11.x()) * Scalar(0.5), (v00.y() + v11.y()) * Scalar(0.5));
+
+                Vector2<Scalar> rotedCenter = R * c2;
                 rotedCenters.push_back(rotedCenter);
 
-                Scalar height = Scalar(0);
+                Scalar h = Scalar(0);
+                terrain.sampleHeightAt(h, c2);
 
-                bool success = terrain.sampleHeightAt(height, center);
-                heightMap.push_back(height);
-                // std::cout<<"height is :"<< height <<std::endl;
-                sampleCenters.push_back({Scalar(c3.x()), Scalar(c3.y()), height});
+                heightMap.push_back(h);
+                sampleCenters.push_back({Scalar(c2.x()), Scalar(c2.y()), h});
 
-                // rotedGrids.push_back({rotedCenter.x(),rotedCenter.y(), height});
-                uint32_t i0 = i * (ny + 1) + j;
-                uint32_t i1 = (i + 1) * (ny + 1) + j;
-                uint32_t i2 = (i + 1) * (ny + 1) + (j + 1);
-                uint32_t i3 = i * (ny + 1) + (j + 1);
+                // =====================================================
+                // IMPORTANT: INDEXING MUST MATCH (j-major layout)
+                // =====================================================
+                uint32_t i0 = j * (nx + 1) + i;
+                uint32_t i1 = j * (nx + 1) + (i + 1);
+                uint32_t i2 = (j + 1) * (nx + 1) + (i + 1);
+                uint32_t i3 = (j + 1) * (nx + 1) + i;
 
-                // triangle 1
                 meshData.indices.push_back(i0);
                 meshData.indices.push_back(i1);
                 meshData.indices.push_back(i2);
 
-                // triangle 2
                 meshData.indices.push_back(i0);
                 meshData.indices.push_back(i2);
                 meshData.indices.push_back(i3);
@@ -489,6 +518,7 @@ namespace layout
         torch::Tensor floors;  // [N]
         torch::Tensor dh;      // [N]
         torch::Tensor base_h;  // scalar
+        torch::Tensor H_site;
         std::vector<int> courtyard_ids;
         int G = 0;
         int N = 0;
@@ -502,6 +532,15 @@ namespace layout
             Eigen::Vector2f offset = Eigen::Vector2f(0.f, 0.f)) const;
     };
 
+    struct SoftRVDOutput
+    {
+        torch::Tensor H_site;
+        torch::Tensor floors;
+        torch::Tensor dh;
+        torch::Tensor weights;
+        torch::Tensor base_h;
+    };
+
     class SoftRVDModel : public torch::nn::Module
     {
     public:
@@ -509,7 +548,8 @@ namespace layout
         torch::Tensor grid_xy;   // [G,2]
         torch::Tensor terrain_h; // [G]
         torch::Tensor site_xy;   // [N,2]
-
+        torch::Tensor global_offset;
+        mutable SoftRVDOutput lastOutput;
         int G = 0;
         int N = 0;
 
@@ -529,8 +569,8 @@ namespace layout
         // ===================== Derived =====================
         torch::Tensor base_height; // scalar (最低地基)
         std::vector<int> isAffectLands;
-            // ===================== Hyper =====================
-            float lambda_far = 1.0f;
+        // ===================== Hyper =====================
+        float lambda_far = 1.0f;
         float lambda_terrain = 0.5f;
         float lambda_entropy = 0.01f;
         std::unique_ptr<torch::optim::Adam> lloyd_optimizer;
@@ -570,8 +610,8 @@ namespace layout
 
             if ((int)isAffectLands.size() < N)
             {
-                // 不够 → 补 0（默认架空）
-                isAffectLands.resize(N, 0);
+                // 不够 → 补 1（默认影响）
+                isAffectLands.resize(N, 1);
             }
             else if ((int)isAffectLands.size() > N)
             {
@@ -588,6 +628,10 @@ namespace layout
                 "delta_logits",
                 0.01f * torch::randn({N, 5}, device));
 
+            global_offset = register_parameter(
+                "global_offset",
+                torch::zeros({1}, device));
+
             computeWeights();
             register_buffer("weights", weights);
 
@@ -600,10 +644,13 @@ namespace layout
             lloyd_optimizer = std::make_unique<torch::optim::Adam>(
                 this->parameters(),
                 torch::optim::AdamOptions(0.05));
+            optimizer = std::make_unique<torch::optim::Adam>(
+                this->parameters(),
+                torch::optim::AdamOptions(0.05));
         }
 
         void computeWeights();
-        torch::Tensor forward();
+        std::pair<torch::Tensor, SoftRVDOutput> forward();
         torch::Tensor energyLloyd();
         void optimize(SoftRVDShowData &showData,
                       int iters = 300,
@@ -613,9 +660,10 @@ namespace layout
                            float lr = 0.05f,
                            int verbose_every = 50);
         void stepOptimizeLloyd(int &curIter, const int maxIter);
-        void stepOptimize(SoftRVDShowData& showData,int &curIter, int maxIter,bool& isOptimizing);
+        void stepOptimize(SoftRVDShowData &showData, int &curIter, int maxIter, bool &isOptimizing);
         void drawGrids(float z = 0.f, float size = 1.f, const Eigen::Vector2f &offset = Eigen::Vector2f(0.f, 0.f)) const;
         void drawTerrain(const std::vector<float> &heights, float z = 0.f, float size = 1.f, const Eigen::Vector2f &offset = Eigen::Vector2f(0.f, 0.f)) const;
+        grid::CellRegion buildCellRegion(const grid::CellGenerator &cellGen) const;
     };
 
 }

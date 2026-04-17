@@ -34,7 +34,7 @@ int main()
 
     //-------------------------random polygon and tensor field-------------------------
     static int ptNum = 5;
-    static float scale = 25.f;
+    static float scale = 12.f;
     static float threshold = 0.5f;
     static bool genPlot = false;
     static int minGridNum = 20;
@@ -83,7 +83,7 @@ int main()
 
     Polyline2_t<float> boundOffset = geo::offsetPolygon(layout.rotedRect, -2.f)[0];
     std::vector<Vector2f> yardSeeds = geo::samplePointsOnPolygonWithSpacing(boundOffset, 2, (unsigned)time(nullptr));
-    M2::PoissonResult totalSeedResult = M2::gen_poisson_sites_in_poly_with_seeds(layout.rotedRect.points, yardSeeds, layout.divGap, 5, 30, (unsigned)time(nullptr));
+    M2::PoissonResult totalSeedResult = M2::gen_poisson_sites_in_poly_with_seeds(layout.rotedRect.points, yardSeeds, layout.divGap, 6, 30, (unsigned)time(nullptr));
     //-------------------------------diff rvd test-------------------------------
 
     torch::manual_seed(0);
@@ -106,28 +106,31 @@ int main()
     std::cout << "softmodel built" << std::endl;
     // softModel.optimizeLloyd();
     bool isOptimizing = false;
-    static int maxIter = 200;
+    static int maxIter = 151;
     int curIter = 0;
-
-    Polyline2_t<float> testGridPoly({{0.f, 0.f},
-                                     {18.f, 0.f},
-                                     {18.f, 8.f},
-                                     {12.f, 8.f},
-                                     {12.f, 15.f},
-                                     {4.f, 15.f},
-                                     {4.f, 8.f},
-                                     {0.f, 8.f}},
+    CellGenerator cellGen(layout.rotedSite, 1.f);
+    
+   
+    Polyline2_t<float> testGridPoly({{0.2341f, 0.f},
+                                     {5.2341f, 0.f},
+                                     {5.2341f, 2.f},
+                                     {4.2341f, 2.f},
+                                     {4.2341f, 4.f},
+                                     {2.2341f, 4.f},
+                                     {2.2341f, 2.f},
+                                     {0.2341f, 2.f}},
                                     true);
-    CellGenerator cellGen(testGridPoly, 1.f);
-    std::vector<int> indices;
-    indices.reserve(cellGen.cells.size());
+    CellGenerator cellGen2(testGridPoly, 1.f);
+    // std::vector<int> indices;
+    // indices.reserve(cellGen.cells.size());
+    grid::CellRegion cellRegion(2, &cellGen2.cells, {{0, 1, 2, 5, 6, 7}, {10, 12}, {3, 4, 8, 9, 11, 13}}, {0.f, 0.f, 0.f}, {1, 2, 1});
 
-    for (int i = 0; i < cellGen.cells.size(); ++i)
-    {
-        indices.push_back(i);
-    }
-    std::cout << "Total cells: " << cellGen.cells.size() << std::endl;
-    CellGroup cellGroup(indices, &cellGen.cells, 0);
+    // for (int i = 0; i < cellGen.cells.size(); ++i)
+    // {
+    //     indices.push_back(i);
+    // }
+    // std::cout << "Total cells: " << cellGen.cells.size() << std::endl;
+    // CellGroup cellGroup(indices, &cellGen.cells, 0);
   
     srand((unsigned)time(nullptr));
 
@@ -169,7 +172,7 @@ int main()
                 streamlines = tensorField.genStreamlines(samplePoints);
                 layout = BuildingLayout<float>(poly, terrain);
                 rect = layout.oriRect;
-                totalSeedResult = M2::gen_poisson_sites_in_poly_with_seeds(layout.rotedRect.points, yardSeeds, layout.divGap, 5, 30, (unsigned)time(nullptr));
+                totalSeedResult = M2::gen_poisson_sites_in_poly_with_seeds(layout.rotedRect.points, yardSeeds, layout.divGap,6, 30, (unsigned)time(nullptr));
                 roomPoints.clear();
                 for (const auto &p : totalSeedResult.samples)
                 {
@@ -201,11 +204,12 @@ int main()
             {
                 if (isFirstSoftIter){
                     isOptimizing = true;
+                    isFirstSoftIter = false;
                 }else{
 
                     isOptimizing = true;
                     curIter = 0;
-                    totalSeedResult = M2::gen_poisson_sites_in_poly_with_seeds(layout.rotedRect.points, yardSeeds, layout.divGap, 5, 30, (unsigned)time(nullptr));
+                    totalSeedResult = M2::gen_poisson_sites_in_poly_with_seeds(layout.rotedRect.points, yardSeeds, layout.divGap, 6, 30, (unsigned)time(nullptr));
                     grid_xy = diffVoronoi::vec2_to_tensor(layout.rotedCenters);
                     site_xy = diffVoronoi::vec2_to_tensor(totalSeedResult.samples);
                     terrain_h = torch::from_blob(layout.heightMap.data(), {static_cast<int64_t>(layout.heightMap.size())}).clone();
@@ -221,6 +225,7 @@ int main()
             if (curIter >= maxIter)
             {
                 isOptimizing = false;
+                cellRegion = softModel.buildCellRegion(cellGen);
                 curIter = 0;
             }
 
@@ -234,7 +239,7 @@ int main()
             if (showTerrain)
                 terrain.draw();
             layout.drawTerrain(RL_GRAY, 0.8f, true, 0.5f);
-            // DrawGrid(50,10);
+            DrawGrid(50,5);
             terrain.drawContours(layers);
             // DrawSphere({0, 0, 0}, 2.f, RL_RED);
             if (showViewPt)
@@ -242,12 +247,28 @@ int main()
                 DrawSphere({terrain.testViewPt.x(), terrain.observeHeight, -terrain.testViewPt.y()}, 1.f, RL_GRAY);
             }
 
-            showData.draw(4.f,1.f/* ,{terrain_width / 4.f, 0.f} */);
+            if(showSoftRVDGrids)
+            {
+                showData.draw(4.f, 1.f /* ,{terrain_width / 4.f, 0.f} */);
+             
+            }
+
+            if(showFinalRVDVolume)
+            {
+                for(int i = 0; i < cellRegion.groups.size(); ++i)
+                {
+                    Color c = renderUtil::ColorFromHue((float)i / cellRegion.groups.size());
+                    const auto &mesh = cellRegion.contourMeshes[i];
+                    mesh.draw(c, 0.5f, true, false, 1.f);
+                 
+                }
+            }
+            
             DrawLine3D({0, 0, 0}, {10000, 0, 0}, RL_RED);
             DrawLine3D({0, 0, 0}, {0, 10000, 0}, RL_BLUE);
             DrawLine3D({0, 0, 0}, {0, 0, -10000}, RL_GREEN);
             // render::stroke_bold_polygon2(poly.points, RL_BLACK, 0.f, 0.07f, 1.f);
-            // render::stroke_bold_polygon2(rect.points, RL_RED, 0.f, 0.07f, 1.f);
+            render::stroke_bold_polygon2(layout.rotedSite.points, RL_RED, 0.f, 0.07f, 1.f);
             // render::stroke_bold_polygon2(obb.poly.points, RL_RED, 0.f, 0.07f, 1.f);
             // render::stroke_bold_polygon3(projPoly,RL_BLACK,0.03F);
             // render::stroke_bold_polygon3(projRect,RL_RED,0.03F);
@@ -284,8 +305,8 @@ int main()
             // softModel.drawTerrain(layout.heightMap);
         },
         [&]() { // 二维屏幕空间绘图
-            // render.draw_index_fonts(layout.rotedCenters, render.ptData.size, render.ptData.color, 0, {terrain_width / 2.f, 0.f});
-            render.draw_index_fonts(totalSeedResult.samples, render.fontData.size * 2, RL_RED, 0, {terrain_width / 2.f, 0.f});
+            render.draw_index_fonts(layout.rotedCenters, render.ptData.size, render.ptData.color, 0, {terrain_width / 4.f, 0.f});
+            render.draw_index_fonts(totalSeedResult.samples, render.fontData.size * 2, RL_RED, 0, {terrain_width / 4.f, 0.f});
             // render.draw_index_fonts(layout.rotedGrids, render.ptData.size, render.ptData.color);
             // net.drawNodesWithIndices(render);
 
@@ -382,6 +403,8 @@ int main()
                     ImGui::Indent();
                     genDiffGrid |= ImGui::SliderFloat("Beta", &beta, 5.f, 100.f, "%.1f");
                     genDiffGrid |= ImGui::SliderFloat("Tau", &tau, 0.1f, 100.f, "%.1f");
+                    ImGui::Checkbox("Show Grids", &showSoftRVDGrids);
+                    ImGui::Checkbox("Show Final Volume", &showFinalRVDVolume);
                     ImGui::Unindent();
                 }
             }

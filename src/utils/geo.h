@@ -2723,6 +2723,18 @@ namespace geo
     }
 
     template <typename Scalar>
+    std::vector<Eigen::Vector3<Scalar>> convertPolyline2To3D(const Polyline2_t<Scalar> &poly, Scalar z = 0)
+    {
+        std::vector<Eigen::Vector3<Scalar>> pts;
+        pts.reserve(poly.points.size());
+
+        for (const auto &p : poly.points)
+            pts.emplace_back(p.x(), p.y(), z);
+
+        return pts;
+    }
+
+    template <typename Scalar>
     inline Eigen::Matrix<Scalar, 2, 2> rotationMatrixFromDegree(double degree)
     {
         // degree -> radian
