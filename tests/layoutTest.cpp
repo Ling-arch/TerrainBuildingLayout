@@ -34,7 +34,7 @@ int main()
 
     //-------------------------random polygon and tensor field-------------------------
     static int ptNum = 5;
-    static float scale = 12.f;
+    static float scale = 16.f;
     static float threshold = 0.5f;
     static bool genPlot = false;
     static int minGridNum = 20;

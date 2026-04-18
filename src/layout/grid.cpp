@@ -347,26 +347,26 @@ namespace grid
         }
         std::reverse(pts.begin(), pts.end());
         contourPoly = geo::Polyline2_t<float>(pts, true);
-        std::cout << "\n=========== CONTOUR POLY DEBUG ===========\n";
-        std::cout << "points count = " << contourPoly.points.size() << "\n";
+        // std::cout << "\n=========== CONTOUR POLY DEBUG ===========\n";
+        // std::cout << "points count = " << contourPoly.points.size() << "\n";
 
-        for (size_t i = 0; i < contourPoly.points.size(); ++i)
-        {
-            const auto &p = contourPoly.points[i];
+        // for (size_t i = 0; i < contourPoly.points.size(); ++i)
+        // {
+        //     const auto &p = contourPoly.points[i];
 
-            std::cout << i << ": ("
-                      << p.x() << ", "
-                      << p.y() << ")";
+        //     std::cout << i << ": ("
+        //               << p.x() << ", "
+        //               << p.y() << ")";
 
-            if (i + 1 < contourPoly.points.size())
-                std::cout << " -> ";
+        //     if (i + 1 < contourPoly.points.size())
+        //         std::cout << " -> ";
 
-            // 每 6 个点换行（避免太长）
-            if (i % 6 == 5)
-                std::cout << "\n";
-        }
+        //     // 每 6 个点换行（避免太长）
+        //     if (i % 6 == 5)
+        //         std::cout << "\n";
+        // }
 
-        std::cout << "\n==========================================\n";
+        // std::cout << "\n==========================================\n";
     }
 
     void CellGenerator::generateCells(const geo::Polyline2_t<float> &site)

@@ -60,24 +60,25 @@ namespace layout
 
         auto A = weights.sum(0);
 
+        // ===============================
+        // terrain expectation
+        // ===============================
         auto h_site_mean =
             (weights.transpose(0, 1).matmul(terrain_h)) / (A + 1e-6);
 
-        // ===============================
-        // robust max
-        // ===============================
         float k_max = 50.0f;
 
-        auto log_w = torch::log(weights + 1e-6);
-        auto val = k_max * (terrain_h.unsqueeze(1) + log_w);
+        auto log_w0 = torch::log(weights + 1e-6);
+        auto val = k_max * (terrain_h.unsqueeze(1) + log_w0);
 
         auto h_site_max =
             torch::logsumexp(val, 0) / k_max;
 
-        auto h_base = h_site_mean.min().detach();
+        // ⭐ 每个 site 一个 base（允许浮动）
+        auto h_base = h_site_mean;
 
         // ===============================
-        // floors（1~3）
+        // floors
         // ===============================
         auto floor_vals = torch::tensor({1.f, 2.f, 3.f}, device);
 
@@ -89,7 +90,7 @@ namespace layout
         auto floors = (p_floor * floor_vals).sum(1);
 
         // ===============================
-        // courtyard
+        // courtyard mask
         // ===============================
         auto courtyard_mask = torch::zeros({N}, device);
 
@@ -97,28 +98,37 @@ namespace layout
         {
             auto ids = torch::tensor(courtyard_ids, torch::kLong).to(device);
             courtyard_mask.index_put_({ids}, 1.0f);
-            floors = floors * (1.0f - courtyard_mask);
         }
 
-        auto building_mask = (1.0f - courtyard_mask); // ⭐ 用于shape过滤
+        auto building_mask = 1.0f - courtyard_mask;
+
+        // courtyard不生成体量
+        floors = floors * building_mask;
 
         // ===============================
         // dh
         // ===============================
         auto delta_vals = torch::tensor({0.f, 2.f, 4.f, 6.f, 8.f}, device);
+
         auto dh = (torch::softmax(delta_logits, 1) * delta_vals).sum(1);
 
         // ===============================
-        // ground / float
+        // ground / float height
         // ===============================
-        auto affect_mask = torch::tensor(isAffectLands, torch::kFloat32).to(device);
+        auto affect_mask =
+            torch::tensor(isAffectLands, torch::kFloat32).to(device);
 
         auto H_ground = h_base + global_offset + dh;
 
         float clearance = 1.0f;
         auto H_float = h_site_max + clearance;
 
-        auto H_site =affect_mask * H_ground + (1.0f - affect_mask) * H_float;
+        auto H_site =
+            affect_mask * H_ground +
+            (1.0f - affect_mask) * H_float;
+
+        // courtyard锁死
+        H_site = H_site * building_mask + H_site.detach() * courtyard_mask;
 
         SoftRVDOutput out;
         out.H_site = H_site;
@@ -128,8 +138,9 @@ namespace layout
         out.base_h = h_base;
 
         lastOutput = out;
+
         // ===============================
-        // CUT / FILL
+        // CUT / FILL (global balance)
         // ===============================
         auto H_grid = weights.matmul(H_site);
 
@@ -146,8 +157,11 @@ namespace layout
 
         auto adj = torch::relu(affinity - 0.05f);
 
+        adj = adj * building_mask.unsqueeze(1) * building_mask.unsqueeze(0);
+
         // ===============================
-        // roof constraint ⭐
+        // ROOF continuity constraint（你最新语义）
+        // “矮的 roof >= 高的 base - 2”
         // ===============================
         float floor_h = 3.0f;
 
@@ -159,59 +173,74 @@ namespace layout
         auto Ri = roof.unsqueeze(1);
         auto Rj = roof.unsqueeze(0);
 
-        auto violation1 = torch::relu(Hi - (Rj + 2.0f));
-        auto violation2 = torch::relu(Hj - (Ri + 2.0f));
+        auto violation =
+            torch::relu((Hj - (Ri - 2.0f))).pow(2);
 
         auto L_roof =
-            (adj * (violation1.pow(2) + violation2.pow(2))).mean();
+            (adj * violation).sum() / (adj.sum() + 1e-6);
 
         // ===============================
-        // Lloyd
+        // Lloyd（带mask）
         // ===============================
-        auto centroid =(weights.transpose(0, 1).matmul(grid_xy)) / (A.unsqueeze(1) + 1e-6);
+        auto centroid =
+            (weights.transpose(0, 1).matmul(grid_xy)) /
+            (A.unsqueeze(1) + 1e-6);
 
-        auto L_lloyd = (site_xy - centroid).pow(2).sum(1).mean();
+        auto L_lloyd =
+            ((site_xy - centroid).pow(2).sum(1) * building_mask).sum() /
+            (building_mask.sum() + 1e-6);
 
         // ===============================
-        // ⭐⭐⭐ AABB SHAPE（核心替换）
+        // SHAPE
         // ===============================
         float k_box = 20.0f;
 
         auto x = grid_xy.select(1, 0).unsqueeze(1);
         auto y = grid_xy.select(1, 1).unsqueeze(1);
 
+        auto log_w = torch::log(weights + 1e-6);
+
         auto x_max = torch::logsumexp(k_box * (x + log_w), 0) / k_box;
-
         auto x_min = -torch::logsumexp(k_box * (-x + log_w), 0) / k_box;
-
         auto y_max = torch::logsumexp(k_box * (y + log_w), 0) / k_box;
-
         auto y_min = -torch::logsumexp(k_box * (-y + log_w), 0) / k_box;
 
         auto width = x_max - x_min;
         auto height = y_max - y_min;
 
-        auto ratio = torch::max(width / (height + 1e-6),
-                                height / (width + 1e-6));
+        auto ratio = torch::max(
+            width / (height + 1e-6),
+            height / (width + 1e-6));
 
-        // ⭐ shape loss（只作用建筑）
         auto L_shape =
             (torch::relu(ratio - 2.0f).pow(2) * building_mask).sum() /
             (building_mask.sum() + 1e-6);
 
         // ===============================
-        // FAR
+        // TERRAIN consistency（你丢的核心）
         // ===============================
-        auto total_floors = (A * floors * building_mask).sum();
+        auto terrain_fit = (H_grid - terrain_h).abs();
+        auto L_terrain = terrain_fit.mean();
 
-        auto L_far = ((total_floors - G * far) / G).pow(2);
+        // ===============================
+        // FAR（含courtyard）
+        // ===============================
+        auto total_floors =
+            (A * floors).sum();
 
-        float actual_far = total_floors.detach().item<float>() / float(G);
+        auto L_far =
+            ((total_floors - G * far) / G).pow(2);
 
         // ===============================
         // FINAL LOSS
         // ===============================
-        auto loss = 1.0f * L_far + 0.5f * L_balance + 1.0f * L_roof + 0.3f * L_lloyd + 0.5f * L_shape; // ⭐ 提高权重（关键）
+        auto loss =
+            1.0f * L_far +
+            0.5f * L_balance +
+            1.0f * L_roof +
+            0.3f * L_lloyd +
+            0.6f * L_shape +
+            1.2f * L_terrain;
 
         // ===============================
         // DEBUG
@@ -220,31 +249,16 @@ namespace layout
 
         if (iter % 10 == 0)
         {
-            float loss_val = loss.item<float>();
-            float far_val = L_far.item<float>();
-            float balance_val = L_balance.item<float>();
-            float roof_val = L_roof.item<float>();
-            float lloyd_val = L_lloyd.item<float>();
-            float shape_val = L_shape.item<float>();
-
-            // ⭐ 平均 aspect ratio（方便观察整体形状）
-            float ratio_mean =
-                ratio.mean().item<float>();
-
-            // ⭐ 最大 ratio（专门抓细长异常）
-            float ratio_max =
-                ratio.max().item<float>();
-
-            std::cout << "Iter " << iter
-                      << " - Loss: " << loss_val
-                      << " (far: " << far_val
-                      << ", balance: " << balance_val
-                      << ", roof: " << roof_val
-                      << ", lloyd: " << lloyd_val
-                      << ", shape: " << shape_val
-                      << ", ratio_mean: " << ratio_mean
-                      << ", ratio_max: " << ratio_max
-                      << ")\n";
+            std::cout
+                << "Iter " << iter
+                << " loss=" << loss.item<float>()
+                << " far=" << L_far.item<float>()
+                << " balance=" << L_balance.item<float>()
+                << " roof=" << L_roof.item<float>()
+                << " terrain=" << L_terrain.item<float>()
+                << " shape=" << L_shape.item<float>()
+                << " ratio_max=" << ratio.max().item<float>()
+                << std::endl;
         }
 
         iter++;
@@ -252,7 +266,8 @@ namespace layout
         return {loss, out};
     }
 
-    grid::CellRegion SoftRVDModel::buildCellRegion(
+    grid::CellRegion
+    SoftRVDModel::buildCellRegion(
         const grid::CellGenerator &cellGen) const
     {
         const auto &out = lastOutput;
@@ -303,28 +318,28 @@ namespace layout
         // =========================
         // ⭐ DEBUG PRINT
         // =========================
-        std::cout << "\n================ CELL REGION DEBUG ================\n";
+        // std::cout << "\n================ CELL REGION DEBUG ================\n";
 
-        for (int i = 0; i < N; ++i)
-        {
-            std::cout << "Site " << i
-                      << " | baseH=" << baseHeights[i]
-                      << " | floors=" << floors[i]
-                      << " | grids=[";
+        // for (int i = 0; i < N; ++i)
+        // {
+        //     std::cout << "Site " << i
+        //               << " | baseH=" << baseHeights[i]
+        //               << " | floors=" << floors[i]
+        //               << " | grids=[";
 
-            const auto &vec = groupIndices[i];
+        //     const auto &vec = groupIndices[i];
 
-            for (size_t k = 0; k < vec.size(); ++k)
-            {
-                std::cout << vec[k];
-                if (k + 1 < vec.size())
-                    std::cout << ",";
-            }
+        //     for (size_t k = 0; k < vec.size(); ++k)
+        //     {
+        //         std::cout << vec[k];
+        //         if (k + 1 < vec.size())
+        //             std::cout << ",";
+        //     }
 
-            std::cout << "]\n";
-        }
+        //     std::cout << "]\n";
+        // }
 
-        std::cout << "==================================================\n\n";
+        // std::cout << "==================================================\n\n";
 
         // =========================
         // 4. return
