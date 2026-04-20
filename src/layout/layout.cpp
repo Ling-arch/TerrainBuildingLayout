@@ -57,7 +57,6 @@ namespace layout
         auto device = grid_xy.device();
 
         computeWeights();
-
         auto A = weights.sum(0);
 
         // ===============================
@@ -74,7 +73,6 @@ namespace layout
         auto h_site_max =
             torch::logsumexp(val, 0) / k_max;
 
-        // ⭐ 每个 site 一个 base（允许浮动）
         auto h_base = h_site_mean;
 
         // ===============================
@@ -101,19 +99,23 @@ namespace layout
         }
 
         auto building_mask = 1.0f - courtyard_mask;
-
-        // courtyard不生成体量
         floors = floors * building_mask;
 
         // ===============================
-        // dh
+        // dh（区分 courtyard）
         // ===============================
-        auto delta_vals = torch::tensor({0.f, 2.f, 4.f, 6.f, 8.f}, device);
+        auto delta_vals_building = torch::tensor({0.f, 2.f, 4.f, 6.f, 8.f}, device);
+        auto delta_vals_court = torch::tensor({0.f, 0.5f, 1.f, 1.5f, 2.f}, device);
 
-        auto dh = (torch::softmax(delta_logits, 1) * delta_vals).sum(1);
+        auto delta_vals =
+            building_mask.unsqueeze(1) * delta_vals_building +
+            courtyard_mask.unsqueeze(1) * delta_vals_court;
+
+        auto p_delta = torch::softmax(delta_logits, 1);
+        auto dh = (p_delta * delta_vals).sum(1);
 
         // ===============================
-        // ground / float height
+        // height
         // ===============================
         auto affect_mask =
             torch::tensor(isAffectLands, torch::kFloat32).to(device);
@@ -127,23 +129,22 @@ namespace layout
             affect_mask * H_ground +
             (1.0f - affect_mask) * H_float;
 
-        // courtyard锁死
         H_site = H_site * building_mask + H_site.detach() * courtyard_mask;
-
         SoftRVDOutput out;
         out.H_site = H_site;
         out.floors = floors;
         out.dh = dh;
         out.weights = weights;
         out.base_h = h_base;
-
         lastOutput = out;
-
         // ===============================
-        // CUT / FILL (global balance)
+        // grid height
         // ===============================
         auto H_grid = weights.matmul(H_site);
 
+        // ===============================
+        // CUT / FILL
+        // ===============================
         auto cut = torch::relu(H_grid - terrain_h);
         auto fill = torch::relu(terrain_h - H_grid);
 
@@ -154,24 +155,19 @@ namespace layout
         // adjacency
         // ===============================
         auto affinity = weights.transpose(0, 1).matmul(weights);
-
         auto adj = torch::relu(affinity - 0.05f);
-
         adj = adj * building_mask.unsqueeze(1) * building_mask.unsqueeze(0);
 
         // ===============================
-        // ROOF continuity constraint（你最新语义）
-        // “矮的 roof >= 高的 base - 2”
+        // ROOF
         // ===============================
-        float floor_h = 3.0f;
+        float floor_h = 4.0f;
 
         auto roof = H_site + floors * floor_h;
 
         auto Hi = H_site.unsqueeze(1);
-        auto Hj = H_site.unsqueeze(0);
-
         auto Ri = roof.unsqueeze(1);
-        auto Rj = roof.unsqueeze(0);
+        auto Hj = H_site.unsqueeze(0);
 
         auto violation =
             torch::relu((Hj - (Ri - 2.0f))).pow(2);
@@ -180,7 +176,7 @@ namespace layout
             (adj * violation).sum() / (adj.sum() + 1e-6);
 
         // ===============================
-        // Lloyd（带mask）
+        // Lloyd
         // ===============================
         auto centroid =
             (weights.transpose(0, 1).matmul(grid_xy)) /
@@ -191,45 +187,50 @@ namespace layout
             (building_mask.sum() + 1e-6);
 
         // ===============================
-        // SHAPE
+        // ⭐ SHAPE（强化版）
         // ===============================
-        float k_box = 20.0f;
+        auto dx = grid_xy.select(1, 0).unsqueeze(1) - centroid.select(1, 0).unsqueeze(0);
+        auto dy = grid_xy.select(1, 1).unsqueeze(1) - centroid.select(1, 1).unsqueeze(0);
 
-        auto x = grid_xy.select(1, 0).unsqueeze(1);
-        auto y = grid_xy.select(1, 1).unsqueeze(1);
-
-        auto log_w = torch::log(weights + 1e-6);
-
-        auto x_max = torch::logsumexp(k_box * (x + log_w), 0) / k_box;
-        auto x_min = -torch::logsumexp(k_box * (-x + log_w), 0) / k_box;
-        auto y_max = torch::logsumexp(k_box * (y + log_w), 0) / k_box;
-        auto y_min = -torch::logsumexp(k_box * (-y + log_w), 0) / k_box;
-
-        auto width = x_max - x_min;
-        auto height = y_max - y_min;
-
-        auto ratio = torch::max(
-            width / (height + 1e-6),
-            height / (width + 1e-6));
+        auto var_x = (weights * dx.pow(2)).sum(0) / (A + 1e-6);
+        auto var_y = (weights * dy.pow(2)).sum(0) / (A + 1e-6);
 
         auto L_shape =
-            (torch::relu(ratio - 2.0f).pow(2) * building_mask).sum() /
+            (torch::abs(var_x - var_y) * building_mask).sum() /
             (building_mask.sum() + 1e-6);
 
         // ===============================
-        // TERRAIN consistency（你丢的核心）
+        // TERRAIN
         // ===============================
-        auto terrain_fit = (H_grid - terrain_h).abs();
-        auto L_terrain = terrain_fit.mean();
+        auto L_terrain = (H_grid - terrain_h).abs().mean();
 
         // ===============================
-        // FAR（含courtyard）
+        // COURTYARD LOCK
         // ===============================
-        auto total_floors =
-            (A * floors).sum();
+        auto court_mask_grid = weights.matmul(courtyard_mask);
+
+        auto L_courtyard =
+            (court_mask_grid * (H_grid - terrain_h).pow(2)).sum() /
+            (court_mask_grid.sum() + 1e-6);
+
+        // ===============================
+        // FAR
+        // ===============================
+        auto total_floors = (A * floors).sum();
 
         auto L_far =
             ((total_floors - G * far) / G).pow(2);
+
+        // ===============================
+        // ENTROPY
+        // ===============================
+        auto L_entropy_floor =
+            -(p_floor * torch::log(p_floor + 1e-6)).sum(1).mean();
+
+        auto L_entropy_dh =
+            -(p_delta * torch::log(p_delta + 1e-6)).sum(1).mean();
+
+        auto L_entropy = L_entropy_floor + L_entropy_dh;
 
         // ===============================
         // FINAL LOSS
@@ -239,36 +240,38 @@ namespace layout
             0.5f * L_balance +
             1.0f * L_roof +
             0.3f * L_lloyd +
-            0.6f * L_shape +
-            1.2f * L_terrain;
-
-        // ===============================
-        // DEBUG
-        // ===============================
-        static int iter = 0;
-
+            1.2f * L_shape + // ⭐ 强化
+            1.0f * L_terrain +
+            2.0f * L_courtyard + // ⭐ 院子锁定
+            0.05f * L_entropy;
+       
         if (iter % 10 == 0)
         {
             std::cout
                 << "Iter " << iter
-                << " loss=" << loss.item<float>()
-                << " far=" << L_far.item<float>()
-                << " balance=" << L_balance.item<float>()
-                << " roof=" << L_roof.item<float>()
-                << " terrain=" << L_terrain.item<float>()
-                << " shape=" << L_shape.item<float>()
-                << " ratio_max=" << ratio.max().item<float>()
+                << " | loss=" << loss.item<float>()
+
+                << " | far=" << L_far.item<float>()
+                << " | balance=" << L_balance.item<float>()
+                << " | roof=" << L_roof.item<float>()
+
+                << " | terrain=" << L_terrain.item<float>()
+                << " | courtyard=" << L_courtyard.item<float>() // ⭐ 新增
+
+                << " | shape=" << L_shape.item<float>()
+
+                << " | lloyd=" << L_lloyd.item<float>()
+
+                << " | entropy=" << L_entropy.item<float>()
+
                 << std::endl;
         }
 
         iter++;
-
-        return {loss, out};
+        return {loss, lastOutput};
     }
 
-    grid::CellRegion
-    SoftRVDModel::buildCellRegion(
-        const grid::CellGenerator &cellGen) const
+    std::pair<grid::CellRegion, grid::FloorSystem> SoftRVDModel::buildCellRegion(const grid::CellGenerator &cellGen) const
     {
         const auto &out = lastOutput;
 
@@ -315,41 +318,25 @@ namespace layout
         for (int i = 0; i < N; ++i)
             floors[i] = (int)std::round(floor_cpu[i].item<float>());
 
-        // =========================
-        // ⭐ DEBUG PRINT
-        // =========================
-        // std::cout << "\n================ CELL REGION DEBUG ================\n";
-
-        // for (int i = 0; i < N; ++i)
-        // {
-        //     std::cout << "Site " << i
-        //               << " | baseH=" << baseHeights[i]
-        //               << " | floors=" << floors[i]
-        //               << " | grids=[";
-
-        //     const auto &vec = groupIndices[i];
-
-        //     for (size_t k = 0; k < vec.size(); ++k)
-        //     {
-        //         std::cout << vec[k];
-        //         if (k + 1 < vec.size())
-        //             std::cout << ",";
-        //     }
-
-        //     std::cout << "]\n";
-        // }
-
-        // std::cout << "==================================================\n\n";
-
+    
         // =========================
         // 4. return
         // =========================
-        return grid::CellRegion(
-            3,
-            &cellGen.cells,
-            groupIndices,
-            baseHeights,
-            floors);
+        return std::pair<grid::CellRegion, grid::FloorSystem>{
+            grid::CellRegion(
+                3,
+                &cellGen.cells,
+                groupIndices,
+                baseHeights,
+                floors,
+                isAffectLands),
+            grid::FloorSystem(
+                &cellGen.cells,
+                groupIndices,
+                baseHeights,
+                floors,
+                isAffectLands)};
+            
     }
 
     void SoftRVDModel::drawGrids(float z, float size, const Eigen::Vector2f &offset) const
@@ -392,7 +379,7 @@ namespace layout
 
             // ---- draw ----
             DrawCube(Vector3{x + offset.x(), 0, -(y + offset.y())}, size, 0, size, Fade(c, 0.3f));
-            DrawCubeWires(Vector3{x + offset.x(), 0, -(y + offset.y())}, size, 0, size, RL_BLACK);
+            //DrawCubeWires(Vector3{x + offset.x(), 0, -(y + offset.y())}, size, 0, size, RL_BLACK);
         }
     }
 
@@ -507,7 +494,7 @@ namespace layout
         float t = float(curIter) / float(std::max(maxIter - 1, 1));
         float s = t * t * (3.f - 2.f * t);
 
-        lambda_entropy = 0.05f * (1.0f - s);
+        lambda_entropy = 0.1f * (1.0f - s);
 
         // ⭐ forward
         auto [loss, out] = forward();
@@ -607,13 +594,6 @@ namespace layout
 
     void SoftRVDShowData::draw(float floor_height, float grid_size, Eigen::Vector2f offset) const
     {
-        // std::cout << "[DRAW DEBUG]"
-        //           << " grid_xy defined=" << grid_xy.defined()
-        //           << " size=" << (grid_xy.defined() ? grid_xy.sizes() : torch::IntArrayRef{})
-        //           << " weights defined=" << weights.defined()
-        //           << " size=" << (weights.defined() ? weights.sizes() : torch::IntArrayRef{})
-        //           << " floors defined=" << floors.defined()
-        //           << std::endl;
         if (!grid_xy.defined() || !weights.defined() || !floors.defined())
             return;
 
@@ -626,7 +606,7 @@ namespace layout
         for (int i = 0; i < N; ++i)
         {
             float hue = float(i) / float(N);
-            cellColors[i] = renderUtil::ColorFromHue(hue);
+            cellColors[i] = renderUtil::ColorFromLowHue(hue);
         }
 
         for (int g = 0; g < G; ++g)
@@ -635,7 +615,7 @@ namespace layout
             float gy = grid_cpu[g][1].item<float>();
 
             int best_i = 0;
-            float max_w = -1e9f; // ⭐ 修复
+            float max_w = -1e9f;
 
             for (int i = 0; i < N; ++i)
             {
@@ -650,20 +630,32 @@ namespace layout
             float floors_soft = f_cpu[best_i].item<float>();
             int floors_int = (int)std::round(floors_soft);
 
+            float z_base = hsite_cpu[best_i].item<float>();
+            float height = 0.0f;
+
+            // =========================
+            // ⭐ courtyard 特殊处理
+            // =========================
+            bool is_courtyard = false;
             for (int cid : courtyard_ids)
             {
                 if (best_i == cid)
                 {
-                    floors_int = 0;
+                    is_courtyard = true;
                     break;
                 }
             }
 
-            if (floors_int <= 0)
-                continue;
-
-            float height = floors_int * floor_height;
-            float z_base = hsite_cpu[best_i].item<float>();
+            if (is_courtyard || floors_int <= 0)
+            {
+                // 👉 院子：0.2m低矮体量
+                floors_int = 0;
+                height = 0.2f;
+            }
+            else
+            {
+                height = floors_int * floor_height;
+            }
 
             DrawCube(
                 Vector3{
@@ -673,7 +665,7 @@ namespace layout
                 grid_size,
                 height,
                 grid_size,
-                Fade(cellColors[best_i], 0.55f));
+                Fade(cellColors[best_i], 0.9f));
         }
     }
 }

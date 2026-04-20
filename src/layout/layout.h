@@ -202,7 +202,7 @@ namespace layout
         BuildingLayout() = default;
         BuildingLayout(const Polyline2_t<Scalar> &site_, const terrain::Terrain &terrain);
         void upload() { model = LoadModelFromMesh(geo::buildRaylibMesh(meshData)); }
-        void drawTerrain(Color color, float colorAlpha, bool wireframe, float wireframeAlpha) const;
+        void drawTerrain(Color color, float colorAlpha, bool wireframe, float wireframeAlpha,Eigen::Vector3f position = {0.f,0.f,0.f}) const;
 
     private:
         void initLayout(const terrain::Terrain &terrain);
@@ -390,15 +390,15 @@ namespace layout
     }
 
     template <typename Scalar>
-    void BuildingLayout<Scalar>::drawTerrain(Color color, float colorAlpha, bool wireframe, float wireframeAlpha) const
+    void BuildingLayout<Scalar>::drawTerrain(Color color, float colorAlpha, bool wireframe, float wireframeAlpha, Eigen::Vector3f position) const
     {
         if (model.meshCount == 0)
             return;
-        DrawModel(model, {0, 0, 0}, 1.0f, Fade(color, colorAlpha));
+        DrawModel(model, {position.x(), position.z(), -position.y()}, 1.0f, Fade(color, colorAlpha));
         if (wireframe)
         {
             // 绘制线框
-            DrawModelWires(model, {0, 0, 0}, 1.0f, Fade(RL_BLACK, wireframeAlpha));
+            DrawModelWires(model, {position.x(), position.z(), -position.y()}, 1.0f, Fade(RL_BLACK, wireframeAlpha));
         }
     }
 
@@ -552,7 +552,7 @@ namespace layout
         mutable SoftRVDOutput lastOutput;
         int G = 0;
         int N = 0;
-
+        int iter = 0;
         float k;
         float tau;
         float far;
@@ -570,9 +570,9 @@ namespace layout
         torch::Tensor base_height; // scalar (最低地基)
         std::vector<int> isAffectLands;
         // ===================== Hyper =====================
-        float lambda_far = 1.0f;
-        float lambda_terrain = 0.5f;
-        float lambda_entropy = 0.01f;
+        // float lambda_far = 1.0f;
+        // float lambda_terrain = 0.5f;
+        float lambda_entropy = 0.05f;
         std::unique_ptr<torch::optim::Adam> lloyd_optimizer;
         std::unique_ptr<torch::optim::Adam> optimizer;
 
@@ -663,7 +663,7 @@ namespace layout
         void stepOptimize(SoftRVDShowData &showData, int &curIter, int maxIter, bool &isOptimizing);
         void drawGrids(float z = 0.f, float size = 1.f, const Eigen::Vector2f &offset = Eigen::Vector2f(0.f, 0.f)) const;
         void drawTerrain(const std::vector<float> &heights, float z = 0.f, float size = 1.f, const Eigen::Vector2f &offset = Eigen::Vector2f(0.f, 0.f)) const;
-        grid::CellRegion buildCellRegion(const grid::CellGenerator &cellGen) const;
+        std::pair<grid::CellRegion, grid::FloorSystem> buildCellRegion(const grid::CellGenerator &cellGen) const;
     };
 
 }

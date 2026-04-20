@@ -369,6 +369,192 @@ namespace grid
         // std::cout << "\n==========================================\n";
     }
 
+    void CellGroup::buildMultipleContours()
+    {
+        contourPolys.clear();
+
+        if (!globalCells || cellIndices.empty())
+            return;
+
+        // group 内的 cell
+        std::unordered_set<int> groupSet(
+            cellIndices.begin(),
+            cellIndices.end());
+
+        std::unordered_set<int> visited;
+
+        for (int seed : cellIndices)
+        {
+            if (visited.count(seed))
+                continue;
+
+            // =========================
+            // BFS 找一个连通块
+            // =========================
+            std::vector<int> component;
+            std::queue<int> q;
+
+            q.push(seed);
+            visited.insert(seed);
+
+            while (!q.empty())
+            {
+                int cur = q.front();
+                q.pop();
+
+                component.push_back(cur);
+
+                const auto &c = globalCells->at(cur);
+
+                for (int d = 0; d < 4; ++d)
+                {
+                    int nb = c.neighbors[d];
+
+                    // ⭐ 核心逻辑：
+                    // 只在 group 内扩展
+                    if (nb != -1 &&
+                        groupSet.count(nb) &&
+                        !visited.count(nb))
+                    {
+                        visited.insert(nb);
+                        q.push(nb);
+                    }
+                }
+            }
+
+            // =========================
+            // 用这个 component 建 contour
+            // =========================
+            CellGroup subGroup(component, globalCells, 0);
+
+            if (!subGroup.contourPoly.points.empty())
+            {
+                contourPolys.push_back(subGroup.contourPoly);
+            }
+
+            std::cout << "[DEBUG] component size = "
+                      << component.size() << std::endl;
+        }
+
+        std::cout << "[DEBUG] total components = "
+                  << contourPolys.size() << std::endl;
+    }
+
+    std::vector<std::vector<int>> CellGroup::findRectGroups() const
+    {
+        std::vector<std::vector<int>> result;
+
+        if (!globalCells || cellIndices.empty())
+            return result;
+
+        // ----------------------------
+        // 1. 构建 occupancy grid
+        // ----------------------------
+        std::unordered_map<int64_t, int> coord2idx;
+
+        int minx = INT_MAX, miny = INT_MAX;
+        int maxx = INT_MIN, maxy = INT_MIN;
+
+        for (int idx : cellIndices)
+        {
+            auto &c = (*globalCells)[idx];
+            minx = std::min(minx, c.coord.x());
+            miny = std::min(miny, c.coord.y());
+            maxx = std::max(maxx, c.coord.x());
+            maxy = std::max(maxy, c.coord.y());
+
+            coord2idx[encode(c.coord.x(), c.coord.y())] = idx;
+        }
+
+        int W = maxx - minx + 1;
+        int H = maxy - miny + 1;
+
+        std::vector<std::vector<int>> grid(H, std::vector<int>(W, 0));
+        std::vector<std::vector<int>> idGrid(H, std::vector<int>(W, -1));
+
+        for (auto &kv : coord2idx)
+        {
+            int x = int(kv.first >> 32);
+            int y = int(kv.first & 0xffffffff);
+
+            int gx = x - minx;
+            int gy = y - miny;
+
+            grid[gy][gx] = 1;
+            idGrid[gy][gx] = kv.second;
+        }
+
+        // ----------------------------
+        // 2. 逐层找最大矩形
+        // ----------------------------
+        std::vector<std::vector<int>> used = grid;
+
+        while (true)
+        {
+            std::vector<int> height(W, 0);
+
+            int bestArea = 0;
+            int bestL = 0, bestR = 0, bestTop = 0, bestBottom = 0;
+
+            for (int y = 0; y < H; ++y)
+            {
+                for (int x = 0; x < W; ++x)
+                {
+                    height[x] = (used[y][x] == 1) ? height[x] + 1 : 0;
+                }
+
+                // 单调栈求最大矩形
+                std::stack<int> st;
+                for (int i = 0; i <= W; ++i)
+                {
+                    int h = (i == W ? 0 : height[i]);
+
+                    while (!st.empty() && height[st.top()] > h)
+                    {
+                        int top = st.top();
+                        st.pop();
+
+                        int left = st.empty() ? 0 : st.top() + 1;
+                        int right = i - 1;
+
+                        int area = height[top] * (right - left + 1);
+
+                        if (area > bestArea)
+                        {
+                            bestArea = area;
+                            bestTop = y;
+                            bestBottom = y - height[top] + 1;
+                            bestL = left;
+                            bestR = right;
+                        }
+                    }
+                    st.push(i);
+                }
+            }
+
+            if (bestArea == 0)
+                break;
+
+            // ----------------------------
+            // 3. 收集这个矩形
+            // ----------------------------
+            std::vector<int> rect;
+
+            for (int y = bestBottom; y <= bestTop; ++y)
+            {
+                for (int x = bestL; x <= bestR; ++x)
+                {
+                    rect.push_back(idGrid[y][x]);
+                    used[y][x] = 0; // remove
+                }
+            }
+
+            result.push_back(rect);
+        }
+
+        return result;
+    }
+
     void CellGenerator::generateCells(const geo::Polyline2_t<float> &site)
     {
 
@@ -436,13 +622,156 @@ namespace grid
 
     void CellRegion::mergeSingleCell()
     {
+        if (!globalCells || groups.empty())
+            return;
+
+        std::vector<int> cellOwner(globalCells->size(), -1);
+
+        // init owner
+        for (int gi = 0; gi < groups.size(); ++gi)
+        {
+            for (int idx : groups[gi].cellIndices)
+                cellOwner[idx] = gi;
+        }
+
+        bool changed = true;
+
+        while (changed)
+        {
+            changed = false;
+
+            for (int gi = 0; gi < groups.size(); ++gi)
+            {
+                auto &grp = groups[gi];
+
+                for (int ci = 0; ci < (int)grp.cellIndices.size(); ++ci)
+                {
+                    int idx = grp.cellIndices[ci];
+                    const auto &cell = (*globalCells)[idx];
+
+                    std::unordered_map<int, int> neighborCount;
+
+                    int selfCount = 0;
+
+                    // ===========================
+                    // 统计邻居 group
+                    // ===========================
+                    for (int d = 0; d < 4; ++d)
+                    {
+                        int nb = cell.neighbors[d];
+                        if (nb < 0)
+                            continue;
+
+                        int nid = cellOwner[nb];
+
+                        if (nid == gi)
+                            selfCount++;
+                        else if (nid >= 0)
+                            neighborCount[nid]++;
+                    }
+
+                    // ===========================
+                    // ⭐ 关键条件：孤岛 / 毛刺
+                    // ===========================
+                    if (selfCount > 1)
+                        continue; // 不是突触
+
+                    if (neighborCount.empty())
+                        continue;
+
+                    // ===========================
+                    // 找最强邻居 group
+                    // ===========================
+                    int bestGroup = -1;
+                    int bestCnt = -1;
+
+                    for (auto &kv : neighborCount)
+                    {
+                        if (kv.second > bestCnt)
+                        {
+                            bestCnt = kv.second;
+                            bestGroup = kv.first;
+                        }
+                    }
+
+                    if (bestGroup < 0 || bestGroup == gi)
+                        continue;
+
+                    auto &target = groups[bestGroup];
+
+                    // ===========================
+                    // try move
+                    // ===========================
+                    size_t oldSize = target.contourPoly.points.size();
+
+                    target.cellIndices.push_back(idx);
+                    grp.cellIndices.erase(grp.cellIndices.begin() + ci);
+
+                    target.buildContourSegments();
+                    target.buildContour();
+
+                    grp.buildContourSegments();
+                    grp.buildContour();
+
+                    size_t newSize = target.contourPoly.points.size();
+
+                    // ===========================
+                    // accept rule
+                    // ===========================
+                    bool accept = (newSize <= oldSize + 2);
+
+                    std::cout << "[TRY] cell " << idx
+                              << " from " << gi
+                              << " -> " << bestGroup
+                              << " selfCount=" << selfCount
+                              << " old=" << oldSize
+                              << " new=" << newSize
+                              << " accept=" << accept << "\n";
+
+                    if (accept)
+                    {
+                        cellOwner[idx] = bestGroup;
+                        changed = true;
+                        break;
+                    }
+                    else
+                    {
+                        // rollback
+                        target.cellIndices.pop_back();
+                        grp.cellIndices.insert(grp.cellIndices.begin() + ci, idx);
+
+                        target.buildContourSegments();
+                        target.buildContour();
+
+                        grp.buildContourSegments();
+                        grp.buildContour();
+                    }
+                }
+
+                if (changed)
+                    break;
+            }
+        }
+
+        // ===========================
+        // debug
+        // ===========================
+        std::cout << "\n===== FINAL GROUPS =====\n";
+
+        for (int gi = 0; gi < groups.size(); ++gi)
+        {
+            std::cout << "group" << gi << ": ";
+            for (auto v : groups[gi].cellIndices)
+                std::cout << v << ",";
+            std::cout << "\n";
+        }
     }
 
-    void CellRegion::pushAdditionalCells(){
-
+    void CellRegion::pushAdditionalCells()
+    {
     }
 
-    void CellRegion::buildContourMeshes(const std::vector<float> &baseHeights,const std::vector<int> &floors)
+    void CellRegion::buildContourMeshes(const std::vector<float> &baseHeights, const std::vector<int> &floors)
     {
         if (groups.empty())
             return;
@@ -466,6 +795,115 @@ namespace grid
             int floor = floors[i];
             std::vector<Eigen::Vector3f> pts3d = geo::convertPolyline2To3D(cellGrp.contourPoly, height);
             contourMeshes.emplace_back(pts3d, floor * 4.0f);
+        }
+    }
+
+    void FloorSystem::build(
+        const std::vector<std::vector<int>> &groupIndices,
+        const std::vector<float> &baseHeights,
+        const std::vector<int> &floors,
+        const std::vector<int> &isAffect)
+    {
+        layers.clear();
+        floorMeshes.clear();
+        yardMeshes.clear();
+
+        int N = groupIndices.size();
+
+        // =========================
+        // 1. h_min
+        // =========================
+        float h_min = 1e9;
+        for (int i = 0; i < N; ++i)
+            if (floors[i] > 0)
+                h_min = std::min(h_min, baseHeights[i]);
+
+        if (h_min == 1e9)
+            h_min = 0.0f;
+
+        auto snap2m = [&](float h)
+        {
+            int k = std::round((h - h_min) / 2.0f);
+            return h_min + k * 2.0f;
+        };
+
+        // =========================
+        // 2. 建筑层 map（只放 building）
+        // =========================
+        std::map<float, std::vector<int>> layerCells;
+
+        for (int i = 0; i < N; ++i)
+        {
+            if (floors[i] <= 0)
+                continue;
+
+            float base = snap2m(baseHeights[i]);
+
+            for (int k = 0; k < floors[i]; ++k)
+            {
+                float h = base + k * 4.0f;
+
+                auto &cells = layerCells[h];
+                cells.insert(cells.end(),
+                             groupIndices[i].begin(),
+                             groupIndices[i].end());
+            }
+        }
+
+        // =========================
+        // 3. 建筑 mesh（关键修复点）
+        // =========================
+        for (auto &kv : layerCells)
+        {
+            float h = kv.first;
+
+            // 去重
+            std::unordered_set<int> uniq(
+                kv.second.begin(),
+                kv.second.end());
+
+            std::vector<int> cells(
+                uniq.begin(),
+                uniq.end());
+
+            std::cout << "\n[Layer] h=" << h
+                      << " cells=" << cells.size() << std::endl;
+
+            // ⭐ 多连通处理
+            CellGroup tmp(cells, globalCells, 0);
+            tmp.buildMultipleContours();
+
+            for (auto &poly : tmp.contourPolys)
+            {
+                auto pts3d = geo::convertPolyline2To3D(poly, h);
+
+                floorMeshes.emplace_back(pts3d, 4.0f);
+            }
+        }
+
+        // =========================
+        // 4. yard（完全独立）
+        // =========================
+        for (int i = 0; i < N; ++i)
+        {
+            if (floors[i] != 0)
+                continue;
+
+            float h = (baseHeights[i] < h_min)
+                          ? h_min
+                          : snap2m(baseHeights[i]);
+
+            CellGroup yardGrp(groupIndices[i], globalCells, 0);
+
+            auto poly = yardGrp.contourPoly;
+
+            auto pts3d = geo::convertPolyline2To3D(poly, h);
+
+            yardMeshes.emplace_back(pts3d, 0.3f);
+
+            std::cout << "[YARD] group " << i
+                      << " cells=" << groupIndices[i].size()
+                      << " h=" << h << std::endl;
         }
     }
 }

@@ -346,12 +346,12 @@ namespace geo
         // std::cout << "[UPLOAD] model created SUCCESS\n";
     }
 
-    void PolygonMesh::draw(Color color, float colorAlpha, bool outline, bool wireframe, float wireframeAlpha)const
+    void PolygonMesh::draw(Color color, float colorAlpha, bool outline, bool wireframe, float wireframeAlpha, Eigen::Vector3f position) const
     {
         // 绘制模型
         if (model.meshCount == 0)
             return;
-        DrawModel(model, {0, 0, 0}, 1.0f, Fade(color, colorAlpha));
+        DrawModel(model, {position.x(), position.z(), -position.y()}, 1.0f, Fade(color, colorAlpha));
 
         if (outline)
         {
@@ -368,25 +368,25 @@ namespace geo
                 uint32_t j = (i + 1) % half;
                 // ===== 1. 顶面轮廓 =====
                 DrawLine3D(
-                    toRay(mesh.vertices[i].position),
-                    toRay(mesh.vertices[j].position),
+                    toRay(mesh.vertices[i].position + position),
+                    toRay(mesh.vertices[j].position + position),
                     RL_BLACK);
                 // ===== 2. 底面轮廓 =====
                 DrawLine3D(
-                    toRay(mesh.vertices[i + half].position),
-                    toRay(mesh.vertices[j + half].position),
+                    toRay(mesh.vertices[i + half].position + position),
+                    toRay(mesh.vertices[j + half].position + position),
                     RL_BLACK);
                 // ===== 3. 竖向轮廓边 =====
                 DrawLine3D(
-                    toRay(mesh.vertices[i].position),
-                    toRay(mesh.vertices[i + half].position),
+                    toRay(mesh.vertices[i].position + position),
+                    toRay(mesh.vertices[i + half].position + position),
                     RL_BLACK);
             }
         }
         if (wireframe)
         {
             // 绘制线框
-            DrawModelWires(model, {0, 0, 0}, 1.0f, Fade(RL_BLACK, wireframeAlpha));
+            DrawModelWires(model, {position.x(), position.z(), -position.y()}, 1.0f, Fade(RL_BLACK, wireframeAlpha));
         }
     }
 

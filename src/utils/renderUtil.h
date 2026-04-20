@@ -17,9 +17,9 @@ namespace renderUtil
     }
 
     Color ColorFromHue(float h);
-
-    inline Color mixColor(const std::vector<Color> &colors,
-                          const std::vector<float> &weights)
+    Color ColorFromLowHue(float h);
+     inline Color mixColor(const std::vector<Color> &colors,
+                                                      const std::vector<float> &weights)
     {
         float r = 0, g = 0, b = 0, a = 0;
 

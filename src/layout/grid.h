@@ -77,6 +77,7 @@ namespace grid
         const std::vector<GridCell> *globalCells; // 指向全局
         std::vector<ContourSegment> contourSegments;
         geo::Polyline2_t<float> contourPoly;
+        std::vector<geo::Polyline2_t<float>> contourPolys;
         CellGroup() = default;
         CellGroup(const std::vector<int> &indices,
                   const std::vector<GridCell> *global,
@@ -97,11 +98,14 @@ namespace grid
             }
 
             buildContourSegments();
+            
             buildContour();
         }
 
         void buildContourSegments();
         void buildContour();
+        void buildMultipleContours();
+        std::vector<std::vector<int>> findRectGroups() const;
     };
 
     // 管理多个cell group的边界关系，构建轮廓网格
@@ -110,12 +114,13 @@ namespace grid
         const std::vector<GridCell> *globalCells;
         std::vector<CellGroup> groups;
         std::vector<geo::PolygonMesh> contourMeshes;
-        
+
         CellRegion(int dim,
                    const std::vector<GridCell> *global,
                    const std::vector<std::vector<int>> &groupIndices,
                    const std::vector<float> &baseHeights,
-                   const std::vector<int> &floors)
+                   const std::vector<int> &floors,
+                   const std::vector<int> &isAffect)
             : globalCells(global)
         {
             int id = 0;
@@ -124,22 +129,54 @@ namespace grid
             {
                 groups.emplace_back(indices, globalCells, id++);
             }
-
-            mergeSingleCell();
-            swapEdgeCells();
-
+            // mergeSingleCell();
             if (dim == 3)
             {
-                pushAdditionalCells();
+                buildContourMeshes(baseHeights, floors);
             }
+            // swapEdgeCells();
 
-            buildContourMeshes(baseHeights, floors);
         }
+
         CellRegion() = default;
         void swapEdgeCells();
         void mergeSingleCell();
         void pushAdditionalCells();
         void buildContourMeshes(const std::vector<float> &baseHeights, const std::vector<int> &floors);
+        
+    };
+
+    struct FloorSystem
+    {
+        const std::vector<GridCell> *globalCells = nullptr;
+
+        struct Layer
+        {
+            float height = 0.0f;
+            std::vector<int> cellIndices;
+        };
+
+         std::map<float, Layer> layers;
+  
+
+        std::vector<geo::PolygonMesh> floorMeshes;
+        std::vector<geo::PolygonMesh> yardMeshes;
+
+        FloorSystem() = default;
+        FloorSystem(const std::vector<GridCell> *cells,const std::vector<std::vector<int>> &groupIndices,
+            const std::vector<float> &baseHeights,
+            const std::vector<int> &floors,
+            const std::vector<int> &isAffect)
+            : globalCells(cells)
+        {
+            build(groupIndices, baseHeights, floors, isAffect);
+        }
+
+        void build(
+            const std::vector<std::vector<int>> &groupIndices,
+            const std::vector<float> &baseHeights,
+            const std::vector<int> &floors,
+            const std::vector<int> &isAffect);
     };
 
     // 全局的Cell数组
