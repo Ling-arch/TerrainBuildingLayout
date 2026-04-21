@@ -271,7 +271,7 @@ namespace layout
         return {loss, lastOutput};
     }
 
-    std::pair<grid::CellRegion, grid::FloorSystem> SoftRVDModel::buildCellRegion(const grid::CellGenerator &cellGen) const
+    std::pair<grid::CellRegion, grid::FloorSystem> SoftRVDModel::buildCellRegion(const grid::CellGenerator &cellGen, const geo::MeshData &originalMesh) const
     {
         const auto &out = lastOutput;
 
@@ -322,21 +322,23 @@ namespace layout
         // =========================
         // 4. return
         // =========================
+        grid::CellRegion cellRegion(
+            3,
+            &cellGen.cells,
+            groupIndices,
+            baseHeights,
+            floors,
+            isAffectLands);
         return std::pair<grid::CellRegion, grid::FloorSystem>{
-            grid::CellRegion(
-                3,
-                &cellGen.cells,
-                groupIndices,
-                baseHeights,
-                floors,
-                isAffectLands),
+            cellRegion,
             grid::FloorSystem(
+                far,
                 &cellGen.cells,
-                groupIndices,
+                cellRegion.rebuildIndices,
                 baseHeights,
                 floors,
-                isAffectLands)};
-            
+                isAffectLands,
+                originalMesh)};
     }
 
     void SoftRVDModel::drawGrids(float z, float size, const Eigen::Vector2f &offset) const
@@ -347,16 +349,16 @@ namespace layout
         for (int i = 0; i < N; ++i)
         {
             float hue = float(i) / float(N);
-            cellColors[i] = renderUtil::ColorFromHue(hue);
+            cellColors[i] = renderUtil::ColorFromLowHue(hue);
             float sx = site_xy[i][0].item<float>();
             float sy = site_xy[i][1].item<float>();
 
             // 画一个小 cube / sphere 表示 site
             DrawCube(
                 Vector3{sx + offset.x(), 0, -(sy + offset.y())},
-                size,
-                size,
-                size,
+                size*0.6f,
+                size*0.6f,
+                size*0.6f,
                 RL_BLACK);
         }
 
@@ -378,7 +380,7 @@ namespace layout
             Color c = renderUtil::mixColor(cellColors, w);
 
             // ---- draw ----
-            DrawCube(Vector3{x + offset.x(), 0, -(y + offset.y())}, size, 0, size, Fade(c, 0.3f));
+            DrawCube(Vector3{x + offset.x(), 0, -(y + offset.y())}, size, 0, size, Fade(c, 0.85f));
             //DrawCubeWires(Vector3{x + offset.x(), 0, -(y + offset.y())}, size, 0, size, RL_BLACK);
         }
     }
@@ -665,7 +667,7 @@ namespace layout
                 grid_size,
                 height,
                 grid_size,
-                Fade(cellColors[best_i], 0.9f));
+                Fade(cellColors[best_i], 0.75f));
         }
     }
 }

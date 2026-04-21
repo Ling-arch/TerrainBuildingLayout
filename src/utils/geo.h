@@ -139,7 +139,7 @@ namespace geo
         void build();
         void upload();
         void regenerate(float newHeight);
-        void draw(Color color, float colorAlpha, bool outline, bool wireframe, float wireframeAlpha,Eigen::Vector3f position = {0.f, 0.f, 0.f}) const;
+        void draw(Color color, float colorAlpha, bool outline, bool wireframe, float wireframeAlpha, Eigen::Vector3f position = {0.f, 0.f, 0.f}, Color lineColor = RL_BLACK, float thickness = 0.1f, float lineAlpha = 1.0f) const;
         const Model &getModel() const { return model; }
 
     private:

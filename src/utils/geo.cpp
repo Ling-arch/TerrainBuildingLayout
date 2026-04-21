@@ -346,7 +346,7 @@ namespace geo
         // std::cout << "[UPLOAD] model created SUCCESS\n";
     }
 
-    void PolygonMesh::draw(Color color, float colorAlpha, bool outline, bool wireframe, float wireframeAlpha, Eigen::Vector3f position) const
+    void PolygonMesh::draw(Color color, float colorAlpha, bool outline, bool wireframe, float wireframeAlpha, Eigen::Vector3f position,Color lineColor,float thickness,float lineAlpha) const
     {
         // 绘制模型
         if (model.meshCount == 0)
@@ -366,21 +366,25 @@ namespace geo
             for (uint32_t i = 0; i < half; ++i)
             {
                 uint32_t j = (i + 1) % half;
+               
                 // ===== 1. 顶面轮廓 =====
-                DrawLine3D(
-                    toRay(mesh.vertices[i].position + position),
-                    toRay(mesh.vertices[j].position + position),
-                    RL_BLACK);
+                // DrawLine3D(
+                //     toRay(mesh.vertices[i].position + position),
+                //     toRay(mesh.vertices[j].position + position),
+                //     RL_BLACK);
+                     DrawCylinderEx(toRay(mesh.vertices[i].position + position), toRay(mesh.vertices[j].position + position), thickness, thickness, 1, Fade(lineColor, lineAlpha));
                 // ===== 2. 底面轮廓 =====
-                DrawLine3D(
-                    toRay(mesh.vertices[i + half].position + position),
-                    toRay(mesh.vertices[j + half].position + position),
-                    RL_BLACK);
+                // DrawLine3D(
+                //     toRay(mesh.vertices[i + half].position + position),
+                //     toRay(mesh.vertices[j + half].position + position),
+                //     RL_BLACK);
+                    DrawCylinderEx(toRay(mesh.vertices[i + half].position + position), toRay(mesh.vertices[j + half].position + position), thickness, thickness, 1, Fade(lineColor, lineAlpha));
                 // ===== 3. 竖向轮廓边 =====
-                DrawLine3D(
-                    toRay(mesh.vertices[i].position + position),
-                    toRay(mesh.vertices[i + half].position + position),
-                    RL_BLACK);
+                // DrawLine3D(
+                //     toRay(mesh.vertices[i].position + position),
+                //     toRay(mesh.vertices[i + half].position + position),
+                //     RL_BLACK);
+                    DrawCylinderEx(toRay(mesh.vertices[i].position + position), toRay(mesh.vertices[i + half].position + position), thickness, thickness, 1, Fade(lineColor, lineAlpha));
             }
         }
         if (wireframe)

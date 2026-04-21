@@ -625,37 +625,42 @@ namespace grid
         if (!globalCells || groups.empty())
             return;
 
-        std::vector<int> cellOwner(globalCells->size(), -1);
+        int cellCount = globalCells->size();
 
+        std::vector<int> cellOwner(cellCount, -1);
+
+        // =========================
         // init owner
+        // =========================
         for (int gi = 0; gi < groups.size(); ++gi)
         {
             for (int idx : groups[gi].cellIndices)
                 cellOwner[idx] = gi;
         }
 
-        bool changed = true;
+        const int MAX_ITER = 50;
 
-        while (changed)
+        for (int iter = 0; iter < MAX_ITER; ++iter)
         {
-            changed = false;
+            std::cout << "\n[ITER] " << iter << "\n";
+
+            bool changed = false;
+
+            // =========================
+            // 记录本轮所有移动
+            // =========================
+            std::vector<std::pair<int, int>> moves; // (cell, targetGroup)
 
             for (int gi = 0; gi < groups.size(); ++gi)
             {
-                auto &grp = groups[gi];
-
-                for (int ci = 0; ci < (int)grp.cellIndices.size(); ++ci)
+                for (int idx : groups[gi].cellIndices)
                 {
-                    int idx = grp.cellIndices[ci];
                     const auto &cell = (*globalCells)[idx];
 
                     std::unordered_map<int, int> neighborCount;
 
                     int selfCount = 0;
 
-                    // ===========================
-                    // 统计邻居 group
-                    // ===========================
                     for (int d = 0; d < 4; ++d)
                     {
                         int nb = cell.neighbors[d];
@@ -670,18 +675,18 @@ namespace grid
                             neighborCount[nid]++;
                     }
 
-                    // ===========================
-                    // ⭐ 关键条件：孤岛 / 毛刺
-                    // ===========================
+                    // =========================
+                    // 条件：必须是“弱连接”
+                    // =========================
                     if (selfCount > 1)
-                        continue; // 不是突触
+                        continue;
 
                     if (neighborCount.empty())
                         continue;
 
-                    // ===========================
-                    // 找最强邻居 group
-                    // ===========================
+                    // =========================
+                    // 找最强邻居
+                    // =========================
                     int bestGroup = -1;
                     int bestCnt = -1;
 
@@ -697,69 +702,73 @@ namespace grid
                     if (bestGroup < 0 || bestGroup == gi)
                         continue;
 
-                    auto &target = groups[bestGroup];
+                    // =========================
+                    // ⭐ 核心收敛条件（防震荡）
+                    // =========================
+                    if (bestCnt <= selfCount)
+                        continue;
 
-                    // ===========================
-                    // try move
-                    // ===========================
-                    size_t oldSize = target.contourPoly.points.size();
-
-                    target.cellIndices.push_back(idx);
-                    grp.cellIndices.erase(grp.cellIndices.begin() + ci);
-
-                    target.buildContourSegments();
-                    target.buildContour();
-
-                    grp.buildContourSegments();
-                    grp.buildContour();
-
-                    size_t newSize = target.contourPoly.points.size();
-
-                    // ===========================
-                    // accept rule
-                    // ===========================
-                    bool accept = (newSize <= oldSize + 2);
-
-                    std::cout << "[TRY] cell " << idx
-                              << " from " << gi
-                              << " -> " << bestGroup
-                              << " selfCount=" << selfCount
-                              << " old=" << oldSize
-                              << " new=" << newSize
-                              << " accept=" << accept << "\n";
-
-                    if (accept)
-                    {
-                        cellOwner[idx] = bestGroup;
-                        changed = true;
-                        break;
-                    }
-                    else
-                    {
-                        // rollback
-                        target.cellIndices.pop_back();
-                        grp.cellIndices.insert(grp.cellIndices.begin() + ci, idx);
-
-                        target.buildContourSegments();
-                        target.buildContour();
-
-                        grp.buildContourSegments();
-                        grp.buildContour();
-                    }
+                    moves.emplace_back(idx, bestGroup);
                 }
-
-                if (changed)
-                    break;
             }
+
+            // =========================
+            // 没有变化 → 收敛
+            // =========================
+            if (moves.empty())
+            {
+                std::cout << "[STOP] no moves\n";
+                break;
+            }
+
+            // =========================
+            // apply moves（批量）
+            // =========================
+            for (auto &mv : moves)
+            {
+                int cell = mv.first;
+                int to = mv.second;
+                int from = cellOwner[cell];
+
+                if (from == to)
+                    continue;
+
+                // remove from old
+                auto &src = groups[from].cellIndices;
+                src.erase(std::remove(src.begin(), src.end(), cell), src.end());
+
+                // add to new
+                groups[to].cellIndices.push_back(cell);
+
+                cellOwner[cell] = to;
+
+                changed = true;
+            }
+
+            // =========================
+            // rebuild contour（统一）
+            // =========================
+            for (auto &g : groups)
+            {
+                g.buildContourSegments();
+                g.buildContour();
+            }
+
+            if (!changed)
+                break;
         }
 
-        // ===========================
+        // =========================
         // debug
-        // ===========================
+        // =========================
         std::cout << "\n===== FINAL GROUPS =====\n";
+
+        rebuildIndices.clear();
 
         for (int gi = 0; gi < groups.size(); ++gi)
         {
+            rebuildIndices.push_back(groups[gi].cellIndices);
+
             std::cout << "group" << gi << ": ";
             for (auto v : groups[gi].cellIndices)
                 std::cout << v << ",";
@@ -796,15 +805,17 @@ namespace grid
             std::vector<Eigen::Vector3f> pts3d = geo::convertPolyline2To3D(cellGrp.contourPoly, height);
             contourMeshes.emplace_back(pts3d, floor * 4.0f);
         }
+        
     }
 
     void FloorSystem::build(
+        float targetFar,
         const std::vector<std::vector<int>> &groupIndices,
         const std::vector<float> &baseHeights,
         const std::vector<int> &floors,
-        const std::vector<int> &isAffect)
+        const std::vector<int> &isAffect,
+        const geo::MeshData &originalMesh)
     {
-        layers.clear();
         floorMeshes.clear();
         yardMeshes.clear();
 
@@ -827,10 +838,11 @@ namespace grid
             return h_min + k * 2.0f;
         };
 
-        // =========================
-        // 2. 建筑层 map（只放 building）
-        // =========================
-        std::map<float, std::vector<int>> layerCells;
+        // =========================================================
+        // 2. BUILDING LAYERS（统一体系）
+        // =========================================================
+        std::map<float, Layer> layers;
+        std::vector<float> layerHeights;
 
         for (int i = 0; i < N; ++i)
         {
@@ -843,67 +855,290 @@ namespace grid
             {
                 float h = base + k * 4.0f;
 
-                auto &cells = layerCells[h];
-                cells.insert(cells.end(),
-                             groupIndices[i].begin(),
-                             groupIndices[i].end());
+                auto &layer = layers[h];
+                layer.height = h;
+                layer.cellIndices.insert(
+                    layer.cellIndices.end(),
+                    groupIndices[i].begin(),
+                    groupIndices[i].end());
+
+                layerHeights.push_back(h);
             }
         }
 
-        // =========================
-        // 3. 建筑 mesh（关键修复点）
-        // =========================
-        for (auto &kv : layerCells)
+        // 去重 layer heights
+        std::sort(layerHeights.begin(), layerHeights.end());
+        layerHeights.erase(
+            std::unique(layerHeights.begin(), layerHeights.end()),
+            layerHeights.end());
+
+        // =========================================================
+        // 3. BUILDING MESH
+        // =========================================================
+        for (auto &kv : layers)
         {
             float h = kv.first;
+            Layer &layer = kv.second;
 
-            // 去重
             std::unordered_set<int> uniq(
-                kv.second.begin(),
-                kv.second.end());
+                layer.cellIndices.begin(),
+                layer.cellIndices.end());
 
-            std::vector<int> cells(
-                uniq.begin(),
-                uniq.end());
+            std::vector<int> cells(uniq.begin(), uniq.end());
 
-            std::cout << "\n[Layer] h=" << h
-                      << " cells=" << cells.size() << std::endl;
-
-            // ⭐ 多连通处理
             CellGroup tmp(cells, globalCells, 0);
             tmp.buildMultipleContours();
 
             for (auto &poly : tmp.contourPolys)
             {
                 auto pts3d = geo::convertPolyline2To3D(poly, h);
-
                 floorMeshes.emplace_back(pts3d, 4.0f);
             }
         }
 
-        // =========================
-        // 4. yard（完全独立）
-        // =========================
+        // =========================================================
+        // 4. YARD（独立体系）
+        // =========================================================
+        std::vector<std::vector<int>> yardCells;
+        std::vector<float> yardHeights;
+
         for (int i = 0; i < N; ++i)
         {
             if (floors[i] != 0)
                 continue;
 
-            float h = (baseHeights[i] < h_min)
-                          ? h_min
-                          : snap2m(baseHeights[i]);
+            float h = snap2m(baseHeights[i]);
 
             CellGroup yardGrp(groupIndices[i], globalCells, 0);
 
             auto poly = yardGrp.contourPoly;
-
             auto pts3d = geo::convertPolyline2To3D(poly, h);
 
             yardMeshes.emplace_back(pts3d, 0.3f);
 
-            std::cout << "[YARD] group " << i
-                      << " cells=" << groupIndices[i].size()
-                      << " h=" << h << std::endl;
+            yardCells.push_back(groupIndices[i]);
+            yardHeights.push_back(h);
+        }
+
+        // =========================================================
+        // 5. FLOATING（关键修复：不 snap，只标记）
+        // =========================================================
+        std::unordered_set<int> floatingCells;
+
+        for (int i = 0; i < N; ++i)
+        {
+            if (isAffect[i] == 0)
+            {
+                floatingCells.insert(
+                    groupIndices[i].begin(),
+                    groupIndices[i].end());
+            }
+        }
+
+        // =========================================================
+        // 6. TERRAIN BUILD（统一后处理）
+        // =========================================================
+        buildChangedTerrainMesh(
+            targetFar,
+            originalMesh,
+            layers,
+            yardCells,
+            yardHeights,
+            floatingCells);
+    }
+
+    void FloorSystem::buildChangedTerrainMesh(
+        float targetFar,
+        const geo::MeshData &originalMesh,
+        const std::map<float, Layer> &layers,
+        const std::vector<std::vector<int>> &yardCells,
+        const std::vector<float> &yardHeights,
+        const std::unordered_set<int> &floatingCells)
+    {
+        if (!globalCells)
+            return;
+
+        std::cout << "\n========== [BUILD TERRAIN MESH] ==========\n";
+
+        meshData = originalMesh;
+
+        int N = globalCells->size();
+
+        std::vector<float> finalHeight(meshData.vertices.size());
+
+        // =========================================================
+        // 0. 初始 = 原始地形
+        // =========================================================
+        for (int i = 0; i < meshData.vertices.size(); ++i)
+            finalHeight[i] = meshData.vertices[i].position.z();
+
+        // =========================================================
+        // 1. 构建 cell → 4 vertices
+        // =========================================================
+        int vertexPerRow = (int)sqrt(meshData.vertices.size());
+
+        auto getCellVertices = [&](int i, int j)
+        {
+            int nx = vertexPerRow - 1;
+
+            int i0 = j * (nx + 1) + i;
+            int i1 = j * (nx + 1) + (i + 1);
+            int i2 = (j + 1) * (nx + 1) + (i + 1);
+            int i3 = (j + 1) * (nx + 1) + i;
+
+            return std::array<int, 4>{i0, i1, i2, i3};
+        };
+
+        // =========================================================
+        // 2. YARD（直接覆盖）
+        // =========================================================
+        std::unordered_set<int> yardCellSet;
+
+        for (int i = 0; i < yardCells.size(); ++i)
+        {
+            float h = yardHeights[i];
+
+            for (int cell : yardCells[i])
+            {
+                yardCellSet.insert(cell);
+
+                int cx = (*globalCells)[cell].coord.x();
+                int cy = (*globalCells)[cell].coord.y();
+
+                auto vid = getCellVertices(cx, cy);
+
+                for (int v : vid)
+                    finalHeight[v] = h;
+            }
+        }
+
+        // =========================================================
+        // 3. BUILDING：先求每个 cell 的“最低层高度”
+        // =========================================================
+        std::vector<float> cellBaseHeight(N, std::numeric_limits<float>::max());
+
+        for (const auto &kv : layers)
+        {
+            float h = kv.first;
+            const auto &cells = kv.second.cellIndices;
+
+            for (int cell : cells)
+            {
+                if (floatingCells.count(cell))
+                    continue;
+
+                if (yardCellSet.count(cell))
+                    continue;
+
+                cellBaseHeight[cell] = std::min(cellBaseHeight[cell], h);
+            }
+        }
+
+        // =========================================================
+        // 4. 写入 building（只写一次！）
+        // =========================================================
+        for (int cell = 0; cell < N; ++cell)
+        {
+            float h = cellBaseHeight[cell];
+
+            if (h == std::numeric_limits<float>::max())
+                continue;
+
+            int cx = (*globalCells)[cell].coord.x();
+            int cy = (*globalCells)[cell].coord.y();
+
+            auto vid = getCellVertices(cx, cy);
+
+            for (int v : vid)
+            {
+                finalHeight[v] = h;
+            }
+        }
+
+        // =========================================================
+        // 5. 写回 mesh
+        // =========================================================
+        for (int i = 0; i < meshData.vertices.size(); ++i)
+            meshData.vertices[i].position.z() = finalHeight[i];
+
+        geo::computeVertexNormals(meshData);
+        model = LoadModelFromMesh(geo::buildRaylibMesh(meshData));
+
+        std::cout << "========== [END TERRAIN MESH] ==========\n";
+
+        // =========================================================
+        //  6. 容积率 FAR 计算
+        // =========================================================
+        int totalFloorCellCount = 0;
+
+        for (const auto &kv : layers)
+        {
+            const auto &cells = kv.second.cellIndices;
+            totalFloorCellCount += (int)cells.size();
+        }
+
+        float far = (float)totalFloorCellCount / (float)N;
+
+        float farDiffRatio = std::abs(far - targetFar) / targetFar;
+
+        std::cout << "\n[FAR]\n";
+        std::cout << "  actual FAR = " << far << "\n";
+        std::cout << "  target FAR = " << targetFar << "\n";
+        std::cout << "  diff ratio = " << farDiffRatio << "\n";
+
+        // =========================================================
+        //  7. 土方量（cut & fill）
+        // =========================================================
+        double earthwork = 0.0;
+
+        for (int i = 0; i < meshData.vertices.size(); ++i)
+        {
+            float originalH = originalMesh.vertices[i].position.z();
+            float newH = finalHeight[i];
+
+            earthwork += (double)(newH - originalH);
+        }
+
+        std::cout << "\n[EARTHWORK]\n";
+        std::cout << "  total (signed) = " << earthwork << "\n";
+
+        if (earthwork > 0)
+            std::cout << "  => fill \n";
+        else
+            std::cout << "  => cut \n";
+
+        std::cout << "========== [END TERRAIN MESH] ==========\n";
+
+        // =========================================================
+        // ⭐ 8. originalMesh 最小高度
+        // =========================================================
+        float minH = std::numeric_limits<float>::max();
+        float maxH = -std::numeric_limits<float>::max();
+
+        for (const auto &v : originalMesh.vertices)
+        {
+            float h = v.position.z();
+
+            minH = std::min(minH, h);
+            maxH = std::max(maxH, h);
+        }
+
+        std::cout << "\n[ORIGINAL TERRAIN HEIGHT]\n";
+        std::cout << "  min height = " << minH << "\n";
+        std::cout << "  max height = " << maxH << "\n";
+    }
+
+    
+
+    void FloorSystem::drawTerrain(Color color, float colorAlpha, bool wireframe, float wireframeAlpha, Eigen::Vector3f position) const
+    {
+        if (model.meshCount == 0)
+            return;
+        DrawModel(model, {position.x(), position.z(), -position.y()}, 1.0f, Fade(color, colorAlpha));
+        if (wireframe)
+        {
+            // 绘制线框
+            DrawModelWires(model, {position.x(), position.z(), -position.y()}, 1.0f, Fade(RL_BLACK, wireframeAlpha));
         }
     }
 }

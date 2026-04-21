@@ -84,7 +84,7 @@ int main()
 
     Polyline2_t<float> boundOffset = geo::offsetPolygon(layout.rotedRect, -2.f)[0];
     std::vector<Vector2f> yardSeeds = geo::samplePointsOnPolygonWithSpacing(boundOffset, 2, (unsigned)time(nullptr));
-    M2::PoissonResult totalSeedResult = M2::gen_poisson_sites_in_poly_with_seeds(layout.rotedRect.points, yardSeeds, layout.divGap, 6, 30, (unsigned)time(nullptr));
+    M2::PoissonResult totalSeedResult = M2::gen_poisson_sites_in_poly_with_seeds(layout.rotedRect.points, yardSeeds, layout.divGap, 7, 30, (unsigned)time(nullptr));
     //-------------------------------diff rvd test-------------------------------
 
     Eigen::AlignedBox2f rectBound = layout.rotedRect.getAABB2();
@@ -105,7 +105,7 @@ int main()
     // ===== Fixed sites =====
     torch::Tensor site_xy = diffVoronoi::vec2_to_tensor(totalSeedResult.samples);
 
-    SoftRVDModel softModel(grid_xy, terrain_h, site_xy, 1, {0, 1}, {1, 1, 0, 1, 1}, beta, tau);
+    SoftRVDModel softModel(grid_xy, terrain_h, site_xy, 1.5f, {0, 1}, {1, 1, 0, 1, 1,0}, beta, tau);
     SoftRVDShowData showData;
     std::cout << "softmodel built" << std::endl;
     // softModel.optimizeLloyd();
@@ -161,7 +161,7 @@ int main()
                 site_xy = diffVoronoi::vec2_to_tensor(samplePoints2);
                 terrain_h = torch::from_blob(layout.heightMap.data(), {static_cast<int64_t>(layout.heightMap.size())}).clone();
                 rvd = RectVoronoi2D<float>(roomPoints, layout.rotedBound);
-                softModel = SoftRVDModel(grid_xy, terrain_h, site_xy, 1, {0, 1}, {1, 1, 0, 1, 1}, beta, tau);
+                softModel = SoftRVDModel(grid_xy, terrain_h, site_xy, 1.5f, {0, 1}, {1, 1, 0, 1, 1, 0}, beta, tau);
                 genPlot = false;
             }
 
@@ -178,7 +178,7 @@ int main()
                 streamlines = tensorField.genStreamlines(samplePoints);
                 layout = BuildingLayout<float>(poly, terrain);
                 rect = layout.oriRect;
-                totalSeedResult = M2::gen_poisson_sites_in_poly_with_seeds(layout.rotedRect.points, yardSeeds, layout.divGap, 6, 30, (unsigned)time(nullptr));
+                totalSeedResult = M2::gen_poisson_sites_in_poly_with_seeds(layout.rotedRect.points, yardSeeds, layout.divGap, 7, 30, (unsigned)time(nullptr));
                 roomPoints.clear();
                 for (const auto &p : totalSeedResult.samples)
                 {
@@ -188,7 +188,7 @@ int main()
                 grid_xy = diffVoronoi::vec2_to_tensor(layout.rotedCenters);
                 site_xy = diffVoronoi::vec2_to_tensor(totalSeedResult.samples);
                 terrain_h = torch::from_blob(layout.heightMap.data(), {static_cast<int64_t>(layout.heightMap.size())}).clone();
-                softModel = SoftRVDModel(grid_xy, terrain_h, site_xy, 1, {0, 1}, {1, 1, 0, 1, 1}, beta, tau);
+                softModel = SoftRVDModel(grid_xy, terrain_h, site_xy, 1.5f, {0, 1}, {1, 1, 0, 1, 1, 0}, beta, tau);
                 needGenTerrain = false;
             }
 
@@ -202,7 +202,7 @@ int main()
             if (genDiffGrid)
             {
                 // model = RVDModel(grid_xy, terrain_h, site_xy, beta);
-                softModel = SoftRVDModel(grid_xy, terrain_h, site_xy, 1, {0, 1}, {1, 1, 0, 1, 1}, beta, tau);
+                softModel = SoftRVDModel(grid_xy, terrain_h, site_xy, 1.5f, {0, 1}, {1, 1, 0, 1, 1, 0}, beta, tau);
                 genDiffGrid = false;
             }
 
@@ -218,11 +218,11 @@ int main()
 
                     isOptimizing = true;
                     curIter = 0;
-                    totalSeedResult = M2::gen_poisson_sites_in_poly_with_seeds(layout.rotedRect.points, yardSeeds, layout.divGap, 6, 30, (unsigned)time(nullptr));
+                    totalSeedResult = M2::gen_poisson_sites_in_poly_with_seeds(layout.rotedRect.points, yardSeeds, layout.divGap, 7, 30, (unsigned)time(nullptr));
                     grid_xy = diffVoronoi::vec2_to_tensor(layout.rotedCenters);
                     site_xy = diffVoronoi::vec2_to_tensor(totalSeedResult.samples);
                     terrain_h = torch::from_blob(layout.heightMap.data(), {static_cast<int64_t>(layout.heightMap.size())}).clone();
-                    softModel = SoftRVDModel(grid_xy, terrain_h, site_xy, 1, {0, 1}, {1, 1, 0, 1, 1}, beta, tau);
+                    softModel = SoftRVDModel(grid_xy, terrain_h, site_xy, 1.5f, {0, 1}, {1, 1, 0, 1, 1, 0}, beta, tau);
                 } 
             }
             if (isOptimizing)
@@ -232,7 +232,7 @@ int main()
             if (curIter >= maxIter)
             {
                 isOptimizing = false;
-                floorCellVolumeLayers = softModel.buildCellRegion(cellGen);
+                floorCellVolumeLayers = softModel.buildCellRegion(cellGen, layout.meshData);
                 curIter = 0;
             }
 
@@ -245,12 +245,25 @@ int main()
         [&]() { // 3维空间绘图内容部分
             // if (showTerrain)
             //     terrain.draw();
-            // rlDisableDepthMask();
+            rlDisableDepthMask();
             BeginBlendMode(BLEND_ALPHA);
-            layout.drawTerrain(RL_GRAY, 1.f, true, 1.f, {-2*rectBoundSize.x(), 0.f, 0.f});//单独显示的地形
-            layout.drawTerrain(RL_GRAY, 0.5f, true, 0.2f);//测试坐标对齐问题的地形
+            if (showFinalRVDVolume)
+            {
+                for (int i = 0; i < floorCellVolumeLayers.first.groups.size(); ++i)
+                {
+                    Color c = renderUtil::ColorFromLowHue((float)i / floorCellVolumeLayers.first.groups.size());
+                    const auto &mesh = floorCellVolumeLayers.first.contourMeshes[i];
+                    mesh.draw(c, 0.7f, true, false, 0.5f, {2 * rectBoundSize.x(), 0.f, 0.f}, RL_BLACK, 0.04f, 1.f);
+                }
+            }
+            layout.drawTerrain(RL_GRAY, 0.5f, true, 1.f, {-2*rectBoundSize.x(), 0.f, 0.f});//单独显示的地形
+            // layout.drawTerrain(RL_GRAY, 0.5f, true, 0.2f);//测试坐标对齐问题的地形
             layout.drawTerrain(RL_GRAY, 0.5f, true, 0.2f, {2 * rectBoundSize.x(), 0.f, 0.f});//显示直接程序生成结果的地形
-            layout.drawTerrain(RL_GRAY, 0.5f, true, 0.2f, {6 * rectBoundSize.x(), 0.f, 0.f});//用于绘制剖面图的地形
+            EndBlendMode();
+
+            rlEnableDepthMask();
+            floorCellVolumeLayers.second.drawTerrain({168, 190, 152, 255}, 0.5f, true, 0.2f, {4 * rectBoundSize.x(), 2*rectBoundSize.y(), 0.f}); // 用于绘制最终结果的地形
+            // layout.drawTerrain(RL_GRAY, 0.5f, true, 0.2f, {6 * rectBoundSize.x(), 0.f, 0.f});//用于绘制剖面图的地形
             //DrawGrid(50, 5);
             // terrain.drawContours(layers);
             // DrawSphere({0, 0, 0}, 2.f, RL_RED);
@@ -261,30 +274,22 @@ int main()
 
             if (showSoftRVDGrids)
             {
-                showData.draw(4.f, 1.f, {2 * rectBoundSize.x(), 0.f});
+                showData.draw(4.f, 1.f, {2 * rectBoundSize.x(), 0});
             }
 
-            if (showFinalRVDVolume)
-            {
-                for (int i = 0; i < floorCellVolumeLayers.first.groups.size(); ++i)
-                {
-                    Color c = renderUtil::ColorFromLowHue((float)i / floorCellVolumeLayers.first.groups.size());
-                    const auto &mesh = floorCellVolumeLayers.first.contourMeshes[i];
-                    mesh.draw(c, 0.9f, false, false, 0.5f, {2 * rectBoundSize.x(), 0.f, 0.f});
-                }
-            }
+           
 
             if (showFinalFloorVolume)
             {
                 for (const auto &mesh : floorCellVolumeLayers.second.floorMeshes)
                 {
-                    mesh.draw(RL_GRAY, 0.9f, false, false, 0.5f, {4 * rectBoundSize.x(), 0.f, 0.f});
-                    mesh.draw(RL_GRAY, 0.9f, false, false, 0.5f, {6 * rectBoundSize.x(), 0.f, 0.f});
+                    mesh.draw({200, 210, 210, 255}, 0.45f, true, false, 0.5f, {4 * rectBoundSize.x(), 2 * rectBoundSize.y(), 0.f}, RL_BLACK, 0.04f, 1.f);
+                    // mesh.draw(RL_GRAY, 0.6f, true, false, 0.5f, {6 * rectBoundSize.x(), 0.f, 0.f});
                 }
                 for (const auto &mesh : floorCellVolumeLayers.second.yardMeshes)
                 {
-                    mesh.draw({165, 197, 144, 255}, 0.9f, false, false, 0.5f, {4 * rectBoundSize.x(), 0.f, 0.f});
-                    mesh.draw({165, 197, 144, 255}, 0.9f, false, false, 0.5f, {6 * rectBoundSize.x(), 0.f, 0.f});
+                    mesh.draw({175, 212, 120, 255}, 0.6f, true, false, 0.5f, {4 * rectBoundSize.x(), 2 * rectBoundSize.y(), 0.f},RL_BLACK,0.04f,0.5f);
+                    // mesh.draw({175, 212, 120, 255}, 0.6f, true, false, 0.5f, {6 * rectBoundSize.x(), 0.f, 0.f});
                 }
             }
 
@@ -292,7 +297,8 @@ int main()
             // DrawLine3D({0, 0, 0}, {0, 10000, 0}, RL_BLUE);
             // DrawLine3D({0, 0, 0}, {0, 0, -10000}, RL_GREEN);
             // render::stroke_bold_polygon2(poly.points, RL_BLACK, 0.f, 0.07f, 1.f);
-            render::stroke_bold_polygon2(layout.rotedSite.points, RL_RED, 0.f, 0.07f, 1.f);
+            render::stroke_bold_polygon2(layout.rotedSite.points, RL_RED, 0.f, 0.07f, 1.f, {0, -4 * rectBoundSize.y()});
+            // render::stroke_bold_polygon2(layout.realSite.points, RL_BLUE, 0.f, 0.07f, 1.f);
             // render::stroke_bold_polygon2(obb.poly.points, RL_RED, 0.f, 0.07f, 1.f);
             // render::stroke_bold_polygon3(projPoly,RL_BLACK,0.03F);
             // render::stroke_bold_polygon3(projRect,RL_RED,0.03F);
@@ -325,15 +331,13 @@ int main()
             // render::draw_points(totalSeedResult.samples, render.ptData.color, 1.f, render.ptData.size * 1.5f, 0, {terrain_width / 2.f, 0.f});
 
             // model.drawGrids();
-            softModel.drawGrids(0.f, 1.f);
+            softModel.drawGrids(0.f, 1.f,{0.f, -4*rectBoundSize.y()});
             // softModel.drawTerrain(layout.heightMap);
-            EndBlendMode();
-
-            // rlEnableDepthMask();
+           
         },
         [&]() { // 二维屏幕空间绘图
             // render.draw_index_fonts(layout.rotedCenters, render.ptData.size, render.ptData.color, 0, {2 * rectBoundSize.x(), 0.f});
-            render.draw_index_fonts(totalSeedResult.samples, render.fontData.size * 2, RL_RED, 0/* , {terrain_width / 4.f, 0.f} */);
+            render.draw_index_fonts(totalSeedResult.samples, render.fontData.size * 2, RL_RED, 0, {0, -4 * rectBoundSize.y()});
             // render.draw_index_fonts(layout.rotedGrids, render.ptData.size, render.ptData.color);
             // net.drawNodesWithIndices(render);
 

@@ -203,20 +203,25 @@ namespace layout
         BuildingLayout(const Polyline2_t<Scalar> &site_, const terrain::Terrain &terrain);
         void upload() { model = LoadModelFromMesh(geo::buildRaylibMesh(meshData)); }
         void drawTerrain(Color color, float colorAlpha, bool wireframe, float wireframeAlpha,Eigen::Vector3f position = {0.f,0.f,0.f}) const;
+      
+Polyline2_t<Scalar> toWorldFromRotedSite(
+    const Polyline2_t<Scalar> &rotedSite)const;
 
     private:
         void initLayout(const terrain::Terrain &terrain);
 
     private:
-        geo::MeshData meshData; // CPU mesh
+        // CPU mesh
         // geo::MeshData orthogonalMesh;
         Model model;
         // GPU mesh
     public:
         Polyline2_t<Scalar> site;
         Polyline2_t<Scalar> oriRect;   // 原始矩形（未旋转）
+        Vector2<Scalar> center;
         Polyline2_t<Scalar> rotedRect; // 旋转后的矩形
         Polyline2_t<Scalar> rotedSite; // 旋转后的地块
+        Polyline2_t<Scalar> realSite; // 旋转回去的地块
         Eigen::AlignedBox<Scalar, 2> rotedBound;
         Eigen::Matrix<Scalar, 2, 2> Rinv;
         std::vector<Scalar> heightMap;
@@ -225,6 +230,7 @@ namespace layout
         Scalar divGap;
         // std::vector<Vector2<Scalar>> rotedVertices;
         std::vector<Eigen::Vector3<Scalar>> grids;
+        geo::MeshData meshData;
         // SurfaceMesh heMesh;
     };
 
@@ -236,7 +242,7 @@ namespace layout
         upload();
     }
 
-     template <typename Scalar>
+    template <typename Scalar>
     void BuildingLayout<Scalar>::initLayout(const terrain::Terrain &terrain)
     {
         geo::OBB2<Scalar> obb(site.points);
@@ -245,15 +251,11 @@ namespace layout
 
         Polyline2_t<Scalar> rotPoly = geo::rotatePoly(site, R);
         rotedRect = geo::getMaxRectInPolyWithRatio(rotPoly, 0.5, 2.0);
-        auto offsets = geo::offsetPolygon(rotedRect, Scalar(-0.5));
-        if (!offsets.empty())
-        {
-            rotedSite = offsets[0];
-        }
-        else
-        {
-          return;
-        }
+
+       
+        // =========================
+        // rotate back to world
+        // =========================
         std::vector<Eigen::Vector2<Scalar>> originalPts;
         for (const auto &p : rotedRect.points)
             originalPts.emplace_back(Rinv * p);
@@ -263,7 +265,13 @@ namespace layout
         heightMap.clear();
         meshData.vertices.clear();
         meshData.indices.clear();
+        rotedCenters.clear();
+        grids.clear();
+        sampleCenters.clear();
 
+        // =========================
+        // base rect
+        // =========================
         Vector2<Scalar> p0 = oriRect.points[0];
         Vector2<Scalar> p1 = oriRect.points[1];
         Vector2<Scalar> p3 = oriRect.points[3];
@@ -277,7 +285,7 @@ namespace layout
         Scalar newW = std::floor(width);
         Scalar newH = std::floor(height);
 
-        Vector2<Scalar> center = (p0 + oriRect.points[2]) * Scalar(0.5);
+         center = (p0 + oriRect.points[2]) * Scalar(0.5);
 
         Vector2<Scalar> dirW = edgeW.normalized();
         Vector2<Scalar> dirH = edgeH.normalized();
@@ -295,19 +303,20 @@ namespace layout
         Vector2<Scalar> newP2 = center + dirW * hw + dirH * hh;
         Vector2<Scalar> newP3 = center - dirW * hw + dirH * hh;
 
+        
         int nx = static_cast<int>(newW);
         int ny = static_cast<int>(newH);
 
-        // =========================================================
-        // ⭐ IMPORTANT FIX: vtx[y][x] style (NY OUTER LOOP SAFE)
-        // =========================================================
-        // std::vector<std::vector<SurfaceMesh::Vertex_index>> vtx;
-        // vtx.resize(ny + 1);
-        // for (int j = 0; j <= ny; ++j)
-        //     vtx[j].resize(nx + 1);
+        // =========================
+        //  关键：统一旋转函数（带 pivot）
+        // =========================
+        auto rotateWithCenter = [&](const Vector2<Scalar> &p)
+        {
+            return R * (p - center) + center;
+        };
 
         // =========================
-        // vertices (NY OUTER LOOP)
+        // vertices
         // =========================
         for (int j = 0; j <= ny; ++j)
         {
@@ -315,18 +324,16 @@ namespace layout
             {
                 Vector2<Scalar> v = newP0 + dirW * Scalar(i) + dirH * Scalar(j);
 
-                // vtx[j][i] = heMesh.add_vertex(
-                //     geo::to_cgal_point(v, Scalar(0)));
-
                 Scalar h = Scalar(0);
                 terrain.sampleHeightAt(h, v);
 
                 grids.push_back({v.x(), v.y(), h});
 
-                Eigen::Vector2f orthoV = R * v;
+                //  修复点
+                Eigen::Vector2<Scalar> rv = rotateWithCenter(v);
 
-                geo::Vertex mv({(float)orthoV.x(),
-                                (float)orthoV.y(),
+                geo::Vertex mv({(float)rv.x(),
+                                (float)rv.y(),
                                 (float)h});
 
                 meshData.vertices.push_back(mv);
@@ -334,48 +341,18 @@ namespace layout
         }
 
         // =========================
-        // faces (STRICT CONSISTENCY)
+        // faces + centers
         // =========================
         for (int j = 0; j < ny; ++j)
         {
             for (int i = 0; i < nx; ++i)
             {
-                Vector2<Scalar> v00 = newP0 + dirW * i + dirH * j;
-                Vector2<Scalar> v11 = newP0 + dirW * (i + 1) + dirH * (j + 1);
-                // SurfaceMesh::Vertex_index v00 = vtx[j][i];
-                // SurfaceMesh::Vertex_index v10 = vtx[j][i + 1];
-                // SurfaceMesh::Vertex_index v01 = vtx[j + 1][i];
-                // SurfaceMesh::Vertex_index v11 = vtx[j + 1][i + 1];
-
-                // heMesh.add_face(v00, v10, v11, v01);
-
-                // geo::Point_3 p00 = heMesh.point(v00);
-                // geo::Point_3 p11 = heMesh.point(v11);
-
-                // geo::Point_3 c3(
-                //     (p00.x() + p11.x()) * Scalar(0.5),
-                //     (p00.y() + p11.y()) * Scalar(0.5),
-                //     (p00.z() + p11.z()) * Scalar(0.5));
-              
-                Vector2<Scalar> c2((v00.x() + v11.x()) * Scalar(0.5), (v00.y() + v11.y()) * Scalar(0.5));
-
-                Vector2<Scalar> rotedCenter = R * c2;
-                rotedCenters.push_back(rotedCenter);
-
-                Scalar h = Scalar(0);
-                terrain.sampleHeightAt(h, c2);
-
-                heightMap.push_back(h);
-                sampleCenters.push_back({Scalar(c2.x()), Scalar(c2.y()), h});
-
-                // =====================================================
-                // IMPORTANT: INDEXING MUST MATCH (j-major layout)
-                // =====================================================
                 uint32_t i0 = j * (nx + 1) + i;
                 uint32_t i1 = j * (nx + 1) + (i + 1);
                 uint32_t i2 = (j + 1) * (nx + 1) + (i + 1);
                 uint32_t i3 = (j + 1) * (nx + 1) + i;
 
+                // ===== mesh =====
                 meshData.indices.push_back(i0);
                 meshData.indices.push_back(i1);
                 meshData.indices.push_back(i2);
@@ -383,10 +360,65 @@ namespace layout
                 meshData.indices.push_back(i0);
                 meshData.indices.push_back(i2);
                 meshData.indices.push_back(i3);
+
+                // ============================================
+                // ⭐ 正确 center：直接用 vertex 平均
+                // ============================================
+                const auto &v0 = meshData.vertices[i0].position;
+                const auto &v1 = meshData.vertices[i1].position;
+                const auto &v2 = meshData.vertices[i2].position;
+                const auto &v3 = meshData.vertices[i3].position;
+
+                Eigen::Vector2f center2D(
+                    (v0.x() + v1.x() + v2.x() + v3.x()) * 0.25f,
+                    (v0.y() + v1.y() + v2.y() + v3.y()) * 0.25f);
+
+                rotedCenters.push_back(center2D);
+
+                // ============================================
+                // ⭐ 反算回 world（给 height / sample 用）
+                // ============================================
+                Eigen::Vector2f world2D = Rinv * center2D;
+
+                Scalar h = Scalar(0);
+                terrain.sampleHeightAt(h, Vector2<Scalar>(world2D.x(), world2D.y()));
+
+                heightMap.push_back(h);
+                sampleCenters.push_back({world2D.x(), world2D.y(), h});
             }
         }
+       
+        auto getV = [&](int j, int i) -> Eigen::Vector2f
+        {
+            int idx = j * (nx + 1) + i;
+            const auto &v = meshData.vertices[idx].position;
+            return Eigen::Vector2f(v.x(), v.y());
+        };
 
+       
+        std::vector<Vector2<Scalar>> rectPts = {
+            getV(0, 0),
+            getV(0, nx),
+            getV(ny, nx),
+            getV(ny, 0)};
+
+        rotedSite = Polyline2_t<Scalar>(rectPts, true);
         geo::computeVertexNormals(meshData);
+        realSite = toWorldFromRotedSite(rotedSite);
+    }
+
+    template <typename Scalar>
+    geo::Polyline2_t<Scalar> BuildingLayout<Scalar>::toWorldFromRotedSite(const Polyline2_t<Scalar> &rotedSite) const
+    {
+        std::vector<Eigen::Vector2<Scalar>> worldPts;
+        worldPts.reserve(rotedSite.points.size());
+
+        for (const auto &p : rotedSite.points)
+        {
+            Eigen::Vector2<Scalar> wp = Rinv * (p - center) + center;
+            worldPts.push_back(wp);
+        }
+        return geo::Polyline2_t<Scalar>(worldPts, true);
     }
 
     template <typename Scalar>
@@ -663,7 +695,8 @@ namespace layout
         void stepOptimize(SoftRVDShowData &showData, int &curIter, int maxIter, bool &isOptimizing);
         void drawGrids(float z = 0.f, float size = 1.f, const Eigen::Vector2f &offset = Eigen::Vector2f(0.f, 0.f)) const;
         void drawTerrain(const std::vector<float> &heights, float z = 0.f, float size = 1.f, const Eigen::Vector2f &offset = Eigen::Vector2f(0.f, 0.f)) const;
-        std::pair<grid::CellRegion, grid::FloorSystem> buildCellRegion(const grid::CellGenerator &cellGen) const;
+        std::pair<grid::CellRegion, grid::FloorSystem> buildCellRegion(const grid::CellGenerator &cellGen,
+                                                                       const geo::MeshData &originalMesh) const;
     };
 
 }

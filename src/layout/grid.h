@@ -98,7 +98,7 @@ namespace grid
             }
 
             buildContourSegments();
-            
+
             buildContour();
         }
 
@@ -114,6 +114,7 @@ namespace grid
         const std::vector<GridCell> *globalCells;
         std::vector<CellGroup> groups;
         std::vector<geo::PolygonMesh> contourMeshes;
+        std::vector<std::vector<int>> rebuildIndices;
 
         CellRegion(int dim,
                    const std::vector<GridCell> *global,
@@ -129,13 +130,13 @@ namespace grid
             {
                 groups.emplace_back(indices, globalCells, id++);
             }
-            // mergeSingleCell();
+            
             if (dim == 3)
             {
                 buildContourMeshes(baseHeights, floors);
             }
             // swapEdgeCells();
-
+            mergeSingleCell();
         }
 
         CellRegion() = default;
@@ -143,40 +144,50 @@ namespace grid
         void mergeSingleCell();
         void pushAdditionalCells();
         void buildContourMeshes(const std::vector<float> &baseHeights, const std::vector<int> &floors);
-        
     };
 
     struct FloorSystem
     {
         const std::vector<GridCell> *globalCells = nullptr;
-
         struct Layer
         {
             float height = 0.0f;
             std::vector<int> cellIndices;
         };
-
-         std::map<float, Layer> layers;
-  
-
         std::vector<geo::PolygonMesh> floorMeshes;
         std::vector<geo::PolygonMesh> yardMeshes;
-
+        geo::MeshData meshData; // CPU mesh
+        Model model;            //
         FloorSystem() = default;
-        FloorSystem(const std::vector<GridCell> *cells,const std::vector<std::vector<int>> &groupIndices,
-            const std::vector<float> &baseHeights,
-            const std::vector<int> &floors,
-            const std::vector<int> &isAffect)
+        FloorSystem(float targetFar,const std::vector<GridCell> *cells, const std::vector<std::vector<int>> &groupIndices,
+                    const std::vector<float> &baseHeights,
+                    const std::vector<int> &floors,
+                    const std::vector<int> &isAffect,
+                    const geo::MeshData &originalMesh)
             : globalCells(cells)
         {
-            build(groupIndices, baseHeights, floors, isAffect);
+            build(targetFar,groupIndices, baseHeights, floors, isAffect, originalMesh);
         }
 
         void build(
+            float targetFar,
             const std::vector<std::vector<int>> &groupIndices,
             const std::vector<float> &baseHeights,
             const std::vector<int> &floors,
-            const std::vector<int> &isAffect);
+            const std::vector<int> &isAffect,
+            const geo::MeshData &originalMesh);
+
+        void buildChangedTerrainMesh(
+            float targetFar,
+            const geo::MeshData &originalMesh,
+            const std::map<float, Layer> &layerCells,
+            const std::vector<std::vector<int>> &yardCells,
+            const std::vector<float> &yardHeights,
+            const std::unordered_set<int> &floatingCells);
+
+        // void mergeSingleCell();
+        void drawTerrain(Color color, float colorAlpha, bool wireframe, float wireframeAlpha, Eigen::Vector3f position = {0.f, 0.f, 0.f}) const;
+       
     };
 
     // 全局的Cell数组
