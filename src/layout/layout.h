@@ -202,10 +202,11 @@ namespace layout
         BuildingLayout() = default;
         BuildingLayout(const Polyline2_t<Scalar> &site_, const terrain::Terrain &terrain);
         void upload() { model = LoadModelFromMesh(geo::buildRaylibMesh(meshData)); }
-        void drawTerrain(Color color, float colorAlpha, bool wireframe, float wireframeAlpha,Eigen::Vector3f position = {0.f,0.f,0.f}) const;
-      
-Polyline2_t<Scalar> toWorldFromRotedSite(
-    const Polyline2_t<Scalar> &rotedSite)const;
+        void drawTerrain(Color color, float colorAlpha, bool wireframe, float wireframeAlpha, Eigen::Vector3f position = {0.f, 0.f, 0.f}) const;
+
+        Polyline2_t<Scalar> toWorldFromRotedSite(const Polyline2_t<Scalar> &rotedSite) const;
+        inline Vector2<Scalar> toWorldPt(const Vector2<Scalar> &p) const { return Rinv * (p - center) + center; }
+        std::vector<Vector2<Scalar>> toWorldPts(const std::vector<Vector2<Scalar>> &pts) const;
 
     private:
         void initLayout(const terrain::Terrain &terrain);
@@ -217,13 +218,14 @@ Polyline2_t<Scalar> toWorldFromRotedSite(
         // GPU mesh
     public:
         Polyline2_t<Scalar> site;
-        Polyline2_t<Scalar> oriRect;   // 原始矩形（未旋转）
+        Polyline2_t<Scalar> oriRect; // 原始矩形（未旋转）
         Vector2<Scalar> center;
         Polyline2_t<Scalar> rotedRect; // 旋转后的矩形
         Polyline2_t<Scalar> rotedSite; // 旋转后的地块
-        Polyline2_t<Scalar> realSite; // 旋转回去的地块
+        Polyline2_t<Scalar> realSite;  // 旋转回去的地块
         Eigen::AlignedBox<Scalar, 2> rotedBound;
         Eigen::Matrix<Scalar, 2, 2> Rinv;
+        grid::InverseTran<Scalar> inverseTran;
         std::vector<Scalar> heightMap;
         std::vector<Vector2<Scalar>> rotedCenters;
         std::vector<Eigen::Vector3<Scalar>> sampleCenters;
@@ -250,9 +252,8 @@ Polyline2_t<Scalar> toWorldFromRotedSite(
         Rinv = R.transpose();
 
         Polyline2_t<Scalar> rotPoly = geo::rotatePoly(site, R);
-        rotedRect = geo::getMaxRectInPolyWithRatio(rotPoly, 0.5, 2.0);
+        rotedRect = geo::getMaxRectInPolyWithRatio(rotPoly, 0.5, 1.8);
 
-       
         // =========================
         // rotate back to world
         // =========================
@@ -262,6 +263,7 @@ Polyline2_t<Scalar> toWorldFromRotedSite(
 
         oriRect = Polyline2_t<Scalar>(originalPts, true);
 
+      
         heightMap.clear();
         meshData.vertices.clear();
         meshData.indices.clear();
@@ -272,48 +274,41 @@ Polyline2_t<Scalar> toWorldFromRotedSite(
         // =========================
         // base rect
         // =========================
-        Vector2<Scalar> p0 = oriRect.points[0];
-        Vector2<Scalar> p1 = oriRect.points[1];
-        Vector2<Scalar> p3 = oriRect.points[3];
+        Vector2<Scalar> p0 = oriRect.points[0]; // 世界坐标下原始矩形顶点0
+        Vector2<Scalar> p1 = oriRect.points[1]; // 世界坐标下原始矩形顶点1
+        Vector2<Scalar> p3 = oriRect.points[3]; // 世界坐标下原始矩形顶点3
 
-        Vector2<Scalar> edgeW = p1 - p0;
-        Vector2<Scalar> edgeH = p3 - p0;
+        Vector2<Scalar> edgeW = p1 - p0; // 世界坐标下宽边的方向
+        Vector2<Scalar> edgeH = p3 - p0; // 世界坐标下长边的方向
 
-        Scalar width = edgeW.norm();
-        Scalar height = edgeH.norm();
+        Scalar width = edgeW.norm(); // 宽的长度
+        Scalar height = edgeH.norm(); //长边的长度
 
-        Scalar newW = std::floor(width);
-        Scalar newH = std::floor(height);
+        Scalar newW = std::floor(width); // 向下取整
+        Scalar newH = std::floor(height); //向下取整
 
-         center = (p0 + oriRect.points[2]) * Scalar(0.5);
+        center = (p0 + oriRect.points[2]) * Scalar(0.5); // 中心点
 
-        Vector2<Scalar> dirW = edgeW.normalized();
-        Vector2<Scalar> dirH = edgeH.normalized();
+        Vector2<Scalar> dirW = edgeW.normalized(); // 世界坐标宽的方向
+        Vector2<Scalar> dirH = edgeH.normalized(); // 世界坐标长的方向
 
-        Scalar hw = newW * Scalar(0.5);
-        Scalar hh = newH * Scalar(0.5);
+        Scalar hw = newW * Scalar(0.5); //一半的宽
+        Scalar hh = newH * Scalar(0.5); //一半的长
 
-        Scalar minW = std::min(newW, newH);
-        Scalar maxW = std::max(newW, newH);
+        Scalar minW = std::min(newW, newH); //真正的宽
+        Scalar maxW = std::max(newW, newH); //真正的长
 
         divGap = std::min(Scalar(0.3 * minW), Scalar(0.2 * maxW));
 
-        Vector2<Scalar> newP0 = center - dirW * hw - dirH * hh;
-        Vector2<Scalar> newP1 = center + dirW * hw - dirH * hh;
-        Vector2<Scalar> newP2 = center + dirW * hw + dirH * hh;
-        Vector2<Scalar> newP3 = center - dirW * hw + dirH * hh;
+        Vector2<Scalar> newP0 = center - dirW * hw - dirH * hh; // 边长取整后，世界坐标下的新端点0
+        Vector2<Scalar> newP1 = center + dirW * hw - dirH * hh; // 边长取整后，世界坐标下的新端点1
+        Vector2<Scalar> newP2 = center + dirW * hw + dirH * hh; // 边长取整后，世界坐标下的新端点2
+        Vector2<Scalar> newP3 = center - dirW * hw + dirH * hh; // 边长取整后，世界坐标下的新端点3
 
-        
-        int nx = static_cast<int>(newW);
-        int ny = static_cast<int>(newH);
+        int nx = static_cast<int>(newW); //整数值宽
+        int ny = static_cast<int>(newH); //整数值长
 
-        // =========================
-        //  关键：统一旋转函数（带 pivot）
-        // =========================
-        auto rotateWithCenter = [&](const Vector2<Scalar> &p)
-        {
-            return R * (p - center) + center;
-        };
+    
 
         // =========================
         // vertices
@@ -322,20 +317,21 @@ Polyline2_t<Scalar> toWorldFromRotedSite(
         {
             for (int i = 0; i <= nx; ++i)
             {
+                //世界坐标下的网格顶点
                 Vector2<Scalar> v = newP0 + dirW * Scalar(i) + dirH * Scalar(j);
 
                 Scalar h = Scalar(0);
                 terrain.sampleHeightAt(h, v);
-
+                //世界坐标下的网格顶点
                 grids.push_back({v.x(), v.y(), h});
 
-                //  修复点
-                Eigen::Vector2<Scalar> rv = rotateWithCenter(v);
+                //局部坐标系下的顶点
+                Eigen::Vector2<Scalar> rv = R * v;
 
                 geo::Vertex mv({(float)rv.x(),
                                 (float)rv.y(),
                                 (float)h});
-
+                //局部坐标系下的mesh
                 meshData.vertices.push_back(mv);
             }
         }
@@ -373,38 +369,46 @@ Polyline2_t<Scalar> toWorldFromRotedSite(
                     (v0.x() + v1.x() + v2.x() + v3.x()) * 0.25f,
                     (v0.y() + v1.y() + v2.y() + v3.y()) * 0.25f);
 
+                //center2D也是局部坐标系下的中心点
                 rotedCenters.push_back(center2D);
 
                 // ============================================
                 // ⭐ 反算回 world（给 height / sample 用）
                 // ============================================
-                Eigen::Vector2f world2D = Rinv * center2D;
+                Eigen::Vector2f world2D = Rinv*center2D;
 
                 Scalar h = Scalar(0);
                 terrain.sampleHeightAt(h, Vector2<Scalar>(world2D.x(), world2D.y()));
-
+                //局部坐标系的mesh的网格面face的中心点，返回到实际世界坐标系下的world2D坐标，去采样
                 heightMap.push_back(h);
                 sampleCenters.push_back({world2D.x(), world2D.y(), h});
             }
         }
-       
-        auto getV = [&](int j, int i) -> Eigen::Vector2f
-        {
-            int idx = j * (nx + 1) + i;
-            const auto &v = meshData.vertices[idx].position;
-            return Eigen::Vector2f(v.x(), v.y());
-        };
 
-       
-        std::vector<Vector2<Scalar>> rectPts = {
-            getV(0, 0),
-            getV(0, nx),
-            getV(ny, nx),
-            getV(ny, 0)};
+        // auto getV = [&](int j, int i) -> Eigen::Vector2f
+        // {
+        //     int idx = j * (nx + 1) + i;
+        //     const auto &v = meshData.vertices[idx].position;
+        //     return Eigen::Vector2f(v.x(), v.y());
+        // };
 
-        rotedSite = Polyline2_t<Scalar>(rectPts, true);
+        // std::vector<Vector2<Scalar>> rectPts = {
+        //     getV(0, 0),
+        //     getV(0, nx),
+        //     getV(ny, nx),
+        //     getV(ny, 0)};
+
+        std::vector<Vector2<Scalar>> realSitePts = {newP0, newP1, newP2, newP3, newP0};
+        //世界坐标系下规整了尺寸的矩形site
+        realSite = Polyline2_t<Scalar>(realSitePts, true);
+        //局部坐标系下规整了尺寸的矩形site
+        rotedSite = geo::rotatePoly(realSite,R);
         geo::computeVertexNormals(meshData);
-        realSite = toWorldFromRotedSite(rotedSite);
+        inverseTran = grid::InverseTran<Scalar>(center, Rinv);
+        // std::cout << "center: " << inverseTran.center.transpose() << std::endl;
+        // std::cout << "Rinv: " << std::endl
+        //           << inverseTran.Rinv << std::endl;
+      
     }
 
     template <typename Scalar>
@@ -419,6 +423,16 @@ Polyline2_t<Scalar> toWorldFromRotedSite(
             worldPts.push_back(wp);
         }
         return geo::Polyline2_t<Scalar>(worldPts, true);
+    }
+
+    template <typename Scalar>
+    std::vector<Eigen::Vector2<Scalar>> BuildingLayout<Scalar>::toWorldPts(const std::vector<Eigen::Vector2<Scalar>> &pts) const
+    {
+        std::vector<Eigen::Vector2<Scalar>> worldpts;
+        for (const auto &p : pts)
+            worldpts.push_back(toWorldPt(p));
+
+        return worldpts;
     }
 
     template <typename Scalar>
@@ -609,6 +623,7 @@ Polyline2_t<Scalar> toWorldFromRotedSite(
         std::unique_ptr<torch::optim::Adam> optimizer;
 
     public:
+        SoftRVDModel() = default;
         SoftRVDModel(
             const torch::Tensor &grid_xy_,
             const torch::Tensor &terrain_h_,
@@ -684,10 +699,7 @@ Polyline2_t<Scalar> toWorldFromRotedSite(
         void computeWeights();
         std::pair<torch::Tensor, SoftRVDOutput> forward();
         torch::Tensor energyLloyd();
-        void optimize(SoftRVDShowData &showData,
-                      int iters = 300,
-                      float lr = 0.05f,
-                      int verbose_every = 50);
+        void optimize(/* SoftRVDShowData &showData,  */ int maxIter = 120);
         void optimizeLloyd(int iters = 250,
                            float lr = 0.05f,
                            int verbose_every = 50);
@@ -696,7 +708,7 @@ Polyline2_t<Scalar> toWorldFromRotedSite(
         void drawGrids(float z = 0.f, float size = 1.f, const Eigen::Vector2f &offset = Eigen::Vector2f(0.f, 0.f)) const;
         void drawTerrain(const std::vector<float> &heights, float z = 0.f, float size = 1.f, const Eigen::Vector2f &offset = Eigen::Vector2f(0.f, 0.f)) const;
         std::pair<grid::CellRegion, grid::FloorSystem> buildCellRegion(const grid::CellGenerator &cellGen,
-                                                                       const geo::MeshData &originalMesh) const;
+                                                                       const geo::MeshData &originalMesh, const grid::InverseTran<float> &tran = grid::InverseTran<float>()) const;
     };
 
 }

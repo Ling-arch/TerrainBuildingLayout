@@ -349,7 +349,7 @@ namespace geo
     void PolygonMesh::draw(Color color, float colorAlpha, bool outline, bool wireframe, float wireframeAlpha, Eigen::Vector3f position,Color lineColor,float thickness,float lineAlpha) const
     {
         // 绘制模型
-        if (model.meshCount == 0)
+        if (model.meshCount == 0 || mesh.vertices.empty())
             return;
         DrawModel(model, {position.x(), position.z(), -position.y()}, 1.0f, Fade(color, colorAlpha));
 

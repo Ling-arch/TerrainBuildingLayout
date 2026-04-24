@@ -329,7 +329,7 @@ namespace util
 
         static bool point_in_poly(const std::vector<Vector2> &poly, const Vector2 &p)
         {
-            return std::abs(winding_number(poly, p) - Scalar(1)) < Scalar(0.1);
+            return std::abs((winding_number(poly, p)) - Scalar(1)) < Scalar(0.1);
         }
 
         static std::vector<Vector2> gen_poisson_sites_in_poly(

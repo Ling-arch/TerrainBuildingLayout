@@ -245,33 +245,33 @@ namespace layout
             2.0f * L_courtyard + // ⭐ 院子锁定
             0.05f * L_entropy;
        
-        if (iter % 10 == 0)
-        {
-            std::cout
-                << "Iter " << iter
-                << " | loss=" << loss.item<float>()
+        // if (iter % 10 == 0)
+        // {
+        //     std::cout
+        //         << "Iter " << iter
+        //         << " | loss=" << loss.item<float>()
 
-                << " | far=" << L_far.item<float>()
-                << " | balance=" << L_balance.item<float>()
-                << " | roof=" << L_roof.item<float>()
+        //         << " | far=" << L_far.item<float>()
+        //         << " | balance=" << L_balance.item<float>()
+        //         << " | roof=" << L_roof.item<float>()
 
-                << " | terrain=" << L_terrain.item<float>()
-                << " | courtyard=" << L_courtyard.item<float>() // ⭐ 新增
+        //         << " | terrain=" << L_terrain.item<float>()
+        //         << " | courtyard=" << L_courtyard.item<float>() // ⭐ 新增
 
-                << " | shape=" << L_shape.item<float>()
+        //         << " | shape=" << L_shape.item<float>()
 
-                << " | lloyd=" << L_lloyd.item<float>()
+        //         << " | lloyd=" << L_lloyd.item<float>()
 
-                << " | entropy=" << L_entropy.item<float>()
+        //         << " | entropy=" << L_entropy.item<float>()
 
-                << std::endl;
-        }
+        //         << std::endl;
+        // }
 
         iter++;
         return {loss, lastOutput};
     }
 
-    std::pair<grid::CellRegion, grid::FloorSystem> SoftRVDModel::buildCellRegion(const grid::CellGenerator &cellGen, const geo::MeshData &originalMesh) const
+    std::pair<grid::CellRegion, grid::FloorSystem> SoftRVDModel::buildCellRegion(const grid::CellGenerator &cellGen, const geo::MeshData &originalMesh, const grid::InverseTran<float> &tran) const
     {
         const auto &out = lastOutput;
 
@@ -323,7 +323,7 @@ namespace layout
         // 4. return
         // =========================
         grid::CellRegion cellRegion(
-            3,
+            2,
             &cellGen.cells,
             groupIndices,
             baseHeights,
@@ -332,6 +332,7 @@ namespace layout
         return std::pair<grid::CellRegion, grid::FloorSystem>{
             cellRegion,
             grid::FloorSystem(
+                tran,
                 far,
                 &cellGen.cells,
                 cellRegion.rebuildIndices,
@@ -516,82 +517,59 @@ namespace layout
         curIter++;
     }
 
-    void SoftRVDModel::optimize(
-        SoftRVDShowData &showData,
-        int iters,
-        float lr,
-        int verbose_every)
+    void SoftRVDModel::optimize(/* SoftRVDShowData &showData, */int maxIter)
     {
-        // torch::optim::Adam optimizer(
-        //     this->parameters(),
-        //     torch::optim::AdamOptions(lr));
+        for (int curIter = 0; curIter < maxIter ; ++curIter)
+        {
+            optimizer->zero_grad();
 
-        // for (int iter = 0; iter < iters; ++iter)
-        // {
-        //     optimizer.zero_grad();
+            // =========================
+            // forward + backward
+            // =========================
+            auto [loss, out] = forward();
+            loss.backward();
+            optimizer->step();
 
-        //     float t = float(iter) / float(std::max(iters - 1, 1));
-        //     float s = t * t * (3.f - 2.f * t);
+            // =========================
+            // optional logging
+            // =========================
+            // if (curIter % 10 == 0)
+            // {
+            //     std::cout
+            //         << "Iter " << curIter
+            //         << " / " << maxIter
+            //         << " | loss = " << loss.item<float>()
 
-        //     lambda_entropy = 0.05f * (1.0f - s);
+            //         << " | far = " << L_far.item<float>()
+            //         << " | balance = " << L_balance.item<float>()
+            //         << " | roof = " << L_roof.item<float>()
 
-        //     auto loss = forward();
+            //         << " | terrain = " << L_terrain.item<float>()
+            //         << " | courtyard = " << L_courtyard.item<float>()
 
-        //     // ⭐⭐⭐ 防止 backward 崩
-        //     if (!loss.requires_grad())
-        //     {
-        //         std::cout << "❌ loss has no grad!" << std::endl;
-        //         return;
-        //     }
+            //         << " | shape = " << L_shape.item<float>()
+            //         << " | lloyd = " << L_lloyd.item<float>()
+            //         << " | entropy = " << L_entropy.item<float>()
 
-        //     loss.backward();
-        //     optimizer.step();
+            //         << std::endl;
+            // }
+            // =========================
+            // early stop safety (optional)
+            // =========================
+            // showData.grid_xy = grid_xy.detach().clone();
+            // showData.weights = out.weights.detach().clone();
+            // showData.floors = out.floors.detach().clone();
+            // showData.dh = out.dh.detach().clone();
+            // showData.base_h = out.base_h.detach().clone();
+            // showData.H_site = out.H_site.detach().clone();
+            if (!torch::isfinite(loss).item<bool>())
+            {
+                std::cout << "[Warning] NaN or Inf detected, stopping optimization.\n";
+                break;
+            }
+        }
 
-        //     // =========================
-        //     // UPDATE SHOW DATA
-        //     // =========================
-        //     {
-        //         auto device = grid_xy.device();
-
-        //         auto floor_vals = torch::arange(0, 5, device);
-        //         auto p_floor = torch::softmax(floor_logits, 1);
-        //         auto floors_now = (p_floor * floor_vals).sum(1);
-
-        //         // 同样要 mask（保持一致）
-        //         if (!courtyard_ids.empty())
-        //         {
-        //             auto mask = torch::ones_like(floors_now);
-        //             auto ids_tensor = torch::tensor(courtyard_ids, torch::dtype(torch::kLong).device(device));
-        //             mask.index_put_({ids_tensor}, 0.0f);
-        //             floors_now = floors_now * mask;
-        //         }
-
-        //         auto delta_vals =
-        //             torch::tensor({0.f, 2.f, 4.f, 6.f, 8.f}, device);
-
-        //         auto p_delta = torch::softmax(delta_logits, 1);
-        //         auto dh_now = (p_delta * delta_vals).sum(1);
-
-        //         dh_now = dh_now * torch::relu(floors_now - 1.0f);
-
-        //         showData.grid_xy = grid_xy;
-        //         showData.weights = weights;
-        //         showData.floors = floors_now;
-        //         showData.dh = dh_now;
-        //         showData.base_h = base_height;
-        //         showData.G = G;
-        //         showData.N = N;
-        //         showData.courtyard_ids = courtyard_ids;
-        //     }
-
-        //     if (iter % verbose_every == 0 || iter == iters - 1)
-        //     {
-        //         std::cout
-        //             << "[Iter " << iter
-        //             << "] loss=" << loss.item<float>()
-        //             << std::endl;
-        //     }
-        // }
+      
     }
 
     void SoftRVDShowData::draw(float floor_height, float grid_size, Eigen::Vector2f offset) const

@@ -432,12 +432,12 @@ namespace grid
                 contourPolys.push_back(subGroup.contourPoly);
             }
 
-            std::cout << "[DEBUG] component size = "
-                      << component.size() << std::endl;
+            // std::cout << "[DEBUG] component size = "
+            //           << component.size() << std::endl;
         }
 
-        std::cout << "[DEBUG] total components = "
-                  << contourPolys.size() << std::endl;
+        // std::cout << "[DEBUG] total components = "
+        //           << contourPolys.size() << std::endl;
     }
 
     std::vector<std::vector<int>> CellGroup::findRectGroups() const
@@ -642,7 +642,7 @@ namespace grid
 
         for (int iter = 0; iter < MAX_ITER; ++iter)
         {
-            std::cout << "\n[ITER] " << iter << "\n";
+            // std::cout << "\n[ITER] " << iter << "\n";
 
             bool changed = false;
 
@@ -761,7 +761,7 @@ namespace grid
         // =========================
         // debug
         // =========================
-        std::cout << "\n===== FINAL GROUPS =====\n";
+        // std::cout << "\n===== FINAL GROUPS =====\n";
 
         rebuildIndices.clear();
 
@@ -769,10 +769,10 @@ namespace grid
         {
             rebuildIndices.push_back(groups[gi].cellIndices);
 
-            std::cout << "group" << gi << ": ";
-            for (auto v : groups[gi].cellIndices)
-                std::cout << v << ",";
-            std::cout << "\n";
+            // std::cout << "group" << gi << ": ";
+            // for (auto v : groups[gi].cellIndices)
+            //     std::cout << v << ",";
+            // std::cout << "\n";
         }
     }
 
@@ -805,7 +805,6 @@ namespace grid
             std::vector<Eigen::Vector3f> pts3d = geo::convertPolyline2To3D(cellGrp.contourPoly, height);
             contourMeshes.emplace_back(pts3d, floor * 4.0f);
         }
-        
     }
 
     void FloorSystem::build(
@@ -814,13 +813,15 @@ namespace grid
         const std::vector<float> &baseHeights,
         const std::vector<int> &floors,
         const std::vector<int> &isAffect,
-        const geo::MeshData &originalMesh)
+        const geo::MeshData &originalMesh, const InverseTran<float> &inverseTran)
     {
         floorMeshes.clear();
         yardMeshes.clear();
-
+        // std::cout << "Before build, center: " << inverseTran.center.transpose() << std::endl;
+        // std::cout << "Before build, Rinv: " << std::endl
+        //           << inverseTran.Rinv << std::endl;
         int N = groupIndices.size();
-
+        float standardFloor = 4.f;
         // =========================
         // 1. h_min
         // =========================
@@ -834,8 +835,8 @@ namespace grid
 
         auto snap2m = [&](float h)
         {
-            int k = std::round((h - h_min) / 2.0f);
-            return h_min + k * 2.0f;
+            int k = std::round((h - h_min) / standardFloor/2.f);
+            return h_min + k * standardFloor/2.0f;
         };
 
         // =========================================================
@@ -853,7 +854,7 @@ namespace grid
 
             for (int k = 0; k < floors[i]; ++k)
             {
-                float h = base + k * 4.0f;
+                float h = base + k * standardFloor;
 
                 auto &layer = layers[h];
                 layer.height = h;
@@ -875,7 +876,8 @@ namespace grid
         // =========================================================
         // 3. BUILDING MESH
         // =========================================================
-        for (auto &kv : layers)
+        volumePolys.clear();
+         for (auto &kv : layers)
         {
             float h = kv.first;
             Layer &layer = kv.second;
@@ -891,8 +893,22 @@ namespace grid
 
             for (auto &poly : tmp.contourPolys)
             {
-                auto pts3d = geo::convertPolyline2To3D(poly, h);
-                floorMeshes.emplace_back(pts3d, 4.0f);
+                std::vector<Eigen::Vector3<float>> worldPts;
+                worldPts.reserve(poly.points.size());
+
+                for (const auto &p : poly.points)
+                {
+                    //  std::cout << "Original point: " << p.transpose() << std::endl;
+                    //  std::cout << "center: " << inverseTran.center.transpose() << std::endl;
+                    //  std::cout << "Rinv: " << std::endl
+                    //            << inverseTran.Rinv << std::endl;
+                    Eigen::Vector2<float> wp = inverseTran.Rinv.transpose() * p;
+                    // std::cout << "Transformed point: " << wp.transpose() << std::endl;
+                    worldPts.push_back({wp.x(), wp.y(), h});
+                }
+                volumePolys.push_back(geo::rotatePoly<float>(poly, inverseTran.Rinv.transpose()));
+                // auto pts3d = geo::convertPolyline2To3D(poly, h);
+                floorMeshes.emplace_back(worldPts, standardFloor);
             }
         }
 
@@ -901,7 +917,7 @@ namespace grid
         // =========================================================
         std::vector<std::vector<int>> yardCells;
         std::vector<float> yardHeights;
-
+        yardPolys.clear();
         for (int i = 0; i < N; ++i)
         {
             if (floors[i] != 0)
@@ -911,10 +927,21 @@ namespace grid
 
             CellGroup yardGrp(groupIndices[i], globalCells, 0);
 
-            auto poly = yardGrp.contourPoly;
-            auto pts3d = geo::convertPolyline2To3D(poly, h);
+            const auto& poly = yardGrp.contourPoly;
+            // auto pts3d = geo::convertPolyline2To3D(poly, h);
+            std::vector<Eigen::Vector3<float>> worldPts;
+            worldPts.reserve(poly.points.size());
 
-            yardMeshes.emplace_back(pts3d, 0.3f);
+            for (const auto &p : poly.points)
+            {
+                // std::cout << "Original yard point: " << p.transpose() << std::endl;
+
+                Eigen::Vector2<float> wp = inverseTran.Rinv.transpose() * p;
+                worldPts.push_back({wp.x(), wp.y(), h});
+                // std::cout << "Transformed yard point: " << wp.transpose() << std::endl;
+            }
+            yardPolys.push_back(geo::rotatePoly<float>(poly, inverseTran.Rinv.transpose()));
+            yardMeshes.emplace_back(worldPts, 0.3f);
 
             yardCells.push_back(groupIndices[i]);
             yardHeights.push_back(h);
@@ -923,28 +950,28 @@ namespace grid
         // =========================================================
         // 5. FLOATING（关键修复：不 snap，只标记）
         // =========================================================
-        std::unordered_set<int> floatingCells;
+        // std::unordered_set<int> floatingCells;
 
-        for (int i = 0; i < N; ++i)
-        {
-            if (isAffect[i] == 0)
-            {
-                floatingCells.insert(
-                    groupIndices[i].begin(),
-                    groupIndices[i].end());
-            }
-        }
+        // for (int i = 0; i < N; ++i)
+        // {
+        //     if (isAffect[i] == 0)
+        //     {
+        //         floatingCells.insert(
+        //             groupIndices[i].begin(),
+        //             groupIndices[i].end());
+        //     }
+        // }
 
         // =========================================================
         // 6. TERRAIN BUILD（统一后处理）
         // =========================================================
-        buildChangedTerrainMesh(
-            targetFar,
-            originalMesh,
-            layers,
-            yardCells,
-            yardHeights,
-            floatingCells);
+        // buildChangedTerrainMesh(
+        //     targetFar,
+        //     originalMesh,
+        //     layers,
+        //     yardCells,
+        //     yardHeights,
+        //     floatingCells);
     }
 
     void FloorSystem::buildChangedTerrainMesh(
@@ -953,12 +980,12 @@ namespace grid
         const std::map<float, Layer> &layers,
         const std::vector<std::vector<int>> &yardCells,
         const std::vector<float> &yardHeights,
-        const std::unordered_set<int> &floatingCells)
+        const std::unordered_set<int> &floatingCells, const InverseTran<float> &inverseTran)
     {
         if (!globalCells)
             return;
 
-        std::cout << "\n========== [BUILD TERRAIN MESH] ==========\n";
+        // std::cout << "\n========== [BUILD TERRAIN MESH] ==========\n";
 
         meshData = originalMesh;
 
@@ -1064,71 +1091,70 @@ namespace grid
         geo::computeVertexNormals(meshData);
         model = LoadModelFromMesh(geo::buildRaylibMesh(meshData));
 
-        std::cout << "========== [END TERRAIN MESH] ==========\n";
+        // std::cout << "========== [END TERRAIN MESH] ==========\n";
 
         // =========================================================
         //  6. 容积率 FAR 计算
         // =========================================================
-        int totalFloorCellCount = 0;
+        // int totalFloorCellCount = 0;
 
-        for (const auto &kv : layers)
-        {
-            const auto &cells = kv.second.cellIndices;
-            totalFloorCellCount += (int)cells.size();
-        }
+        // for (const auto &kv : layers)
+        // {
+        //     const auto &cells = kv.second.cellIndices;
+        //     totalFloorCellCount += (int)cells.size();
+        // }
 
-        float far = (float)totalFloorCellCount / (float)N;
+        // float far = (float)totalFloorCellCount / (float)N;
 
-        float farDiffRatio = std::abs(far - targetFar) / targetFar;
+        // float farDiffRatio = std::abs(far - targetFar) / targetFar;
 
-        std::cout << "\n[FAR]\n";
-        std::cout << "  actual FAR = " << far << "\n";
-        std::cout << "  target FAR = " << targetFar << "\n";
-        std::cout << "  diff ratio = " << farDiffRatio << "\n";
+        // std::cout << "\n[FAR]\n";
+        // std::cout << "  actual FAR = " << far << "\n";
+        // std::cout << "  target FAR = " << targetFar << "\n";
+        // std::cout << "  diff ratio = " << farDiffRatio << "\n";
 
-        // =========================================================
-        //  7. 土方量（cut & fill）
-        // =========================================================
-        double earthwork = 0.0;
+        // // =========================================================
+        // //  7. 土方量（cut & fill）
+        // // =========================================================
+        // double earthwork = 0.0;
 
-        for (int i = 0; i < meshData.vertices.size(); ++i)
-        {
-            float originalH = originalMesh.vertices[i].position.z();
-            float newH = finalHeight[i];
+        // for (int i = 0; i < meshData.vertices.size(); ++i)
+        // {
+        //     float originalH = originalMesh.vertices[i].position.z();
+        //     float newH = finalHeight[i];
 
-            earthwork += (double)(newH - originalH);
-        }
+        //     earthwork += (double)(newH - originalH);
+        // }
 
-        std::cout << "\n[EARTHWORK]\n";
-        std::cout << "  total (signed) = " << earthwork << "\n";
+        // std::cout << "\n[EARTHWORK]\n";
+        // std::cout << "  total (signed) = " << earthwork << "\n";
 
-        if (earthwork > 0)
-            std::cout << "  => fill \n";
-        else
-            std::cout << "  => cut \n";
+        // if (earthwork > 0)
+        //     std::cout << "  => fill \n";
+        // else
+        //     std::cout << "  => cut \n";
 
-        std::cout << "========== [END TERRAIN MESH] ==========\n";
+        // std::cout << "========== [END TERRAIN MESH] ==========\n";
 
-        // =========================================================
-        // ⭐ 8. originalMesh 最小高度
-        // =========================================================
-        float minH = std::numeric_limits<float>::max();
-        float maxH = -std::numeric_limits<float>::max();
+        // // =========================================================
+        // // ⭐ 8. originalMesh 最小高度
+        // // =========================================================
+        // float minH = std::numeric_limits<float>::max();
+        // float maxH = -std::numeric_limits<float>::max();
 
-        for (const auto &v : originalMesh.vertices)
-        {
-            float h = v.position.z();
+        // for (const auto &v : originalMesh.vertices)
+        // {
+        //     float h = v.position.z();
 
-            minH = std::min(minH, h);
-            maxH = std::max(maxH, h);
-        }
+        //     minH = std::min(minH, h);
+        //     maxH = std::max(maxH, h);
+        // }
 
-        std::cout << "\n[ORIGINAL TERRAIN HEIGHT]\n";
-        std::cout << "  min height = " << minH << "\n";
-        std::cout << "  max height = " << maxH << "\n";
+        // std::cout << "\n[ORIGINAL TERRAIN HEIGHT]\n";
+        // std::cout << "  min height = " << minH << "\n";
+        // std::cout << "  max height = " << maxH << "\n";
     }
 
-    
 
     void FloorSystem::drawTerrain(Color color, float colorAlpha, bool wireframe, float wireframeAlpha, Eigen::Vector3f position) const
     {

@@ -141,6 +141,7 @@ namespace geo
         void regenerate(float newHeight);
         void draw(Color color, float colorAlpha, bool outline, bool wireframe, float wireframeAlpha, Eigen::Vector3f position = {0.f, 0.f, 0.f}, Color lineColor = RL_BLACK, float thickness = 0.1f, float lineAlpha = 1.0f) const;
         const Model &getModel() const { return model; }
+        const std::vector<Eigen::Vector3f> &getPoints() const { return points; }
 
     private:
         std::vector<Eigen::Vector3f> points;
@@ -831,6 +832,7 @@ namespace geo
             return polyA;
     }
 
+    //A poly sub B poly
     template <typename Scalar>
     std::vector<Polyline2_t<Scalar>> subPolygon(const Polyline2_t<Scalar> &polyA, const Polyline2_t<Scalar> &polyB)
     {

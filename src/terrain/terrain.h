@@ -227,9 +227,14 @@ namespace terrain
         bool additionalShowWire = false;
         std::vector<float> viewShedScore;      // face viewshed
         std::vector<std::vector<int>> faceAdj; // face adjacency
+
+    
+
+
         Terrain() = default;
         Terrain(int width, int height, float cellSize);
         Terrain(int seed_, int width, int height, float cellSize, float frequency, float amplitude);
+        Terrain(const std::vector<float>& heightMap_,int width, int height,float cellSize);
         void regenerate(int w, int h, float freq, float amp);
         void regenerate(int seed, int w, int h, float freq, float amp);
         void generateHeight(float frequency, float amplitude);
@@ -259,7 +264,9 @@ namespace terrain
         inline int vertexIndex(int gx, int gy) const { return gy * (width + 1) + gx; }
         inline int gridIndex(int gx, int gy) const { return gy * width + gx; }
 
-        void applyFaceColor();                                                                   // set face colors depend on slope , aspect
+        void applyFaceColor(); 
+        void applyPolyColor(const std::vector<geo::Polyline2_t<float>>& polys, Color color);     // set face colors depend on slope , aspect
+    
         bool sampleTensorAt(field::TerrainTensor<float> &out, const Eigen::Vector2f &pos) const; // sample vertex slope and aspect in [0,pi/2);
         bool sampleTerrainPtAt(TerrainPoint &out, const Eigen::Vector2f &pos) const;             // sample vertex slope and aspect in [0,2pi);
         bool sampleHeightAt(float &outHeight, const Eigen::Vector2f &pos) const;                 // sample height at pos

@@ -27,6 +27,14 @@ namespace terrain
         upload();
     }
 
+    Terrain::Terrain(const std::vector<float> &heightMap_,int w, int h,float cs)
+    :heightmap(heightMap_), width(w), height(h), cellSize(cs)
+    {
+        buildMesh();
+        calculateInfos();
+        upload();
+    }
+
     void Terrain::generateHeight(float freq, float amp)
     {
         Noise noise(seed);
@@ -107,7 +115,7 @@ namespace terrain
         {
         case TerrainViewMode::Wire:
             for (const Model &model : models)
-                DrawModelWires(model, {0, 0, 0}, 1.0f, RL_BLACK);
+                DrawModelWires(model, {0, 0, 0}, 1.f, {95, 95, 95, 195});
             break;
 
         case TerrainViewMode::Aspect:
@@ -117,7 +125,7 @@ namespace terrain
                 DrawModel(model, {0, 0, 0}, 1.0f, RL_WHITE);
                 if (additionalShowWire)
                 {
-                    DrawModelWires(model, {0, 0, 0}, 1.0f, RL_BLACK);
+                    DrawModelWires(model, {0, 0, 0}, 1.f, {95, 95, 95,195});
                 }
             }
             break;
@@ -129,7 +137,7 @@ namespace terrain
                 DrawModel(model, {0, 0, 0}, 1.0f, RL_GRAY);
                 if (additionalShowWire)
                 {
-                    DrawModelWires(model, {0, 0, 0}, 1.0f, RL_BLACK);
+                    DrawModelWires(model, {0, 0, 0}, 1.f, {95, 95, 95,195});
                 }
             }
             break;
@@ -338,6 +346,8 @@ namespace terrain
         }
     }
 
+
+
     bool Terrain::sampleTensorAt(field::TerrainTensor<float> &out, const Eigen::Vector2f &pos) const
     {
         if (!aabb2.contains(pos))
@@ -393,6 +403,81 @@ namespace terrain
         }
 
         return true;
+    }
+
+    void Terrain::applyPolyColor(const std::vector<geo::Polyline2_t<float>> &polys, Color c)
+    {
+        // 1. 处理所有多边形的 AABB
+        std::vector<Eigen::AlignedBox<float, 2>> polyAABBs;
+        for (const auto &poly : polys)
+        {
+            polyAABBs.push_back(poly.getAABB2());
+        }
+
+        // 2. 遍历所有 chunk 和它们的顶点
+        for (auto &chunk : chunkMeshes)
+        {
+            Mesh &m = chunk.mesh;                                           // 获取当前 chunk 的网格
+            std::vector<int> &localToGlobalVerts = chunk.localToGlobalVert; // 局部到全局顶点索引映射
+
+            // 3. 遍历每个顶点并计算是否在多边形内
+            for (int lv = 0; lv < m.vertexCount; ++lv)
+            {
+                int globalVertexIdx = localToGlobalVerts[lv]; // 获取当前局部顶点的全局索引
+
+                // if (globalVertexIdx >= 1000)
+                //     continue; // 如果全局索引大于1000，跳过
+
+                const TerrainVertex &vertex = mesh.vertices[globalVertexIdx]; // 从全局顶点数组获取顶点数据
+
+                // 3.1 获取顶点的 2D 坐标（假设我们只关心 x 和 y 坐标）
+                Eigen::Vector2f vertexPos = vertex.position.head<2>(); // 获取 2D 坐标
+
+                // 3.2 计算当前顶点的 AABB
+                Eigen::AlignedBox<float, 2> vertexAABB;
+                vertexAABB.extend(vertexPos);
+
+                // 3.3 检查顶点是否与任何多边形的 AABB 相交
+                bool isInPoly = false;
+                for (size_t i = 0; i < polys.size(); ++i)
+                {
+                    const auto &poly = polys[i];
+                    const auto &polyAABB = polyAABBs[i];
+
+                    // 如果顶点不在多边形的 AABB 范围内，则跳过
+                    if (!vertexAABB.intersects(polyAABB))
+                        continue;
+
+                    // 3.4 对于潜在的交集顶点，检查其是否完全在多边形内
+                    bool pointInside = util::Math2<float>::point_in_poly(poly.points, vertexPos);
+
+                    // Debug: 输出顶点信息
+                    // std::cout << "Global Vertex " << globalVertexIdx << " Position: ("
+                    //           << vertexPos.x() << ", "
+                    //           << vertexPos.y() << ") "
+                    //           << (pointInside ? "is inside polygon " : "is NOT inside polygon ")
+                    //           << i << std::endl;
+
+                    if (pointInside)
+                    {
+                        isInPoly = true;
+                        break; // 一旦找到符合条件的顶点，停止检查
+                    }
+                }
+
+                // 4. 如果顶点在多边形内，则为其着色
+                if (isInPoly)
+                {
+                    m.colors[lv * 4 + 0] = c.r;
+                    m.colors[lv * 4 + 1] = c.g;
+                    m.colors[lv * 4 + 2] = c.b;
+                    m.colors[lv * 4 + 3] = c.a; // Alpha 通道设为不透明
+                }
+            }
+
+            // 5. 更新 mesh 缓存
+            UpdateMeshBuffer(m, 3, m.colors, m.vertexCount * 4, 0);
+        }
     }
 
     bool Terrain::sampleTerrainPtAt(TerrainPoint &out, const Eigen::Vector2f &pos) const

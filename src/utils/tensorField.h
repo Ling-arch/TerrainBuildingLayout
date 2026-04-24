@@ -121,10 +121,10 @@ namespace field
         PointAtrractor(const Vector2<Scalar> &pos_, Scalar radius_)
             : pos(pos_), radius(radius_) {}
 
-        void draw() const
+        void draw(float z = 0.f) const
         {
 
-            DrawCylinder({pos.x(), 0.f, -pos.y()}, radius, radius, 10.f, 20, Fade(RL_RED, 0.06f));
+            DrawCylinder({pos.x(), z, -pos.y()}, radius, radius, 10.f, 20, Fade(RL_RED, 0.15f));
         }
     };
 

@@ -2,6 +2,7 @@
 
 #include "geo.h"
 
+
 namespace grid
 {
 
@@ -11,6 +12,26 @@ namespace grid
         Right,
         Down,
         Left
+    };
+
+    template <typename Scalar>
+    struct InverseTran
+    {
+        Eigen::Vector2<Scalar> center = Eigen::Vector2<Scalar>::Zero();
+        Eigen::Matrix<Scalar, 2, 2> Rinv = Eigen::Matrix<Scalar, 2, 2>::Identity();
+
+        InverseTran() = default;
+
+        // 确保传入的 R 是 2x2 矩阵
+        InverseTran(const Eigen::Vector2<Scalar> &cen, const Eigen::Matrix<Scalar, 2, 2> &R)
+            : center(cen)
+        {
+            // 确保R是一个2x2矩阵
+            assert(R.rows() == 2 && R.cols() == 2); // 这行是可选的，帮助检查传入矩阵的尺寸
+
+            // 如果传入的 R 不是单位矩阵，则进行逆运算
+            Rinv = R.inverse();
+        }
     };
 
     struct BoundaryEdge
@@ -156,6 +177,8 @@ namespace grid
         };
         std::vector<geo::PolygonMesh> floorMeshes;
         std::vector<geo::PolygonMesh> yardMeshes;
+        std::vector<geo::Polyline2_t<float>> volumePolys;
+        std::vector<geo::Polyline2_t<float>> yardPolys;
         geo::MeshData meshData; // CPU mesh
         Model model;            //
         FloorSystem() = default;
@@ -169,13 +192,23 @@ namespace grid
             build(targetFar,groupIndices, baseHeights, floors, isAffect, originalMesh);
         }
 
+        FloorSystem(const InverseTran<float> &inverseTran, float targetFar, const std::vector<GridCell> *cells, const std::vector<std::vector<int>> &groupIndices,
+                    const std::vector<float> &baseHeights,
+                    const std::vector<int> &floors,
+                    const std::vector<int> &isAffect,
+                    const geo::MeshData &originalMesh)
+            : globalCells(cells)
+        {
+            build(targetFar, groupIndices, baseHeights, floors, isAffect, originalMesh, inverseTran);
+        }
+
         void build(
             float targetFar,
             const std::vector<std::vector<int>> &groupIndices,
             const std::vector<float> &baseHeights,
             const std::vector<int> &floors,
             const std::vector<int> &isAffect,
-            const geo::MeshData &originalMesh);
+            const geo::MeshData &originalMesh,const InverseTran<float> &inverseTran= InverseTran<float>());
 
         void buildChangedTerrainMesh(
             float targetFar,
@@ -183,11 +216,11 @@ namespace grid
             const std::map<float, Layer> &layerCells,
             const std::vector<std::vector<int>> &yardCells,
             const std::vector<float> &yardHeights,
-            const std::unordered_set<int> &floatingCells);
+            const std::unordered_set<int> &floatingCells, const InverseTran<float> &inverseTran = InverseTran<float>());
 
         // void mergeSingleCell();
         void drawTerrain(Color color, float colorAlpha, bool wireframe, float wireframeAlpha, Eigen::Vector3f position = {0.f, 0.f, 0.f}) const;
-       
+     
     };
 
     // 全局的Cell数组

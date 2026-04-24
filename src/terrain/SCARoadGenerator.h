@@ -72,6 +72,7 @@ namespace SCARoad
         Terrain terrain;
         float attractionDist = 60.f;
         float killDist = 3.f;
+        
 
         enum class VenationType
         {
